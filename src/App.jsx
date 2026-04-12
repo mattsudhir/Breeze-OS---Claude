@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar';
 import TopBar from './components/TopBar';
 import ChatHome from './components/ChatHome';
 import ClassicDashboard from './components/ClassicDashboard';
+import PropertiesPage from './components/PropertiesPage';
 import './App.css';
 
 function App() {
@@ -26,8 +27,18 @@ function App() {
     setActiveView(classic ? 'dashboard' : 'chat');
   };
 
-  // For non-chat/dashboard nav items, show classic dashboard as placeholder
-  const showClassicView = showClassic || (activeView !== 'chat' && activeView !== 'dashboard');
+  // Decide which view to render
+  const renderContent = () => {
+    if (activeView === 'chat') return <ChatHome />;
+    if (activeView === 'properties') return <PropertiesPage />;
+    if (activeView === 'dashboard' || showClassic) {
+      return <ClassicDashboard onNavigate={handleNavigate} />;
+    }
+    // Other nav items default to dashboard for now
+    return <ClassicDashboard onNavigate={handleNavigate} />;
+  };
+
+  const showToggle = activeView === 'chat' || activeView === 'dashboard';
 
   return (
     <div className={`app-layout ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
@@ -43,13 +54,14 @@ function App() {
       />
       <div className="main-content">
         <TopBar
-          showClassic={showClassicView}
+          showClassic={showClassic}
           onToggleClassic={handleToggleClassic}
           activeView={activeView}
           onMenuToggle={() => setMobileMenuOpen(!mobileMenuOpen)}
+          showToggle={showToggle}
         />
         <main className="content-area">
-          {showClassicView ? <ClassicDashboard /> : <ChatHome />}
+          {renderContent()}
         </main>
       </div>
     </div>

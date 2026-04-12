@@ -56,7 +56,7 @@ function getStatusClass(s) {
   return 'status-open';
 }
 
-export default function ClassicDashboard() {
+export default function ClassicDashboard({ onNavigate }) {
   const [properties, setProperties] = useState(null);
   const [units, setUnits] = useState(null);
   const [workOrders, setWorkOrders] = useState(null);
@@ -117,10 +117,10 @@ export default function ClassicDashboard() {
   const vacantUnits = totalUnits - occupiedUnits;
 
   const STATS = [
-    { label: 'Total Units', value: String(totalUnits), icon: Building2, color: '#0077B6', trend: null },
-    { label: 'Occupied', value: String(occupiedUnits), icon: Home, color: '#2E7D32', trend: null },
-    { label: 'Vacant', value: String(vacantUnits), icon: AlertCircle, color: '#E65100', trend: null },
-    { label: 'Properties', value: String(properties ? properties.length : 4), icon: Building2, color: '#1565C0', trend: null },
+    { label: 'Total Units', value: String(totalUnits), icon: Building2, color: '#0077B6', trend: null, nav: 'properties' },
+    { label: 'Occupied', value: String(occupiedUnits), icon: Home, color: '#2E7D32', trend: null, nav: 'properties' },
+    { label: 'Vacant', value: String(vacantUnits), icon: AlertCircle, color: '#E65100', trend: null, nav: 'properties' },
+    { label: 'Properties', value: String(properties ? properties.length : 4), icon: Building2, color: '#1565C0', trend: null, nav: 'properties' },
   ];
 
   // Maintenance: use live data or demo fallback
@@ -169,7 +169,11 @@ export default function ClassicDashboard() {
       {/* Stats row */}
       <div className="stats-row">
         {STATS.map((stat, i) => (
-          <div key={i} className="stat-card">
+          <button
+            key={i}
+            className="stat-card stat-card-clickable"
+            onClick={() => stat.nav && onNavigate && onNavigate(stat.nav)}
+          >
             <div className="stat-icon" style={{ backgroundColor: stat.color + '15', color: stat.color }}>
               <stat.icon size={22} />
             </div>
@@ -183,7 +187,7 @@ export default function ClassicDashboard() {
                 </span>
               )}
             </div>
-          </div>
+          </button>
         ))}
       </div>
 
