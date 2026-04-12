@@ -2,7 +2,12 @@ import { useState, useRef, useEffect } from 'react';
 import {
   Mic, MicOff, Send, Paperclip, FileText, Home, DollarSign,
   Wrench, User, Bot, ChevronDown, Building2, Loader2,
+  Volume2, VolumeX,
 } from 'lucide-react';
+import {
+  startListening, stopListening, speak, cancelSpeech,
+  isListeningSupported, isSpeakingSupported,
+} from '../lib/voice';
 
 const WELCOME_MESSAGE = {
   id: 1,
@@ -31,11 +36,25 @@ export default function ChatHome() {
   const [isRecording, setIsRecording] = useState(false);
   const [showQuickActions, setShowQuickActions] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
+  const [ttsEnabled, setTtsEnabled] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
   // Conversation history sent to the LLM (role/content only, no UI fields)
   const llmHistoryRef = useRef([]);
+  const stopListenRef = useRef(null);
+  const voiceInputPendingRef = useRef(false);
+
+  const voiceListenSupported = isListeningSupported();
+  const voiceSpeakSupported = isSpeakingSupported();
+
+  // Cancel any in-progress speech when the component unmounts
+  useEffect(() => {
+    return () => {
+      cancelSpeech();
+      stopListening();
+    };
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -85,6 +104,11 @@ export default function ChatHome() {
         avatar: 'bot',
         text: data.reply,
       });
+
+      // Read response aloud if TTS is on
+      if (ttsEnabled && voiceSpeakSupported) {
+        speak(data.reply);
+      }
     } catch (err) {
       addMessage({
         type: 'system',
@@ -130,11 +154,65 @@ export default function ChatHome() {
   };
 
   const toggleRecording = () => {
-    // Voice support comes in Phase 2 (Web Speech API)
-    setIsRecording(!isRecording);
-    if (!isRecording) {
-      setTimeout(() => setIsRecording(false), 2000);
+    if (!voiceListenSupported) return;
+
+    // If already listening, stop — onFinal will fire via the voice module
+    if (isRecording) {
+      stopListenRef.current?.();
+      return;
     }
+
+    // If Breeze is currently speaking, cut it off before the user talks
+    cancelSpeech();
+
+    setIsRecording(true);
+    setInput('');
+    voiceInputPendingRef.current = true;
+
+    const stop = startListening({
+      onInterim: (text) => {
+        setInput(text);
+      },
+      onFinal: (text) => {
+        setIsRecording(false);
+        stopListenRef.current = null;
+        // Auto-send the final transcript. Use the captured text directly
+        // since state updates are async and handleSend reads from `input`.
+        if (voiceInputPendingRef.current && text && text.trim()) {
+          voiceInputPendingRef.current = false;
+          sendFromVoice(text.trim());
+        } else {
+          voiceInputPendingRef.current = false;
+        }
+      },
+      onError: (err) => {
+        setIsRecording(false);
+        stopListenRef.current = null;
+        voiceInputPendingRef.current = false;
+        console.warn('Voice recognition error:', err.message);
+      },
+    });
+    stopListenRef.current = stop;
+  };
+
+  const sendFromVoice = (text) => {
+    addMessage({
+      type: 'user',
+      sender: 'You',
+      avatar: 'user',
+      text,
+    });
+    setInput('');
+    sendToLLM(text);
+  };
+
+  const toggleTts = () => {
+    if (!voiceSpeakSupported) return;
+    if (ttsEnabled) {
+      // Turning off — cut off any in-progress speech
+      cancelSpeech();
+    }
+    setTtsEnabled(!ttsEnabled);
   };
 
   return (
@@ -149,6 +227,16 @@ export default function ChatHome() {
             transition: 'transform 0.2s',
           }} />
         </button>
+        {voiceSpeakSupported && (
+          <button
+            className={`tts-toggle ${ttsEnabled ? 'active' : ''}`}
+            onClick={toggleTts}
+            title={ttsEnabled ? 'Mute replies' : 'Read replies aloud'}
+          >
+            {ttsEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
+            <span>{ttsEnabled ? 'Voice on' : 'Voice off'}</span>
+          </button>
+        )}
         {showQuickActions && (
           <div className="quick-actions-grid">
             {QUICK_ACTIONS.map((action, i) => (
@@ -244,13 +332,26 @@ export default function ChatHome() {
         </div>
 
         <button
-          className={`walkie-talkie-btn ${isRecording ? 'recording' : ''}`}
+          className={`walkie-talkie-btn ${isRecording ? 'recording' : ''} ${!voiceListenSupported ? 'disabled' : ''}`}
           onClick={toggleRecording}
-          title={isRecording ? 'Stop recording' : 'Hold to talk'}
+          disabled={!voiceListenSupported || isThinking}
+          title={
+            !voiceListenSupported
+              ? 'Voice not supported in this browser'
+              : isRecording
+              ? 'Tap to stop and send'
+              : 'Tap to talk'
+          }
         >
           <div className="walkie-inner">
             {isRecording ? <MicOff size={24} /> : <Mic size={24} />}
-            <span>{isRecording ? 'Listening...' : 'Talk to Breeze'}</span>
+            <span>
+              {!voiceListenSupported
+                ? 'Voice unavailable'
+                : isRecording
+                ? 'Listening... tap to send'
+                : 'Tap to talk'}
+            </span>
           </div>
           {isRecording && <div className="recording-pulse" />}
         </button>
