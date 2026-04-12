@@ -366,7 +366,9 @@ export default function MaintenancePage() {
   const [reloadTick, setReloadTick] = useState(0);
 
   // Critical path: fetch work orders first on their own so the list renders
-  // as soon as possible and isn't blocked on four other cold-start calls.
+  // as soon as possible and isn't blocked on lookup cold-starts. Everything
+  // else runs in a second phase so they don't compete for the same Vercel
+  // serverless instance during cold-start.
   useEffect(() => {
     let cancelled = false;
     async function fetchTickets() {
@@ -386,51 +388,57 @@ export default function MaintenancePage() {
     return () => { cancelled = true; };
   }, [reloadTick]);
 
-  // Background: fetch the lookup tables (properties, units, categories,
-  // statuses) in parallel. The list view doesn't need these to render —
-  // they enrich names and populate the detail-view edit dropdowns.
+  // Phase two: once work orders have loaded, fetch lookups one at a time
+  // so we don't create a concurrent pile-up on the same serverless instance.
+  // These are not blocking — they just enrich names and populate dropdowns
+  // whenever they land.
   useEffect(() => {
+    if (!workOrders) return;
     let cancelled = false;
-    async function fetchLookups() {
-      const results = await Promise.allSettled([
-        getProperties(),
-        getUnits(),
-        getWorkOrderCategories(),
-        getWorkOrderStatuses(),
-        getWorkOrderPriorities(),
-      ]);
-      if (cancelled) return;
-      const [propsRes, unitsRes, catsRes, statusesRes, prioritiesRes] = results;
 
-      if (propsRes.status === 'fulfilled' && propsRes.value) {
-        const map = {};
-        propsRes.value.forEach((p) => { map[p.id] = p.name; });
-        setPropertyMap(map);
-      }
-      if (unitsRes.status === 'fulfilled' && unitsRes.value) {
-        const map = {};
-        unitsRes.value.forEach((u) => { map[u.id] = u.name; });
-        setUnitMap(map);
-      }
-      if (catsRes.status === 'fulfilled' && catsRes.value) {
-        const map = {};
-        catsRes.value.forEach((c) => { map[c.id] = c.name; });
-        setCategoryLookup(map);
-      }
-      if (statusesRes.status === 'fulfilled' && statusesRes.value) {
-        const map = {};
-        statusesRes.value.forEach((s) => { map[s.id] = s; });
-        setStatusLookup(map);
-      }
-      if (prioritiesRes.status === 'fulfilled' && prioritiesRes.value) {
-        const map = {};
-        prioritiesRes.value.forEach((p) => { map[p.id] = p.name; });
-        setPriorityLookup(map);
+    async function fetchLookups() {
+      const steps = [
+        { fn: getProperties, apply: (data) => {
+          const map = {};
+          data.forEach((p) => { map[p.id] = p.name; });
+          setPropertyMap(map);
+        }},
+        { fn: getUnits, apply: (data) => {
+          const map = {};
+          data.forEach((u) => { map[u.id] = u.name; });
+          setUnitMap(map);
+        }},
+        { fn: getWorkOrderCategories, apply: (data) => {
+          const map = {};
+          data.forEach((c) => { map[c.id] = c.name; });
+          setCategoryLookup(map);
+        }},
+        { fn: getWorkOrderStatuses, apply: (data) => {
+          const map = {};
+          data.forEach((s) => { map[s.id] = s; });
+          setStatusLookup(map);
+        }},
+        { fn: getWorkOrderPriorities, apply: (data) => {
+          const map = {};
+          data.forEach((p) => { map[p.id] = p.name; });
+          setPriorityLookup(map);
+        }},
+      ];
+
+      for (const step of steps) {
+        if (cancelled) return;
+        try {
+          const data = await step.fn();
+          if (cancelled) return;
+          if (data) step.apply(data);
+        } catch {
+          // ignore individual lookup failures — the list is still usable
+        }
       }
     }
     fetchLookups();
     return () => { cancelled = true; };
-  }, [reloadTick]);
+  }, [workOrders]);
 
   // Enrich work orders with names resolved client-side from lookup maps
   const enriched = workOrders

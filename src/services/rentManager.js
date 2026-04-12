@@ -227,9 +227,10 @@ export async function updateTenant(id, patch) {
 // Categories and statuses are their own endpoints we can resolve from.
 
 export async function getWorkOrders() {
-  // Limit page size so we don't blow through the Vercel function timeout
-  // fetching hundreds of records on a cold-start.
-  const data = await rmFetch('/ServiceManagerIssues?pageSize=100&pageNumber=1');
+  // Keep pageSize small enough to survive a cold-start. 50 is a safe
+  // middle ground — the list sorts by priority/date client-side so the
+  // most interesting tickets surface first anyway.
+  const data = await rmFetch('/ServiceManagerIssues?pageSize=50&pageNumber=1');
   if (!data || !Array.isArray(data)) return null;
 
   return data.map((wo) => ({
