@@ -113,6 +113,36 @@ const TOOLS = [
       required: [],
     },
   },
+  {
+    name: 'notify_team',
+    description:
+      'Send a notification message to the team chat (Zoho Cliq). Use when the user explicitly asks ' +
+      'you to notify, alert, ping, message, or tell someone about something. Currently every ' +
+      'notification routes to the same team channel regardless of recipient — include the recipient ' +
+      'name in the input so the message reads naturally.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        recipient: {
+          type: 'string',
+          description:
+            'Who or what team the message is directed to, e.g. "plumbing team", "Marcia Clark", ' +
+            '"maintenance supervisor". Used in the message header only.',
+        },
+        message: {
+          type: 'string',
+          description: 'The actual notification text to send. Keep it concise and actionable.',
+        },
+        context: {
+          type: 'string',
+          description:
+            'Optional reference like "WO-57", "Unit 204 at Oakwood", "Marcia Clark (#t0001)". ' +
+            'Helps the recipient find the record in Rent Manager.',
+        },
+      },
+      required: ['recipient', 'message'],
+    },
+  },
 ];
 
 // ── Tool executors ───────────────────────────────────────────────
@@ -325,6 +355,53 @@ async function executeTool(name, input) {
         };
       }
 
+      case 'notify_team': {
+        const webhookUrl = process.env.ZOHO_CLIQ_WEBHOOK_URL;
+        if (!webhookUrl) {
+          return {
+            error:
+              'ZOHO_CLIQ_WEBHOOK_URL is not configured. Add it in Vercel → Settings → Environment Variables.',
+          };
+        }
+
+        const recipient = (input.recipient || 'the team').trim();
+        const message = (input.message || '').trim();
+        if (!message) return { error: 'notify_team requires a non-empty message' };
+        const context = input.context ? ` · ${input.context}` : '';
+
+        // Zoho Cliq bot / incoming webhook accepts { text } as the minimum
+        // payload. Format with a header line so the recipient is visible
+        // in the Cliq channel.
+        const text =
+          `📢 *Notify ${recipient}*${context}\n` +
+          `${message}\n\n` +
+          `_Sent via Breeze AI_`;
+
+        try {
+          const res = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text,
+              bot: { name: 'Breeze AI' },
+            }),
+          });
+          if (!res.ok) {
+            const errText = await res.text();
+            return {
+              error: `Zoho Cliq webhook failed (HTTP ${res.status}): ${errText.slice(0, 400)}`,
+            };
+          }
+          return {
+            success: true,
+            sent_to: recipient,
+            delivered_text: text,
+          };
+        } catch (err) {
+          return { error: `Zoho Cliq request failed: ${err.message}` };
+        }
+      }
+
       default:
         return { error: `Unknown tool: ${name}` };
     }
@@ -399,6 +476,13 @@ Style:
 
 Error handling (important):
 - If a tool returns an object containing an "error" field, do NOT paraphrase it as "authentication error", "session issue", or any other natural-language summary. Instead, report the error verbatim to the user prefixed with "Tool error:" so they can see exactly what Rent Manager returned. Example: "Tool error: Could not fetch work orders (HTTP 404): No resource found at /ServiceManagerIssues". Do not retry the same tool call if it just errored.
+
+Notifications:
+- When the user explicitly asks you to notify, alert, ping, message, text, or tell someone about something (e.g. "notify the plumbing team about WO-57", "ping Marcia that her lease is expiring", "alert maintenance about the Mold ticket"), use the notify_team tool. It posts a message to the team chat channel via Zoho Cliq.
+- Always include a recipient (who it's going to) and a concrete message. If the context is a specific record (a ticket, unit, tenant), pass it in the context field.
+- After the tool returns success, confirm briefly to the user — e.g. "Sent to the team chat for the plumbing team." Do NOT paste the full delivered text back; a short confirmation is enough.
+- If the tool returns an error, surface it verbatim per the error-handling rule above.
+- If the user implicitly wants to notify but hasn't said so (e.g. "this needs to be fixed"), ask before sending — don't auto-notify.
 
 Show Me links:
 - When you answer a question that could reasonably be drilled into on one of the app's list pages (maintenance, properties, tenants), end your reply with a single SHOWME marker on its own line so the UI can render a "Show me" button that deep-links to that page with matching filters.
