@@ -371,10 +371,14 @@ function DetailRow({ icon: Icon, label, value }) {
 
 // Translate chat-supplied filters into the page's internal filter state.
 // Chat sends keys like { status, min_priority, category, search }. The
-// page stores status + category as chip values and search as a free text
-// term. We additionally expose a minPriority filter.
+// page uses exact-match priorities ('all' | 'urgent' | 'high' | 'medium' | 'low'),
+// so we collapse the chat's cumulative min_priority to the single level
+// the user most likely cares about — the lowest bucket they named.
 function normalizeInitialFilters(initial) {
   if (!initial) return {};
+  const priorityFilter = initial.min_priority
+    ? initial.min_priority  // chat min_priority=urgent → page priority=urgent
+    : undefined;
   return {
     statusFilter:
       initial.status === 'completed' ? 'completed'
@@ -384,7 +388,7 @@ function normalizeInitialFilters(initial) {
     categoryFilter: initial.category
       ? normalizeCategory(initial.category)
       : undefined,
-    minPriority: initial.min_priority || undefined,
+    priorityFilter,
     searchTerm: initial.search || undefined,
   };
 }
@@ -400,7 +404,7 @@ export default function MaintenancePage({ initialFilters }) {
   const [searchTerm, setSearchTerm] = useState(applied.searchTerm || '');
   const [categoryFilter, setCategoryFilter] = useState(applied.categoryFilter || 'all');
   const [statusFilter, setStatusFilter] = useState(applied.statusFilter || 'open');
-  const [minPriority, setMinPriority] = useState(applied.minPriority || 'low');
+  const [priorityFilter, setPriorityFilter] = useState(applied.priorityFilter || 'all');
   const [selectedId, setSelectedId] = useState(null);
 
   const [categoryLookup, setCategoryLookup] = useState({});
@@ -629,14 +633,34 @@ export default function MaintenancePage({ initialFilters }) {
   ).length;
 
   // ── Apply filters ──────────────────────────────────────────────
-  const minPriorityRank = priorityRank(minPriority);
+  // Count tickets per priority level (open items only by default, so the
+  // numbers reflect "stuff you might need to act on")
+  const priorityCounts = enriched.reduce(
+    (acc, w) => {
+      const r = priorityRank(w.priority);
+      if (r === 4) acc.urgent += 1;
+      else if (r === 3) acc.high += 1;
+      else if (r === 2) acc.medium += 1;
+      else if (r === 1) acc.low += 1;
+      return acc;
+    },
+    { urgent: 0, high: 0, medium: 0, low: 0 },
+  );
+
+  const selectedPriorityRank =
+    priorityFilter === 'urgent' ? 4
+    : priorityFilter === 'high' ? 3
+    : priorityFilter === 'medium' ? 2
+    : priorityFilter === 'low' ? 1
+    : null;
+
   const filtered = enriched
     .filter((w) => {
       if (categoryFilter !== 'all' && normalizeCategory(w.category) !== categoryFilter) return false;
       const s = statusMetaFromWo(w, statusLookup);
       if (statusFilter === 'open' && !s.isOpen) return false;
       if (statusFilter === 'completed' && s.isOpen) return false;
-      if (minPriority !== 'low' && priorityRank(w.priority) < minPriorityRank) return false;
+      if (selectedPriorityRank != null && priorityRank(w.priority) !== selectedPriorityRank) return false;
       if (searchTerm) {
         const q = searchTerm.toLowerCase();
         return (
@@ -686,7 +710,7 @@ export default function MaintenancePage({ initialFilters }) {
           <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
             <option value="open">Open ({openCount})</option>
             <option value="completed">Completed ({completedCount})</option>
-            <option value="all">All ({enriched.length})</option>
+            <option value="all">All</option>
           </select>
         </label>
 
@@ -704,11 +728,12 @@ export default function MaintenancePage({ initialFilters }) {
 
         <label className="filter-select">
           <span className="filter-select-label">Priority</span>
-          <select value={minPriority} onChange={(e) => setMinPriority(e.target.value)}>
-            <option value="low">Any</option>
-            <option value="medium">Medium+</option>
-            <option value="high">High+</option>
-            <option value="urgent">Urgent only</option>
+          <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)}>
+            <option value="all">Any</option>
+            <option value="urgent">Urgent ({priorityCounts.urgent})</option>
+            <option value="high">High ({priorityCounts.high})</option>
+            <option value="medium">Medium ({priorityCounts.medium})</option>
+            <option value="low">Low ({priorityCounts.low})</option>
           </select>
         </label>
       </div>
