@@ -7,6 +7,9 @@
 
 let currentRecognition = null;
 let currentUtterance = null;
+let currentAudio = null;
+let currentAudioUrl = null;
+let elevenLabsDisabled = false; // set to true after a quota/auth failure so we stop retrying
 
 // ── Feature detection ────────────────────────────────────────────
 
@@ -20,7 +23,12 @@ export function isListeningSupported() {
 }
 
 export function isSpeakingSupported() {
-  return typeof window !== 'undefined' && 'speechSynthesis' in window;
+  // ElevenLabs works in any browser with fetch + Audio; Web Speech is a fallback
+  return (
+    typeof window !== 'undefined' &&
+    typeof fetch !== 'undefined' &&
+    typeof Audio !== 'undefined'
+  );
 }
 
 // ── Speech recognition (listen) ──────────────────────────────────
@@ -105,11 +113,15 @@ export function stopListening() {
 }
 
 // ── Speech synthesis (speak) ─────────────────────────────────────
+//
+// Primary: ElevenLabs via /api/tts (high quality, costs quota).
+// Fallback: Web Speech API (robotic but free, works offline).
+// If ElevenLabs returns a quota/auth error once, we remember and skip
+// it for the rest of the session to avoid repeated failures.
 
-// Pick a reasonable default voice — prefer en-US, prefer "Google" or "Samantha"
-// (common high-quality voices on Chrome/Safari) if available.
-function pickVoice() {
-  if (!isSpeakingSupported()) return null;
+// Pick a reasonable Web Speech voice — used only when ElevenLabs can't serve.
+function pickWebSpeechVoice() {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
   const voices = window.speechSynthesis.getVoices();
   if (!voices.length) return null;
 
@@ -123,17 +135,15 @@ function pickVoice() {
   return preferred || pool[0];
 }
 
-export function speak(text, { onEnd } = {}) {
-  if (!isSpeakingSupported() || !text) {
+function speakWithWebSpeech(text, onEnd) {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
     onEnd?.();
     return;
   }
-
-  // Cancel anything currently speaking
-  cancelSpeech();
+  window.speechSynthesis.cancel();
 
   const utterance = new SpeechSynthesisUtterance(text);
-  const voice = pickVoice();
+  const voice = pickWebSpeechVoice();
   if (voice) utterance.voice = voice;
   utterance.rate = 1.0;
   utterance.pitch = 1.0;
@@ -152,8 +162,106 @@ export function speak(text, { onEnd } = {}) {
   window.speechSynthesis.speak(utterance);
 }
 
+async function speakWithElevenLabs(text, onEnd) {
+  const response = await fetch('/api/tts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+
+  if (!response.ok) {
+    // Disable for the rest of the session on quota / auth errors
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      // ignore
+    }
+    if (response.status === 401 || response.status === 402 || payload?.quota_exceeded) {
+      elevenLabsDisabled = true;
+      console.warn('ElevenLabs disabled for session:', payload?.error || response.status);
+    }
+    throw new Error(payload?.error || `TTS failed: ${response.status}`);
+  }
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const audio = new Audio(url);
+  currentAudio = audio;
+  currentAudioUrl = url;
+
+  audio.onended = () => {
+    if (currentAudioUrl === url) {
+      URL.revokeObjectURL(url);
+      currentAudioUrl = null;
+    }
+    if (currentAudio === audio) currentAudio = null;
+    onEnd?.();
+  };
+  audio.onerror = () => {
+    if (currentAudioUrl === url) {
+      URL.revokeObjectURL(url);
+      currentAudioUrl = null;
+    }
+    if (currentAudio === audio) currentAudio = null;
+    onEnd?.();
+  };
+
+  try {
+    await audio.play();
+  } catch (err) {
+    // Autoplay policy or other playback issue
+    if (currentAudioUrl === url) {
+      URL.revokeObjectURL(url);
+      currentAudioUrl = null;
+    }
+    if (currentAudio === audio) currentAudio = null;
+    throw err;
+  }
+}
+
+export async function speak(text, { onEnd } = {}) {
+  if (!text) {
+    onEnd?.();
+    return;
+  }
+
+  // Cancel anything currently speaking
+  cancelSpeech();
+
+  // Try ElevenLabs first unless we've already learned it's unavailable
+  if (!elevenLabsDisabled) {
+    try {
+      await speakWithElevenLabs(text, onEnd);
+      return;
+    } catch (err) {
+      console.warn('ElevenLabs TTS failed, falling back to Web Speech:', err.message);
+      // fall through to Web Speech
+    }
+  }
+
+  speakWithWebSpeech(text, onEnd);
+}
+
 export function cancelSpeech() {
-  if (!isSpeakingSupported()) return;
-  window.speechSynthesis.cancel();
+  // Cancel ElevenLabs audio playback
+  if (currentAudio) {
+    try {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+    } catch {
+      // ignore
+    }
+    currentAudio = null;
+  }
+  if (currentAudioUrl) {
+    URL.revokeObjectURL(currentAudioUrl);
+    currentAudioUrl = null;
+  }
+
+  // Cancel Web Speech synthesis
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    window.speechSynthesis.cancel();
+  }
   currentUtterance = null;
 }
