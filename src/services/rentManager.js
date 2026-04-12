@@ -199,53 +199,53 @@ export async function updateTenant(id, patch) {
 
 // ── Service Manager (Maintenance / Work Orders) ─────────────────
 
+// Rent Manager's maintenance module is called "Service Manager" and the
+// tickets live under /ServiceManagerIssues (not /ServiceManagerOrders).
+// Categories and statuses are their own endpoints we can resolve from.
+
 export async function getWorkOrders() {
-  // Bare call — embeds like Property/Unit/Category are version-specific on
-  // Rent Manager and the wrong name 400s the entire request. We surface
-  // whatever top-level fields RM gives us and let the page resolve names
-  // client-side from the properties/units caches.
-  const data = await rmFetch('/ServiceManagerOrders');
+  const data = await rmFetch('/ServiceManagerIssues');
   if (!data || !Array.isArray(data)) return null;
 
-  return data.map((wo) => {
-    // RM field names vary by version; try a few
-    const category =
-      wo.Category?.Name ||
-      wo.CategoryName ||
-      wo.ServiceType ||
-      wo.Type ||
-      wo.Trade ||
-      '';
-    const issues = Array.isArray(wo.ServiceManagerIssues) ? wo.ServiceManagerIssues : [];
-    const firstIssue = issues[0] || {};
-    const summary =
-      wo.Summary ||
-      wo.Description ||
-      firstIssue.Description ||
-      firstIssue.Summary ||
-      '';
+  return data.map((wo) => ({
+    id: wo.ServiceManagerIssueID || wo.IssueID || wo.ID,
+    displayId: wo.DisplayID || `WO-${wo.ServiceManagerIssueID || wo.IssueID}`,
+    summary: wo.Summary || wo.Description || '',
+    description: wo.Description || '',
+    status: wo.StatusName || wo.Status || '',
+    statusId: wo.ServiceManagerStatusID || wo.StatusID,
+    priority: wo.Priority || wo.PriorityName || 'normal',
+    categoryId: wo.ServiceManagerCategoryID || wo.CategoryID,
+    categoryName: wo.CategoryName || wo.Category?.Name || '',
+    propertyId: wo.PropertyID,
+    unitId: wo.UnitID,
+    tenantId: wo.TenantID,
+    createdDate: wo.CreateDate || wo.DateCreated || wo.CreatedDate,
+    updatedDate: wo.UpdateDate || wo.DateUpdated,
+    scheduledDate: wo.ScheduledDate,
+    completedDate: wo.CompletedDate || wo.DateCompleted,
+    assignedTo: wo.AssignedTo || wo.AssignedUser || '',
+    raw: wo,
+  }));
+}
 
-    return {
-      id: wo.ServiceManagerOrderID || wo.OrderID || wo.ID,
-      displayId: wo.ServiceManagerOrderDisplayID || `WO-${wo.ServiceManagerOrderID || wo.OrderID}`,
-      summary,
-      description: wo.Description || firstIssue.Description || '',
-      status: wo.Status || '',
-      priority: wo.Priority || 'normal',
-      category,
-      propertyId: wo.PropertyID,
-      propertyName: wo.Property?.Name || wo.Property?.ShortName || '',
-      unitId: wo.UnitID,
-      unitName: wo.Unit?.Name || '',
-      createdDate: wo.CreateDate || wo.DateCreated || wo.CreatedDate,
-      updatedDate: wo.UpdateDate || wo.DateUpdated,
-      scheduledDate: wo.ScheduledDate,
-      completedDate: wo.CompletedDate || wo.DateCompleted,
-      assignedTo: wo.AssignedTo || wo.AssignedUser || '',
-      issueCount: issues.length,
-      raw: wo,
-    };
-  });
+export async function getWorkOrderCategories() {
+  const data = await rmFetch('/ServiceManagerCategories');
+  if (!data || !Array.isArray(data)) return null;
+  return data.map((c) => ({
+    id: c.ServiceManagerCategoryID || c.CategoryID || c.ID,
+    name: c.Name || c.CategoryName || '',
+  }));
+}
+
+export async function getWorkOrderStatuses() {
+  const data = await rmFetch('/ServiceManagerStatuses');
+  if (!data || !Array.isArray(data)) return null;
+  return data.map((s) => ({
+    id: s.ServiceManagerStatusID || s.StatusID || s.ID,
+    name: s.Name || s.StatusName || '',
+    isClosed: s.IsClosed || s.IsComplete || false,
+  }));
 }
 
 // ── Charges / Accounting ────────────────────────────────────────

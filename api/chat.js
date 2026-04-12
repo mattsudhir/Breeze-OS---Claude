@@ -175,15 +175,16 @@ async function executeTool(name, input) {
       }
 
       case 'list_work_orders': {
-        const res = await rmCall('/ServiceManagerOrders');
+        const res = await rmCall('/ServiceManagerIssues');
         if (!res.ok || !Array.isArray(res.data)) {
           return { error: `Could not fetch work orders: ${res.status}` };
         }
         let orders = res.data.map((w) => ({
-          id: w.ServiceManagerOrderID || w.OrderID,
+          id: w.ServiceManagerIssueID || w.IssueID,
           summary: w.Summary || w.Description,
-          status: w.Status,
-          priority: w.Priority,
+          status: w.StatusName || w.Status,
+          priority: w.Priority || w.PriorityName,
+          category_id: w.ServiceManagerCategoryID || w.CategoryID,
           property_id: w.PropertyID,
           unit_id: w.UnitID,
           created: w.CreateDate || w.DateCreated,

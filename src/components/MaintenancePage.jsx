@@ -4,7 +4,10 @@ import {
   ChevronLeft, Building2, Home, Clock, Calendar, User as UserIcon,
   AlertTriangle, Zap, Droplet, Flame, Wind, Lightbulb, Hammer,
 } from 'lucide-react';
-import { getWorkOrders, getProperties, getUnits } from '../services/rentManager';
+import {
+  getWorkOrders, getProperties, getUnits,
+  getWorkOrderCategories, getWorkOrderStatuses,
+} from '../services/rentManager';
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -172,13 +175,18 @@ export default function MaintenancePage() {
   const [statusFilter, setStatusFilter] = useState('open');
   const [selectedId, setSelectedId] = useState(null);
 
+  const [categoryLookup, setCategoryLookup] = useState({});
+  const [statusLookup, setStatusLookup] = useState({});
+
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
-      const [woData, propsData, unitsData] = await Promise.all([
+      const [woData, propsData, unitsData, catsData, statusesData] = await Promise.all([
         getWorkOrders(),
         getProperties(),
         getUnits(),
+        getWorkOrderCategories(),
+        getWorkOrderStatuses(),
       ]);
       if (woData) {
         setWorkOrders(woData);
@@ -194,17 +202,35 @@ export default function MaintenancePage() {
         unitsData.forEach((u) => { map[u.id] = u.name; });
         setUnitMap(map);
       }
+      if (catsData) {
+        const map = {};
+        catsData.forEach((c) => { map[c.id] = c.name; });
+        setCategoryLookup(map);
+      }
+      if (statusesData) {
+        const map = {};
+        statusesData.forEach((s) => { map[s.id] = s; });
+        setStatusLookup(map);
+      }
       setLoading(false);
     }
     fetchData();
   }, []);
 
-  // Enrich work orders with property and unit names resolved client-side
+  // Enrich work orders with names resolved client-side from lookup maps
   const enriched = workOrders
     ? workOrders.map((w) => ({
         ...w,
-        propertyName: w.propertyName || propertyMap[w.propertyId] || '',
-        unitName: w.unitName || unitMap[w.unitId] || '',
+        propertyName: propertyMap[w.propertyId] || '',
+        unitName: unitMap[w.unitId] || '',
+        category:
+          w.categoryName ||
+          categoryLookup[w.categoryId] ||
+          '',
+        status:
+          w.status ||
+          statusLookup[w.statusId]?.name ||
+          '',
       }))
     : null;
 
