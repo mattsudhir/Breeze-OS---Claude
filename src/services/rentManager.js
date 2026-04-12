@@ -157,24 +157,26 @@ export async function getTenant(id) {
 }
 
 // Update a tenant. `patch` is a plain object of the fields to change.
-// Rent Manager typically accepts PUT with a partial object keyed by its API field names.
+// Rent Manager uses a batch-upsert convention: PUT /Tenants with an ARRAY
+// of tenant objects in the body. Each object must include TenantID.
 export async function updateTenant(id, patch) {
   if (!id) throw new Error('updateTenant requires an id');
-  // Build the RM-shaped payload from our camelCase patch
-  const body = { TenantID: id };
-  if ('firstName' in patch) body.FirstName = patch.firstName;
-  if ('lastName' in patch) body.LastName = patch.lastName;
-  if ('email' in patch) body.Email = patch.email;
-  if ('homePhone' in patch) body.Phone = patch.homePhone;
-  if ('cellPhone' in patch) body.CellPhone = patch.cellPhone;
-  if ('workPhone' in patch) body.WorkPhone = patch.workPhone;
-  if ('status' in patch) body.Status = patch.status;
-  if ('comment' in patch) body.Comment = patch.comment;
 
-  return rmFetch(`/Tenants/${id}`, {
+  // Build the RM-shaped payload from our camelCase patch
+  const record = { TenantID: id };
+  if ('firstName' in patch) record.FirstName = patch.firstName;
+  if ('lastName' in patch) record.LastName = patch.lastName;
+  if ('email' in patch) record.Email = patch.email;
+  if ('homePhone' in patch) record.Phone = patch.homePhone;
+  if ('cellPhone' in patch) record.CellPhone = patch.cellPhone;
+  if ('workPhone' in patch) record.WorkPhone = patch.workPhone;
+  if ('status' in patch) record.Status = patch.status;
+  if ('comment' in patch) record.Comment = patch.comment;
+
+  return rmFetch(`/Tenants`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify([record]),
     throwOnError: true,
   });
 }
