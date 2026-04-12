@@ -6,6 +6,8 @@ import ClassicDashboard from './components/ClassicDashboard';
 import PropertiesPage from './components/PropertiesPage';
 import TenantsPage from './components/TenantsPage';
 import MaintenancePage from './components/MaintenancePage';
+import TasksPage from './components/TasksPage';
+import WorkflowsPage from './components/WorkflowsPage';
 import './App.css';
 
 function App() {
@@ -43,6 +45,8 @@ function App() {
     if (activeView === 'maintenance') {
       return <MaintenancePage initialFilters={pendingFilters.maintenance} />;
     }
+    if (activeView === 'tasks') return <TasksPage />;
+    if (activeView === 'workflows') return <WorkflowsPage />;
     if (activeView === 'dashboard' || showClassic) {
       return <ClassicDashboard onNavigate={handleNavigate} />;
     }

@@ -8,6 +8,8 @@ const TITLES = {
   leases: 'Leases',
   accounting: 'Accounting',
   maintenance: 'Maintenance',
+  tasks: 'Tasks',
+  workflows: 'Workflows',
   reports: 'Reports',
   settings: 'Settings',
   help: 'Help',
