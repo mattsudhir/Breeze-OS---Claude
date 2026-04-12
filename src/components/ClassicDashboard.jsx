@@ -66,18 +66,23 @@ export default function ClassicDashboard({ onNavigate }) {
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
-      const [propsData, unitsData, woData] = await Promise.all([
+      // Use allSettled so one slow/failed call doesn't kill the others
+      const results = await Promise.allSettled([
         getProperties(),
         getUnits(),
         getWorkOrders(),
       ]);
+      const [propsRes, unitsRes, woRes] = results;
+      const propsData = propsRes.status === 'fulfilled' ? propsRes.value : null;
+      const unitsData = unitsRes.status === 'fulfilled' ? unitsRes.value : null;
+      const woData    = woRes.status    === 'fulfilled' ? woRes.value    : null;
 
-      if (propsData) {
-        setProperties(propsData);
-        setIsLive(true);
-      }
+      if (propsData) setProperties(propsData);
       if (unitsData) setUnits(unitsData);
       if (woData) setWorkOrders(woData);
+
+      // Banner shows "live" if ANY endpoint responded, not just properties
+      if (propsData || unitsData || woData) setIsLive(true);
 
       setLoading(false);
     }

@@ -4,26 +4,49 @@
 const API_BASE = '/api';
 
 async function rmFetch(endpoint, options = {}) {
-  try {
-    const res = await fetch(`${API_BASE}${endpoint}`, options);
-    if (!res.ok) {
-      // Try to read error body so callers can surface it
-      let errMsg = `HTTP ${res.status}`;
-      try {
-        const body = await res.json();
-        if (body?.error) errMsg = body.error;
-        else if (body?.data) errMsg = typeof body.data === 'string' ? body.data : JSON.stringify(body.data);
-      } catch {}
-      throw new Error(errMsg);
+  // Retry once on transient errors (cold-start timeouts, 5xx) for GETs.
+  // Write methods (POST/PUT/PATCH/DELETE) are NOT retried since they aren't
+  // guaranteed idempotent.
+  const method = (options.method || 'GET').toUpperCase();
+  const retries = method === 'GET' ? 1 : 0;
+
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(`${API_BASE}${endpoint}`, options);
+      if (!res.ok) {
+        let errMsg = `HTTP ${res.status}`;
+        try {
+          const body = await res.json();
+          if (body?.error) errMsg = body.error;
+          else if (body?.data) errMsg = typeof body.data === 'string' ? body.data : JSON.stringify(body.data);
+        } catch {}
+        // Retry on 5xx; fail fast on 4xx
+        if (res.status >= 500 && attempt < retries) {
+          lastErr = new Error(errMsg);
+          await new Promise((r) => setTimeout(r, 500));
+          continue;
+        }
+        throw new Error(errMsg);
+      }
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || `API error ${json.status}`);
+      return json.data;
+    } catch (err) {
+      lastErr = err;
+      // Retry network errors
+      if (attempt < retries) {
+        await new Promise((r) => setTimeout(r, 500));
+        continue;
+      }
+      console.warn(`Rent Manager API call failed (${endpoint}):`, err.message);
+      if (options.throwOnError) throw err;
+      return null;
     }
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.error || `API error ${json.status}`);
-    return json.data;
-  } catch (err) {
-    console.warn(`Rent Manager API call failed (${endpoint}):`, err.message);
-    if (options.throwOnError) throw err;
-    return null;
   }
+  console.warn(`Rent Manager API call failed (${endpoint}):`, lastErr?.message);
+  if (options.throwOnError) throw lastErr;
+  return null;
 }
 
 // ── Properties ──────────────────────────────────────────────────
