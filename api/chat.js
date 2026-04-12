@@ -76,15 +76,31 @@ const TOOLS = [
   {
     name: 'list_work_orders',
     description:
-      'List maintenance work orders / service requests. Returns id, summary, priority, status, ' +
-      'and the related unit/property. Use for questions about maintenance, repairs, or open issues.',
+      'List maintenance work orders / service requests. Returns summary, priority, status, category, ' +
+      'and the related unit/property. Use for questions about maintenance, repairs, or open issues. ' +
+      'Supports filtering by status, minimum priority, and category. The response includes counts so ' +
+      'you can answer "how many" questions without iterating through the full list.',
     input_schema: {
       type: 'object',
       properties: {
         status_filter: {
           type: 'string',
-          description: 'Optional: "open" to show only incomplete orders, "all" for everything. Default: all.',
-          enum: ['open', 'all'],
+          description: '"open" for incomplete tickets, "completed" for done, "all" for everything. Default: all.',
+          enum: ['open', 'completed', 'all'],
+        },
+        min_priority: {
+          type: 'string',
+          description:
+            'Minimum priority to include. "urgent" = only urgent/emergency; "high" = high and urgent; ' +
+            '"medium" = medium, high, and urgent; "low" = everything. Default: low.',
+          enum: ['urgent', 'high', 'medium', 'low'],
+        },
+        category: {
+          type: 'string',
+          description:
+            'Filter by ticket category. Keyword-matched against the ticket\'s category name. ' +
+            'Examples: "hvac", "plumbing", "electrical", "appliance", "pest", "locks". ' +
+            'Leave empty to include all categories.',
         },
       },
       required: [],
@@ -175,31 +191,106 @@ async function executeTool(name, input) {
       }
 
       case 'list_work_orders': {
-        const res = await rmCall('/ServiceManagerIssues');
-        if (!res.ok || !Array.isArray(res.data)) {
+        // Fetch tickets + categories in parallel so we can resolve IDs to names
+        const [woRes, catRes] = await Promise.all([
+          rmCall('/ServiceManagerIssues'),
+          rmCall('/ServiceManagerCategories'),
+        ]);
+        if (!woRes.ok || !Array.isArray(woRes.data)) {
           return {
-            error: `Could not fetch work orders (HTTP ${res.status}): ${
-              typeof res.data === 'string' ? res.data : JSON.stringify(res.data)
+            error: `Could not fetch work orders (HTTP ${woRes.status}): ${
+              typeof woRes.data === 'string' ? woRes.data : JSON.stringify(woRes.data)
             }`,
           };
         }
-        let orders = res.data.map((w) => ({
-          id: w.ServiceManagerIssueID || w.IssueID,
-          summary: w.Summary || w.Description,
-          status: w.StatusName || w.Status,
-          priority: w.Priority || w.PriorityName,
-          category_id: w.ServiceManagerCategoryID || w.CategoryID,
-          property_id: w.PropertyID,
-          unit_id: w.UnitID,
-          created: w.CreateDate || w.DateCreated,
-        }));
-        if (input.status_filter === 'open') {
-          orders = orders.filter((o) => {
-            const s = (o.status || '').toLowerCase();
-            return !s.includes('complete') && !s.includes('closed');
-          });
+
+        // Build category id → name map
+        const catMap = {};
+        if (catRes.ok && Array.isArray(catRes.data)) {
+          for (const c of catRes.data) {
+            const id = c.ServiceManagerCategoryID || c.CategoryID || c.ID;
+            const name = c.Name || c.CategoryName || '';
+            if (id) catMap[id] = name;
+          }
         }
-        return { count: orders.length, work_orders: orders.slice(0, 20) };
+
+        // Helpers
+        const rankPriority = (p) => {
+          const pl = (p || '').toLowerCase();
+          if (pl.includes('emerg') || pl.includes('urgent')) return 4;
+          if (pl.includes('high')) return 3;
+          if (pl.includes('med') || pl.includes('normal')) return 2;
+          if (pl.includes('low')) return 1;
+          return 2;
+        };
+        const isOpenStatus = (s) => {
+          const sl = (s || '').toLowerCase();
+          return !sl.includes('complete') && !sl.includes('closed') && !sl.includes('resolved');
+        };
+
+        // Map + enrich
+        let orders = woRes.data.map((w) => {
+          const catId = w.ServiceManagerCategoryID || w.CategoryID;
+          const categoryName = w.CategoryName || catMap[catId] || '';
+          return {
+            id: w.ServiceManagerIssueID || w.IssueID,
+            summary: w.Summary || w.Description || '',
+            status: w.StatusName || w.Status || '',
+            priority: w.Priority || w.PriorityName || 'normal',
+            category: categoryName,
+            property_id: w.PropertyID,
+            unit_id: w.UnitID,
+            created: w.CreateDate || w.DateCreated,
+          };
+        });
+
+        const totalCount = orders.length;
+
+        // Status filter
+        if (input.status_filter === 'open') {
+          orders = orders.filter((o) => isOpenStatus(o.status));
+        } else if (input.status_filter === 'completed') {
+          orders = orders.filter((o) => !isOpenStatus(o.status));
+        }
+
+        // Priority filter (minimum)
+        if (input.min_priority) {
+          const threshold = rankPriority(input.min_priority);
+          orders = orders.filter((o) => rankPriority(o.priority) >= threshold);
+        }
+
+        // Category filter (keyword match)
+        if (input.category) {
+          const q = input.category.toLowerCase();
+          orders = orders.filter((o) => (o.category || '').toLowerCase().includes(q));
+        }
+
+        // Sort by priority desc, then newest first
+        orders.sort((a, b) => {
+          const diff = rankPriority(b.priority) - rankPriority(a.priority);
+          if (diff !== 0) return diff;
+          return new Date(b.created || 0).getTime() - new Date(a.created || 0).getTime();
+        });
+
+        // Count breakdown by priority (from the filtered set)
+        const priority_counts = {
+          urgent: orders.filter((o) => rankPriority(o.priority) === 4).length,
+          high: orders.filter((o) => rankPriority(o.priority) === 3).length,
+          medium: orders.filter((o) => rankPriority(o.priority) === 2).length,
+          low: orders.filter((o) => rankPriority(o.priority) === 1).length,
+        };
+
+        return {
+          total_work_orders_in_system: totalCount,
+          filtered_count: orders.length,
+          priority_counts,
+          filters_applied: {
+            status: input.status_filter || 'all',
+            min_priority: input.min_priority || 'low',
+            category: input.category || 'any',
+          },
+          sample: orders.slice(0, 15),
+        };
       }
 
       default:
