@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import {
   getWorkOrders, getProperties, getUnits,
-  getWorkOrderCategories, getWorkOrderStatuses,
+  getWorkOrderCategories, getWorkOrderStatuses, getWorkOrderPriorities,
   updateWorkOrder,
 } from '../services/rentManager';
 
@@ -82,9 +82,7 @@ function formatDate(d) {
 
 // ── Detail view ──────────────────────────────────────────────────
 
-const PRIORITY_OPTIONS = ['Urgent', 'High', 'Medium', 'Low'];
-
-function WorkOrderDetail({ workOrder, categories, statuses, onBack, onUpdated }) {
+function WorkOrderDetail({ workOrder, categories, statuses, priorities, onBack, onUpdated }) {
   const catKey = normalizeCategory(workOrder.category);
   const cat = CATEGORY_META[catKey];
   const CatIcon = cat.icon;
@@ -102,7 +100,7 @@ function WorkOrderDetail({ workOrder, categories, statuses, onBack, onUpdated })
     setForm({
       summary: workOrder.summary || '',
       description: workOrder.description || '',
-      priority: workOrder.priority || 'Medium',
+      priorityId: workOrder.priorityId || '',
       categoryId: workOrder.categoryId || '',
       statusId: workOrder.statusId || '',
     });
@@ -120,12 +118,13 @@ function WorkOrderDetail({ workOrder, categories, statuses, onBack, onUpdated })
     setSaving(true);
     setSaveError(null);
     try {
-      // Coerce id fields to numbers if RM expects them
+      // RM requires numeric IDs for priority/category/status — strings are
+      // rejected with a type conversion error.
       const patch = {
         summary: form.summary,
         description: form.description,
-        priority: form.priority,
       };
+      if (form.priorityId) patch.priorityId = Number(form.priorityId);
       if (form.categoryId) patch.categoryId = Number(form.categoryId);
       if (form.statusId) patch.statusId = Number(form.statusId);
 
@@ -215,11 +214,12 @@ function WorkOrderDetail({ workOrder, categories, statuses, onBack, onUpdated })
               <label>
                 <span>Priority</span>
                 <select
-                  value={form.priority}
-                  onChange={(e) => setForm({ ...form, priority: e.target.value })}
+                  value={form.priorityId}
+                  onChange={(e) => setForm({ ...form, priorityId: e.target.value })}
                 >
-                  {PRIORITY_OPTIONS.map((p) => (
-                    <option key={p} value={p}>{p}</option>
+                  <option value="">—</option>
+                  {priorities.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
                 </select>
               </label>
@@ -331,6 +331,7 @@ export default function MaintenancePage() {
 
   const [categoryLookup, setCategoryLookup] = useState({});
   const [statusLookup, setStatusLookup] = useState({});
+  const [priorityLookup, setPriorityLookup] = useState({});
   const [fetchFailed, setFetchFailed] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
 
@@ -366,9 +367,10 @@ export default function MaintenancePage() {
         getUnits(),
         getWorkOrderCategories(),
         getWorkOrderStatuses(),
+        getWorkOrderPriorities(),
       ]);
       if (cancelled) return;
-      const [propsRes, unitsRes, catsRes, statusesRes] = results;
+      const [propsRes, unitsRes, catsRes, statusesRes, prioritiesRes] = results;
 
       if (propsRes.status === 'fulfilled' && propsRes.value) {
         const map = {};
@@ -389,6 +391,11 @@ export default function MaintenancePage() {
         const map = {};
         statusesRes.value.forEach((s) => { map[s.id] = s; });
         setStatusLookup(map);
+      }
+      if (prioritiesRes.status === 'fulfilled' && prioritiesRes.value) {
+        const map = {};
+        prioritiesRes.value.forEach((p) => { map[p.id] = p.name; });
+        setPriorityLookup(map);
       }
     }
     fetchLookups();
@@ -467,11 +474,15 @@ export default function MaintenancePage() {
     const statusesList = Object.entries(statusLookup).map(([id, s]) => ({
       id: Number(id), name: s.name || s,
     }));
+    const prioritiesList = Object.entries(priorityLookup).map(([id, name]) => ({
+      id: Number(id), name,
+    }));
     return (
       <WorkOrderDetail
         workOrder={wo}
         categories={categoriesList}
         statuses={statusesList}
+        priorities={prioritiesList}
         onBack={() => setSelectedId(null)}
         onUpdated={() => setReloadTick((t) => t + 1)}
       />

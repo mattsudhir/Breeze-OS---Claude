@@ -228,21 +228,23 @@ export async function updateTenant(id, patch) {
 
 export async function getWorkOrders() {
   // Limit page size so we don't blow through the Vercel function timeout
-  // fetching hundreds of records on a cold-start. RM's paging is
-  // pageNumber/pageSize on the query string. 100 is plenty for the UI
-  // (sorted by priority/date we'll see the interesting ones).
+  // fetching hundreds of records on a cold-start.
   const data = await rmFetch('/ServiceManagerIssues?pageSize=100&pageNumber=1');
   if (!data || !Array.isArray(data)) return null;
 
   return data.map((wo) => ({
+    // Read field names per the RM schema (see ServiceManager/Issues/issue.schema.js
+    // in TopShelfRobot/rent-manager). RM uses Title / CategoryID / StatusID /
+    // PriorityID as the canonical fields. Fallbacks cover version drift.
     id: wo.ServiceManagerIssueID || wo.IssueID || wo.ID,
     displayId: wo.DisplayID || `WO-${wo.ServiceManagerIssueID || wo.IssueID}`,
-    summary: wo.Summary || wo.Description || '',
+    summary: wo.Title || wo.Summary || wo.Description || '',
     description: wo.Description || '',
     status: wo.StatusName || wo.Status || '',
-    statusId: wo.ServiceManagerStatusID || wo.StatusID,
-    priority: wo.Priority || wo.PriorityName || 'normal',
-    categoryId: wo.ServiceManagerCategoryID || wo.CategoryID,
+    statusId: wo.StatusID || wo.ServiceManagerStatusID,
+    priority: wo.Priority || wo.PriorityName || '',
+    priorityId: wo.PriorityID,
+    categoryId: wo.CategoryID || wo.ServiceManagerCategoryID,
     categoryName: wo.CategoryName || wo.Category?.Name || '',
     propertyId: wo.PropertyID,
     unitId: wo.UnitID,
@@ -250,9 +252,18 @@ export async function getWorkOrders() {
     createdDate: wo.CreateDate || wo.DateCreated || wo.CreatedDate,
     updatedDate: wo.UpdateDate || wo.DateUpdated,
     scheduledDate: wo.ScheduledDate,
-    completedDate: wo.CompletedDate || wo.DateCompleted,
+    completedDate: wo.CompletedDate || wo.DateCompleted || wo.CloseDate,
     assignedTo: wo.AssignedTo || wo.AssignedUser || '',
     raw: wo,
+  }));
+}
+
+export async function getWorkOrderPriorities() {
+  const data = await rmFetch('/ServiceManagerPriorities');
+  if (!data || !Array.isArray(data)) return null;
+  return data.map((p) => ({
+    id: p.ServiceManagerPriorityID || p.PriorityID || p.ID,
+    name: p.Name || p.PriorityName || '',
   }));
 }
 
@@ -284,8 +295,14 @@ export async function getWorkOrder(id) {
 }
 
 // Update a work order using the same fetch-merge-POST pattern as tenants.
-// Rent Manager's POST on the collection endpoint acts as upsert when the
-// primary key is present in the payload.
+//
+// Per the RM schema, writable work order fields are:
+//   Title (string)     — NOT "Summary"
+//   Description (string)
+//   CategoryID (number) — NOT "ServiceManagerCategoryID"
+//   StatusID (number)   — NOT "ServiceManagerStatusID"
+//   PriorityID (number) — NOT "Priority" string. RM rejects strings like
+//                         "High" with an enum conversion error.
 export async function updateWorkOrder(id, patch) {
   if (!id) throw new Error('updateWorkOrder requires an id');
 
@@ -294,11 +311,19 @@ export async function updateWorkOrder(id, patch) {
   const current = Array.isArray(existing) ? existing[0] : existing;
 
   const record = { ...current };
-  if ('summary' in patch) record.Summary = patch.summary;
+  if ('summary' in patch) {
+    record.Title = patch.summary;
+    // Keep Summary too in case the record round-trips via a different version
+    record.Summary = patch.summary;
+  }
   if ('description' in patch) record.Description = patch.description;
-  if ('priority' in patch) record.Priority = patch.priority;
-  if ('categoryId' in patch) record.ServiceManagerCategoryID = patch.categoryId;
-  if ('statusId' in patch) record.ServiceManagerStatusID = patch.statusId;
+  if ('priorityId' in patch) {
+    record.PriorityID = Number(patch.priorityId);
+    // Clear any inherited string Priority so RM's converter doesn't see it
+    delete record.Priority;
+  }
+  if ('categoryId' in patch) record.CategoryID = Number(patch.categoryId);
+  if ('statusId' in patch) record.StatusID = Number(patch.statusId);
   if ('assignedTo' in patch) record.AssignedTo = patch.assignedTo;
 
   // Ensure PK stays set
