@@ -243,6 +243,9 @@ export async function getWorkOrders(opts = {}) {
     displayId: wo.DisplayID || `WO-${wo.ServiceManagerIssueID || wo.IssueID}`,
     summary: wo.Title || wo.Summary || wo.Description || '',
     description: wo.Description || '',
+    // RM has a literal IsClosed bool — that's our source of truth for
+    // whether a ticket is resolved. Don't guess from the status string.
+    isClosed: wo.IsClosed === true,
     status: wo.StatusName || wo.Status || '',
     statusId: wo.StatusID || wo.ServiceManagerStatusID,
     priority: wo.Priority || wo.PriorityName || '',

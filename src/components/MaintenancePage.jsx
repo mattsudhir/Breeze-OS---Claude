@@ -54,21 +54,39 @@ function priorityMeta(p) {
   return { label: 'Low', className: 'priority-low', icon: Clock };
 }
 
-function statusMeta(s) {
-  const sl = (s || '').toLowerCase();
-  if (sl.includes('complete') || sl.includes('closed') || sl.includes('resolved')) {
-    return { label: 'Completed', className: 'status-completed', isOpen: false };
+// Resolve a work order's status using RM's source-of-truth fields:
+// - isClosed (boolean on the work order itself)
+// - statusLookup map (from /ServiceManagerStatuses, has each status's
+//   own IsClosed flag and human name)
+// Returns a consistent { label, className, isOpen } shape for the UI.
+function statusMetaFromWo(wo, statusLookup) {
+  const lookupEntry =
+    wo.statusId != null ? statusLookup?.[wo.statusId] : null;
+
+  // RM's IsClosed on the work order is authoritative. Fall back to the
+  // lookup entry's IsClosed flag, then to keyword matching on the name.
+  const isClosed =
+    wo.isClosed === true ||
+    lookupEntry?.isClosed === true ||
+    /complete|closed|resolved/i.test(wo.status || '');
+
+  // Display name: prefer the RM status name verbatim so we never
+  // mis-label a custom status.
+  const label = lookupEntry?.name || wo.status || (isClosed ? 'Closed' : 'Open');
+
+  // Color/tone — three buckets: closed, in-progress-ish, plain open
+  let className = 'status-open';
+  if (isClosed) {
+    className = 'status-completed';
+  } else if (/progress|working|active/i.test(label)) {
+    className = 'status-in_progress';
+  } else if (/assign|scheduled/i.test(label)) {
+    className = 'status-assigned';
+  } else if (/hold|wait/i.test(label)) {
+    className = 'status-onhold';
   }
-  if (sl.includes('progress') || sl.includes('active') || sl.includes('working')) {
-    return { label: 'In Progress', className: 'status-in_progress', isOpen: true };
-  }
-  if (sl.includes('assign') || sl.includes('scheduled')) {
-    return { label: 'Assigned', className: 'status-assigned', isOpen: true };
-  }
-  if (sl.includes('hold') || sl.includes('wait')) {
-    return { label: 'On Hold', className: 'status-onhold', isOpen: true };
-  }
-  return { label: s || 'Open', className: 'status-open', isOpen: true };
+
+  return { label, className, isOpen: !isClosed };
 }
 
 function formatDate(d) {
@@ -82,13 +100,16 @@ function formatDate(d) {
 
 // ── Detail view ──────────────────────────────────────────────────
 
-function WorkOrderDetail({ workOrder, categories, statuses, priorities, onBack, onUpdated }) {
+function WorkOrderDetail({
+  workOrder, categories, statuses, priorities, statusLookup,
+  onBack, onUpdated,
+}) {
   const catKey = normalizeCategory(workOrder.category);
   const cat = CATEGORY_META[catKey];
   const CatIcon = cat.icon;
   const pri = priorityMeta(workOrder.priority);
   const PriIcon = pri.icon;
-  const status = statusMeta(workOrder.status);
+  const status = statusMetaFromWo(workOrder, statusLookup);
 
   const [editing, setEditing] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
@@ -554,6 +575,7 @@ export default function MaintenancePage() {
         categories={categoriesList}
         statuses={statusesList}
         priorities={prioritiesList}
+        statusLookup={statusLookup}
         onBack={() => setSelectedId(null)}
         onUpdated={() => setReloadTick((t) => t + 1)}
       />
@@ -567,17 +589,17 @@ export default function MaintenancePage() {
     return acc;
   }, {});
 
-  const openCount = enriched.filter((w) => statusMeta(w.status).isOpen).length;
+  const openCount = enriched.filter((w) => statusMetaFromWo(w, statusLookup).isOpen).length;
   const completedCount = enriched.length - openCount;
   const urgentOpenCount = enriched.filter(
-    (w) => statusMeta(w.status).isOpen && priorityRank(w.priority) >= 3,
+    (w) => statusMetaFromWo(w, statusLookup).isOpen && priorityRank(w.priority) >= 3,
   ).length;
 
   // ── Apply filters ──────────────────────────────────────────────
   const filtered = enriched
     .filter((w) => {
       if (categoryFilter !== 'all' && normalizeCategory(w.category) !== categoryFilter) return false;
-      const s = statusMeta(w.status);
+      const s = statusMetaFromWo(w, statusLookup);
       if (statusFilter === 'open' && !s.isOpen) return false;
       if (statusFilter === 'completed' && s.isOpen) return false;
       if (searchTerm) {
@@ -690,7 +712,7 @@ export default function MaintenancePage() {
           const CatIcon = cat.icon;
           const pri = priorityMeta(w.priority);
           const PriIcon = pri.icon;
-          const status = statusMeta(w.status);
+          const status = statusMetaFromWo(w, statusLookup);
 
           return (
             <button
