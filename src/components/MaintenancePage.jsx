@@ -476,21 +476,31 @@ export default function MaintenancePage() {
     return () => { cancelled = true; };
   }, [workOrders]);
 
-  // Enrich work orders with names resolved client-side from lookup maps
+  // Enrich work orders with names resolved client-side from lookup tables.
+  // RM's list endpoint returns both ID fields and legacy string fields (e.g.
+  // Priority / PriorityName) that can disagree with the canonical priorities
+  // table. The ID + lookup is the source of truth — never trust the string.
   const enriched = workOrders
-    ? workOrders.map((w) => ({
-        ...w,
-        propertyName: propertyMap[w.propertyId] || '',
-        unitName: unitMap[w.unitId] || '',
-        category:
-          w.categoryName ||
-          categoryLookup[w.categoryId] ||
-          '',
-        status:
-          w.status ||
-          statusLookup[w.statusId]?.name ||
-          '',
-      }))
+    ? workOrders.map((w) => {
+        const resolvedCategory =
+          (w.categoryId != null ? categoryLookup[w.categoryId] : null) ||
+          w.categoryName || w.category || '';
+        const resolvedStatus =
+          (w.statusId != null ? statusLookup[w.statusId]?.name : null) ||
+          w.status || '';
+        const resolvedPriority =
+          (w.priorityId != null ? priorityLookup[w.priorityId] : null) ||
+          w.priority || '';
+
+        return {
+          ...w,
+          propertyName: propertyMap[w.propertyId] || '',
+          unitName: unitMap[w.unitId] || '',
+          category: resolvedCategory,
+          status: resolvedStatus,
+          priority: resolvedPriority,
+        };
+      })
     : null;
 
   if (loading) {
