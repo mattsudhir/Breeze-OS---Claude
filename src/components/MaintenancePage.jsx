@@ -4,7 +4,7 @@ import {
   ChevronLeft, Building2, Home, Clock, Calendar, User as UserIcon,
   AlertTriangle, Zap, Droplet, Flame, Wind, Lightbulb, Hammer,
 } from 'lucide-react';
-import { getWorkOrders } from '../services/rentManager';
+import { getWorkOrders, getProperties, getUnits } from '../services/rentManager';
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -163,6 +163,8 @@ function DetailRow({ icon: Icon, label, value }) {
 
 export default function MaintenancePage() {
   const [workOrders, setWorkOrders] = useState(null);
+  const [propertyMap, setPropertyMap] = useState({});
+  const [unitMap, setUnitMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [isLive, setIsLive] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -173,15 +175,38 @@ export default function MaintenancePage() {
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
-      const data = await getWorkOrders();
-      if (data) {
-        setWorkOrders(data);
+      const [woData, propsData, unitsData] = await Promise.all([
+        getWorkOrders(),
+        getProperties(),
+        getUnits(),
+      ]);
+      if (woData) {
+        setWorkOrders(woData);
         setIsLive(true);
+      }
+      if (propsData) {
+        const map = {};
+        propsData.forEach((p) => { map[p.id] = p.name; });
+        setPropertyMap(map);
+      }
+      if (unitsData) {
+        const map = {};
+        unitsData.forEach((u) => { map[u.id] = u.name; });
+        setUnitMap(map);
       }
       setLoading(false);
     }
     fetchData();
   }, []);
+
+  // Enrich work orders with property and unit names resolved client-side
+  const enriched = workOrders
+    ? workOrders.map((w) => ({
+        ...w,
+        propertyName: w.propertyName || propertyMap[w.propertyId] || '',
+        unitName: w.unitName || unitMap[w.unitId] || '',
+      }))
+    : null;
 
   if (loading) {
     return (
@@ -194,7 +219,7 @@ export default function MaintenancePage() {
     );
   }
 
-  if (!workOrders || workOrders.length === 0) {
+  if (!enriched || enriched.length === 0) {
     return (
       <div className="properties-page">
         <div className="empty-state">
@@ -208,7 +233,7 @@ export default function MaintenancePage() {
 
   // Detail view
   if (selectedId) {
-    const wo = workOrders.find((w) => w.id === selectedId);
+    const wo = enriched.find((w) => w.id === selectedId);
     if (!wo) {
       setSelectedId(null);
       return null;
@@ -217,20 +242,20 @@ export default function MaintenancePage() {
   }
 
   // ── Counts used for filter chip labels ─────────────────────────
-  const categoryCounts = workOrders.reduce((acc, w) => {
+  const categoryCounts = enriched.reduce((acc, w) => {
     const k = normalizeCategory(w.category);
     acc[k] = (acc[k] || 0) + 1;
     return acc;
   }, {});
 
-  const openCount = workOrders.filter((w) => statusMeta(w.status).isOpen).length;
-  const completedCount = workOrders.length - openCount;
-  const urgentOpenCount = workOrders.filter(
+  const openCount = enriched.filter((w) => statusMeta(w.status).isOpen).length;
+  const completedCount = enriched.length - openCount;
+  const urgentOpenCount = enriched.filter(
     (w) => statusMeta(w.status).isOpen && priorityRank(w.priority) >= 3,
   ).length;
 
   // ── Apply filters ──────────────────────────────────────────────
-  const filtered = workOrders
+  const filtered = enriched
     .filter((w) => {
       if (categoryFilter !== 'all' && normalizeCategory(w.category) !== categoryFilter) return false;
       const s = statusMeta(w.status);
@@ -272,7 +297,7 @@ export default function MaintenancePage() {
         border: `1px solid ${isLive ? '#C8E6C9' : '#FFE0B2'}`,
       }}>
         {isLive ? (
-          <><CheckCircle2 size={14} /> Live data — {workOrders.length} tickets ({openCount} open, {urgentOpenCount} urgent/high)</>
+          <><CheckCircle2 size={14} /> Live data — {enriched.length} tickets ({openCount} open, {urgentOpenCount} urgent/high)</>
         ) : (
           <><WifiOff size={14} /> Demo data</>
         )}
@@ -296,7 +321,7 @@ export default function MaintenancePage() {
           className={`status-filter-chip ${statusFilter === 'all' ? 'active' : ''}`}
           onClick={() => setStatusFilter('all')}
         >
-          All <span className="chip-count">{workOrders.length}</span>
+          All <span className="chip-count">{enriched.length}</span>
         </button>
       </div>
 

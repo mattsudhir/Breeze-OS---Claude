@@ -200,10 +200,11 @@ export async function updateTenant(id, patch) {
 // ── Service Manager (Maintenance / Work Orders) ─────────────────
 
 export async function getWorkOrders() {
-  // Ask RM for related entities so we can show property name, unit, category, etc.
-  const data = await rmFetch(
-    '/ServiceManagerOrders?embeds=Property,Unit,Category,ServiceManagerIssues',
-  );
+  // Bare call — embeds like Property/Unit/Category are version-specific on
+  // Rent Manager and the wrong name 400s the entire request. We surface
+  // whatever top-level fields RM gives us and let the page resolve names
+  // client-side from the properties/units caches.
+  const data = await rmFetch('/ServiceManagerOrders');
   if (!data || !Array.isArray(data)) return null;
 
   return data.map((wo) => {
