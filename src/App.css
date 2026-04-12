@@ -2078,3 +2078,70 @@
   justify-content: center;
   flex-shrink: 0;
 }
+
+/* ── Compact filter row with native selects ─────────────────── */
+.filter-select-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.filter-select {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.filter-select-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gray-500, #6c757d);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding-left: 2px;
+}
+.filter-select select {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: inherit;
+  background: white;
+  color: var(--gray-800, #212529);
+  border: 1px solid var(--gray-300, #DEE2E6);
+  border-radius: 8px;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23495057' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 32px;
+}
+.filter-select select:focus {
+  outline: none;
+  border-color: var(--blue-500, #0077B6);
+  box-shadow: 0 0 0 3px rgba(0, 119, 182, 0.12);
+}
+
+/* ── Chat Show Me button ─────────────────────────────────────── */
+.chat-showme-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--blue-500, #0077B6);
+  background: rgba(0, 119, 182, 0.08);
+  border: 1px solid rgba(0, 119, 182, 0.25);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.chat-showme-btn:hover {
+  background: rgba(0, 119, 182, 0.15);
+  border-color: rgba(0, 119, 182, 0.4);
+}

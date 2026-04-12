@@ -369,15 +369,38 @@ function DetailRow({ icon: Icon, label, value }) {
 
 // ── Main page ───────────────────────────────────────────────────
 
-export default function MaintenancePage() {
+// Translate chat-supplied filters into the page's internal filter state.
+// Chat sends keys like { status, min_priority, category, search }. The
+// page stores status + category as chip values and search as a free text
+// term. We additionally expose a minPriority filter.
+function normalizeInitialFilters(initial) {
+  if (!initial) return {};
+  return {
+    statusFilter:
+      initial.status === 'completed' ? 'completed'
+      : initial.status === 'all' ? 'all'
+      : initial.status === 'open' ? 'open'
+      : undefined,
+    categoryFilter: initial.category
+      ? normalizeCategory(initial.category)
+      : undefined,
+    minPriority: initial.min_priority || undefined,
+    searchTerm: initial.search || undefined,
+  };
+}
+
+export default function MaintenancePage({ initialFilters }) {
+  const applied = normalizeInitialFilters(initialFilters);
+
   const [workOrders, setWorkOrders] = useState(null);
   const [propertyMap, setPropertyMap] = useState({});
   const [unitMap, setUnitMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [isLive, setIsLive] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('open');
+  const [searchTerm, setSearchTerm] = useState(applied.searchTerm || '');
+  const [categoryFilter, setCategoryFilter] = useState(applied.categoryFilter || 'all');
+  const [statusFilter, setStatusFilter] = useState(applied.statusFilter || 'open');
+  const [minPriority, setMinPriority] = useState(applied.minPriority || 'low');
   const [selectedId, setSelectedId] = useState(null);
 
   const [categoryLookup, setCategoryLookup] = useState({});
@@ -606,12 +629,14 @@ export default function MaintenancePage() {
   ).length;
 
   // ── Apply filters ──────────────────────────────────────────────
+  const minPriorityRank = priorityRank(minPriority);
   const filtered = enriched
     .filter((w) => {
       if (categoryFilter !== 'all' && normalizeCategory(w.category) !== categoryFilter) return false;
       const s = statusMetaFromWo(w, statusLookup);
       if (statusFilter === 'open' && !s.isOpen) return false;
       if (statusFilter === 'completed' && s.isOpen) return false;
+      if (minPriority !== 'low' && priorityRank(w.priority) < minPriorityRank) return false;
       if (searchTerm) {
         const q = searchTerm.toLowerCase();
         return (
@@ -654,55 +679,38 @@ export default function MaintenancePage() {
         )}
       </div>
 
-      {/* Status filter row */}
-      <div className="status-filter-row">
-        <button
-          className={`status-filter-chip ${statusFilter === 'open' ? 'active' : ''}`}
-          onClick={() => setStatusFilter('open')}
-        >
-          Open <span className="chip-count">{openCount}</span>
-        </button>
-        <button
-          className={`status-filter-chip ${statusFilter === 'completed' ? 'active' : ''}`}
-          onClick={() => setStatusFilter('completed')}
-        >
-          Completed <span className="chip-count">{completedCount}</span>
-        </button>
-        <button
-          className={`status-filter-chip ${statusFilter === 'all' ? 'active' : ''}`}
-          onClick={() => setStatusFilter('all')}
-        >
-          All <span className="chip-count">{enriched.length}</span>
-        </button>
-      </div>
+      {/* Compact filter row — three native selects */}
+      <div className="filter-select-row">
+        <label className="filter-select">
+          <span className="filter-select-label">Status</span>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <option value="open">Open ({openCount})</option>
+            <option value="completed">Completed ({completedCount})</option>
+            <option value="all">All ({enriched.length})</option>
+          </select>
+        </label>
 
-      {/* Category filter row */}
-      <div className="status-filter-row" style={{ marginTop: 8 }}>
-        <button
-          className={`status-filter-chip ${categoryFilter === 'all' ? 'active' : ''}`}
-          onClick={() => setCategoryFilter('all')}
-        >
-          All types
-        </button>
-        {visibleCategories.map((key) => {
-          const meta = CATEGORY_META[key];
-          const Icon = meta.icon;
-          return (
-            <button
-              key={key}
-              className={`status-filter-chip ${categoryFilter === key ? 'active' : ''}`}
-              onClick={() => setCategoryFilter(key)}
-              style={
-                categoryFilter === key
-                  ? { background: meta.color + '15', color: meta.color, borderColor: meta.color + '66' }
-                  : undefined
-              }
-            >
-              <Icon size={12} style={{ marginRight: 4 }} />
-              {meta.label} <span className="chip-count">{categoryCounts[key]}</span>
-            </button>
-          );
-        })}
+        <label className="filter-select">
+          <span className="filter-select-label">Type</span>
+          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+            <option value="all">All types</option>
+            {visibleCategories.map((key) => (
+              <option key={key} value={key}>
+                {CATEGORY_META[key].label} ({categoryCounts[key]})
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="filter-select">
+          <span className="filter-select-label">Priority</span>
+          <select value={minPriority} onChange={(e) => setMinPriority(e.target.value)}>
+            <option value="low">Any</option>
+            <option value="medium">Medium+</option>
+            <option value="high">High+</option>
+            <option value="urgent">Urgent only</option>
+          </select>
+        </label>
       </div>
 
       <div className="dashboard-search">

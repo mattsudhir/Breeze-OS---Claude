@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import {
   Mic, MicOff, Send, Paperclip, FileText, Home, DollarSign,
   Wrench, User, Bot, ChevronDown, Building2, Loader2,
-  Volume2, VolumeX,
+  Volume2, VolumeX, ArrowRight,
 } from 'lucide-react';
 import {
   startListening, stopListening, speak, cancelSpeech,
@@ -21,6 +21,48 @@ const WELCOME_MESSAGE = {
   time: '9:00 AM',
 };
 
+// Parse a SHOWME marker from a Breeze reply.
+// Format: [SHOWME view=maintenance status=open min_priority=urgent]
+// Returns { view, filters, displayText } where displayText is the reply
+// with the marker stripped out.
+const SHOWME_REGEX = /\s*\[SHOWME\s+([^\]]+)\]\s*$/i;
+
+function parseShowMe(reply) {
+  if (!reply) return { view: null, filters: null, displayText: reply };
+  const match = reply.match(SHOWME_REGEX);
+  if (!match) return { view: null, filters: null, displayText: reply };
+
+  const body = match[1];
+  const parts = body.split(/\s+/).filter(Boolean);
+  const kv = {};
+  for (const p of parts) {
+    const eq = p.indexOf('=');
+    if (eq < 0) continue;
+    const k = p.slice(0, eq).trim();
+    const v = p.slice(eq + 1).trim();
+    if (k) kv[k] = v;
+  }
+  const view = kv.view || null;
+  delete kv.view;
+
+  return {
+    view,
+    filters: Object.keys(kv).length ? kv : null,
+    displayText: reply.replace(SHOWME_REGEX, '').trimEnd(),
+  };
+}
+
+function ShowMeButtonLabel({ view, filters }) {
+  const parts = [];
+  if (filters?.status) parts.push(filters.status);
+  if (filters?.min_priority) parts.push(`${filters.min_priority}+`);
+  if (filters?.category) parts.push(filters.category);
+  if (filters?.search) parts.push(`"${filters.search}"`);
+  const tail = parts.length ? ` (${parts.join(', ')})` : '';
+  const label = view === 'maintenance' ? 'maintenance' : view;
+  return <>Show me in {label}{tail}</>;
+}
+
 const QUICK_ACTIONS = [
   { icon: User, label: 'Who lives at...', color: '#1565C0', prompt: 'List my current tenants' },
   { icon: DollarSign, label: 'Balances', color: '#2E7D32', prompt: 'Which tenants have an outstanding balance?' },
@@ -30,7 +72,7 @@ const QUICK_ACTIONS = [
   { icon: FileText, label: 'Lease details', color: '#0077B6', prompt: "What are the lease details for Marcia Clark?" },
 ];
 
-export default function ChatHome() {
+export default function ChatHome({ onNavigate }) {
   const [messages, setMessages] = useState([WELCOME_MESSAGE]);
   const [input, setInput] = useState('');
   const [isRecording, setIsRecording] = useState(false);
@@ -92,22 +134,28 @@ export default function ChatHome() {
         return;
       }
 
-      // Append assistant turn to history so follow-ups keep context
+      // Append assistant turn to history so follow-ups keep context.
+      // Keep the raw marker in the LLM history so "show me" follow-ups
+      // retain the structured context, but strip it from the display.
       llmHistoryRef.current = [
         ...llmHistoryRef.current,
         { role: 'assistant', content: data.reply },
       ];
 
+      const { view, filters, displayText } = parseShowMe(data.reply);
+
       addMessage({
         type: 'system',
         sender: 'Breeze AI',
         avatar: 'bot',
-        text: data.reply,
+        text: displayText,
+        showMe: view ? { view, filters } : null,
       });
 
-      // Read response aloud if TTS is on
+      // Read response aloud if TTS is on (use stripped text so the
+      // marker isn't spoken verbatim)
       if (ttsEnabled && voiceSpeakSupported) {
-        speak(data.reply);
+        speak(displayText);
       }
     } catch (err) {
       addMessage({
@@ -283,6 +331,15 @@ export default function ChatHome() {
                     </div>
                     <button className="attachment-download">View</button>
                   </div>
+                )}
+                {msg.showMe && onNavigate && (
+                  <button
+                    className="chat-showme-btn"
+                    onClick={() => onNavigate(msg.showMe.view, msg.showMe.filters)}
+                  >
+                    <ShowMeButtonLabel view={msg.showMe.view} filters={msg.showMe.filters} />
+                    <ArrowRight size={14} />
+                  </button>
                 )}
               </div>
             </div>

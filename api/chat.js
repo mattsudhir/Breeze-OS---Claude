@@ -78,8 +78,8 @@ const TOOLS = [
     description:
       'List maintenance work orders / service requests. Returns summary, priority, status, category, ' +
       'and the related unit/property. Use for questions about maintenance, repairs, or open issues. ' +
-      'Supports filtering by status, minimum priority, and category. The response includes counts so ' +
-      'you can answer "how many" questions without iterating through the full list.',
+      'Supports filtering by status, minimum priority, category, and free-text search. The response ' +
+      'includes counts so you can answer "how many" questions without iterating through the full list.',
     input_schema: {
       type: 'object',
       properties: {
@@ -98,9 +98,16 @@ const TOOLS = [
         category: {
           type: 'string',
           description:
-            'Filter by ticket category. Keyword-matched against the ticket\'s category name. ' +
-            'Examples: "hvac", "plumbing", "electrical", "appliance", "pest", "locks". ' +
-            'Leave empty to include all categories.',
+            'Exact category/trade to filter by. Use this only when the user names a trade like ' +
+            '"plumbing", "electrical", "HVAC", "appliance", "pest". ' +
+            'For everything else (e.g. "mold", "leak", "gas smell", "paint"), prefer search_text.',
+        },
+        search_text: {
+          type: 'string',
+          description:
+            'Free-text keyword that is matched against the ticket summary, description, AND category. ' +
+            'Use this for questions like "mold tickets", "gas smell", "kitchen issues", "leaky faucet". ' +
+            'Prefer this over category unless the user explicitly named a trade.',
         },
       },
       required: [],
@@ -275,10 +282,19 @@ async function executeTool(name, input) {
           orders = orders.filter((o) => rankPriority(o.priority) >= threshold);
         }
 
-        // Category filter (keyword match)
+        // Category filter (exact-ish trade match)
         if (input.category) {
           const q = input.category.toLowerCase();
           orders = orders.filter((o) => (o.category || '').toLowerCase().includes(q));
+        }
+
+        // Free-text search across summary, description, and category
+        if (input.search_text) {
+          const q = input.search_text.toLowerCase();
+          orders = orders.filter((o) =>
+            (o.summary || '').toLowerCase().includes(q) ||
+            (o.category || '').toLowerCase().includes(q),
+          );
         }
 
         // Sort by priority desc, then newest first
@@ -382,7 +398,19 @@ Style:
 - If the user asks something that needs no tool call (greeting, follow-up clarification), just answer directly.
 
 Error handling (important):
-- If a tool returns an object containing an "error" field, do NOT paraphrase it as "authentication error", "session issue", or any other natural-language summary. Instead, report the error verbatim to the user prefixed with "Tool error:" so they can see exactly what Rent Manager returned. Example: "Tool error: Could not fetch work orders (HTTP 404): No resource found at /ServiceManagerIssues". Do not retry the same tool call if it just errored.`;
+- If a tool returns an object containing an "error" field, do NOT paraphrase it as "authentication error", "session issue", or any other natural-language summary. Instead, report the error verbatim to the user prefixed with "Tool error:" so they can see exactly what Rent Manager returned. Example: "Tool error: Could not fetch work orders (HTTP 404): No resource found at /ServiceManagerIssues". Do not retry the same tool call if it just errored.
+
+Show Me links:
+- When you answer a question that could reasonably be drilled into on one of the app's list pages (maintenance, properties, tenants), end your reply with a single SHOWME marker on its own line so the UI can render a "Show me" button that deep-links to that page with matching filters.
+- Marker format: [SHOWME view=<page> key1=value1 key2=value2 ...]
+  * view is one of: maintenance, properties, tenants
+  * For maintenance, valid keys are: status (open|completed|all), min_priority (urgent|high|medium|low), category (trade name), search (free text). Only include the filters you actually used in the tool call.
+- Examples:
+  * User: "How many urgent work orders?" → reply ends with [SHOWME view=maintenance status=open min_priority=urgent]
+  * User: "Any mold tickets?" → [SHOWME view=maintenance search=mold]
+  * User: "Open HVAC issues?" → [SHOWME view=maintenance status=open category=hvac]
+- Only emit a marker when the answer involves a filterable list. Skip it for greetings, explanations, or questions about individual records. Do not wrap the marker in backticks, code blocks, or extra punctuation — it must match the regex exactly.
+- The user may also verbally say "show me" as a follow-up; treat that as a request to re-emit the previous filters in a fresh marker.`;
 
 // ── Agent loop ───────────────────────────────────────────────────
 

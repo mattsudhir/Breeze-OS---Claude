@@ -13,10 +13,16 @@ function App() {
   const [showClassic, setShowClassic] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  // Filters to seed a page with when navigating from a chat Show Me link.
+  // Keyed by view id (e.g. 'maintenance') → plain object of filter values.
+  const [pendingFilters, setPendingFilters] = useState({});
 
-  const handleNavigate = (viewId) => {
+  const handleNavigate = (viewId, filters) => {
     setActiveView(viewId);
     setMobileMenuOpen(false);
+    if (filters) {
+      setPendingFilters((prev) => ({ ...prev, [viewId]: filters }));
+    }
     if (viewId === 'chat') {
       setShowClassic(false);
     } else if (viewId === 'dashboard') {
@@ -31,10 +37,12 @@ function App() {
 
   // Decide which view to render
   const renderContent = () => {
-    if (activeView === 'chat') return <ChatHome />;
+    if (activeView === 'chat') return <ChatHome onNavigate={handleNavigate} />;
     if (activeView === 'properties') return <PropertiesPage />;
     if (activeView === 'tenants') return <TenantsPage />;
-    if (activeView === 'maintenance') return <MaintenancePage />;
+    if (activeView === 'maintenance') {
+      return <MaintenancePage initialFilters={pendingFilters.maintenance} />;
+    }
     if (activeView === 'dashboard' || showClassic) {
       return <ClassicDashboard onNavigate={handleNavigate} />;
     }
