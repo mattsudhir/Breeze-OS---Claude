@@ -331,45 +331,69 @@ export default function MaintenancePage() {
 
   const [categoryLookup, setCategoryLookup] = useState({});
   const [statusLookup, setStatusLookup] = useState({});
+  const [fetchFailed, setFetchFailed] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
 
+  // Critical path: fetch work orders first on their own so the list renders
+  // as soon as possible and isn't blocked on four other cold-start calls.
   useEffect(() => {
-    async function fetchData() {
+    let cancelled = false;
+    async function fetchTickets() {
       setLoading(true);
-      const [woData, propsData, unitsData, catsData, statusesData] = await Promise.all([
-        getWorkOrders(),
+      setFetchFailed(false);
+      const woData = await getWorkOrders();
+      if (cancelled) return;
+      if (woData) {
+        setWorkOrders(woData);
+        setIsLive(true);
+      } else {
+        setFetchFailed(true);
+      }
+      setLoading(false);
+    }
+    fetchTickets();
+    return () => { cancelled = true; };
+  }, [reloadTick]);
+
+  // Background: fetch the lookup tables (properties, units, categories,
+  // statuses) in parallel. The list view doesn't need these to render —
+  // they enrich names and populate the detail-view edit dropdowns.
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchLookups() {
+      const results = await Promise.allSettled([
         getProperties(),
         getUnits(),
         getWorkOrderCategories(),
         getWorkOrderStatuses(),
       ]);
-      if (woData) {
-        setWorkOrders(woData);
-        setIsLive(true);
-      }
-      if (propsData) {
+      if (cancelled) return;
+      const [propsRes, unitsRes, catsRes, statusesRes] = results;
+
+      if (propsRes.status === 'fulfilled' && propsRes.value) {
         const map = {};
-        propsData.forEach((p) => { map[p.id] = p.name; });
+        propsRes.value.forEach((p) => { map[p.id] = p.name; });
         setPropertyMap(map);
       }
-      if (unitsData) {
+      if (unitsRes.status === 'fulfilled' && unitsRes.value) {
         const map = {};
-        unitsData.forEach((u) => { map[u.id] = u.name; });
+        unitsRes.value.forEach((u) => { map[u.id] = u.name; });
         setUnitMap(map);
       }
-      if (catsData) {
+      if (catsRes.status === 'fulfilled' && catsRes.value) {
         const map = {};
-        catsData.forEach((c) => { map[c.id] = c.name; });
+        catsRes.value.forEach((c) => { map[c.id] = c.name; });
         setCategoryLookup(map);
       }
-      if (statusesData) {
+      if (statusesRes.status === 'fulfilled' && statusesRes.value) {
         const map = {};
-        statusesData.forEach((s) => { map[s.id] = s; });
+        statusesRes.value.forEach((s) => { map[s.id] = s; });
         setStatusLookup(map);
       }
-      setLoading(false);
     }
-    fetchData();
-  }, []);
+    fetchLookups();
+    return () => { cancelled = true; };
+  }, [reloadTick]);
 
   // Enrich work orders with names resolved client-side from lookup maps
   const enriched = workOrders
@@ -399,13 +423,32 @@ export default function MaintenancePage() {
     );
   }
 
+  if (fetchFailed) {
+    return (
+      <div className="properties-page">
+        <div className="empty-state">
+          <WifiOff size={40} />
+          <h3>Couldn't reach Rent Manager</h3>
+          <p>The work order endpoint didn't respond in time. This is usually a cold-start timeout.</p>
+          <button
+            className="btn-primary"
+            style={{ marginTop: 16 }}
+            onClick={() => setReloadTick((t) => t + 1)}
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!enriched || enriched.length === 0) {
     return (
       <div className="properties-page">
         <div className="empty-state">
           <WifiOff size={40} />
           <h3>No maintenance tickets found</h3>
-          <p>Couldn't reach Rent Manager, or there are no service orders on file.</p>
+          <p>Rent Manager returned an empty list. There are no service orders on file.</p>
         </div>
       </div>
     );
@@ -430,11 +473,7 @@ export default function MaintenancePage() {
         categories={categoriesList}
         statuses={statusesList}
         onBack={() => setSelectedId(null)}
-        onUpdated={async () => {
-          // Refetch the list so the updated ticket reflects on the list view
-          const fresh = await getWorkOrders();
-          if (fresh) setWorkOrders(fresh);
-        }}
+        onUpdated={() => setReloadTick((t) => t + 1)}
       />
     );
   }
