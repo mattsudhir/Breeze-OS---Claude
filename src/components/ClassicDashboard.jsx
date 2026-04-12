@@ -125,7 +125,10 @@ export default function ClassicDashboard({ onNavigate }) {
     { label: 'Total Units', value: String(totalUnits), icon: Building2, color: '#0077B6', trend: null, nav: 'properties' },
     { label: 'Occupied', value: String(occupiedUnits), icon: Home, color: '#2E7D32', trend: null, nav: 'properties' },
     { label: 'Vacant', value: String(vacantUnits), icon: AlertCircle, color: '#E65100', trend: null, nav: 'properties' },
-    { label: 'Properties', value: String(properties ? properties.length : 4), icon: Building2, color: '#1565C0', trend: null, nav: 'properties' },
+    // The Properties card opens the dedicated drilldown — a sortable
+    // portfolio table with per-property metrics — rather than the
+    // sidebar list view, which stays at 'properties'.
+    { label: 'Properties', value: String(properties ? properties.length : 4), icon: Building2, color: '#1565C0', trend: null, nav: 'properties-drilldown' },
   ];
 
   // Maintenance: use live data or demo fallback

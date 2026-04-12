@@ -11,6 +11,7 @@ import WorkflowsPage from './components/WorkflowsPage';
 import LeasingPage from './components/LeasingPage';
 import AccountingPage from './components/AccountingPage';
 import ReportsPage from './components/ReportsPage';
+import PropertiesDrilldown from './components/PropertiesDrilldown';
 import './App.css';
 
 function App() {
@@ -28,10 +29,14 @@ function App() {
     if (filters) {
       setPendingFilters((prev) => ({ ...prev, [viewId]: filters }));
     }
-    if (viewId === 'chat') {
-      setShowClassic(false);
-    } else if (viewId === 'dashboard') {
+    // showClassic tracks whether the dashboard is the *default* surface.
+    // Only the dashboard itself sets it true; every other destination
+    // clears it so a dashboard stat card click lands cleanly on the
+    // target page without the dashboard lingering underneath.
+    if (viewId === 'dashboard') {
       setShowClassic(true);
+    } else {
+      setShowClassic(false);
     }
   };
 
@@ -53,6 +58,7 @@ function App() {
     if (activeView === 'leasing') return <LeasingPage />;
     if (activeView === 'accounting') return <AccountingPage />;
     if (activeView === 'reports') return <ReportsPage />;
+    if (activeView === 'properties-drilldown') return <PropertiesDrilldown />;
     if (activeView === 'dashboard' || showClassic) {
       return <ClassicDashboard onNavigate={handleNavigate} />;
     }
