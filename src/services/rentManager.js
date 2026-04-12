@@ -173,8 +173,10 @@ export async function updateTenant(id, patch) {
   if ('status' in patch) record.Status = patch.status;
   if ('comment' in patch) record.Comment = patch.comment;
 
+  // Rent Manager uses POST as upsert: if TenantID is present it updates,
+  // otherwise it creates. PUT is not supported on /Tenants in this RM version.
   return rmFetch(`/Tenants`, {
-    method: 'PUT',
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify([record]),
     throwOnError: true,
