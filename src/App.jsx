@@ -5,6 +5,7 @@ import ChatHome from './components/ChatHome';
 import ClassicDashboard from './components/ClassicDashboard';
 import PropertiesPage from './components/PropertiesPage';
 import TenantsPage from './components/TenantsPage';
+import MaintenancePage from './components/MaintenancePage';
 import './App.css';
 
 function App() {
@@ -33,6 +34,7 @@ function App() {
     if (activeView === 'chat') return <ChatHome />;
     if (activeView === 'properties') return <PropertiesPage />;
     if (activeView === 'tenants') return <TenantsPage />;
+    if (activeView === 'maintenance') return <MaintenancePage />;
     if (activeView === 'dashboard' || showClassic) {
       return <ClassicDashboard onNavigate={handleNavigate} />;
     }

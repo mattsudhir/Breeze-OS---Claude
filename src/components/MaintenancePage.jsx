@@ -1,0 +1,405 @@
+import { useState, useEffect } from 'react';
+import {
+  Wrench, Search, CheckCircle2, AlertCircle, Loader2, WifiOff,
+  ChevronLeft, Building2, Home, Clock, Calendar, User as UserIcon,
+  AlertTriangle, Zap, Droplet, Flame, Wind, Lightbulb, Hammer,
+} from 'lucide-react';
+import { getWorkOrders } from '../services/rentManager';
+
+// ── Helpers ──────────────────────────────────────────────────────
+
+function normalizeCategory(raw) {
+  const c = (raw || '').toLowerCase();
+  if (!c) return 'other';
+  if (c.includes('hvac') || c.includes('heat') || c.includes('air') || c.includes('cool')) return 'hvac';
+  if (c.includes('plumb') || c.includes('leak') || c.includes('water') || c.includes('pipe') || c.includes('toilet') || c.includes('faucet') || c.includes('drain')) return 'plumbing';
+  if (c.includes('electric') || c.includes('outlet') || c.includes('wiring') || c.includes('light')) return 'electrical';
+  if (c.includes('appliance') || c.includes('refrig') || c.includes('dishwash') || c.includes('dryer') || c.includes('washer') || c.includes('oven') || c.includes('stove')) return 'appliance';
+  if (c.includes('pest') || c.includes('roach') || c.includes('rodent') || c.includes('bug')) return 'pest';
+  if (c.includes('lock') || c.includes('key') || c.includes('door')) return 'locks';
+  if (c.includes('general') || c.includes('maint')) return 'general';
+  return 'other';
+}
+
+const CATEGORY_META = {
+  hvac:       { label: 'HVAC',       icon: Wind,       color: '#1565C0' },
+  plumbing:   { label: 'Plumbing',   icon: Droplet,    color: '#00838F' },
+  electrical: { label: 'Electrical', icon: Zap,        color: '#F9A825' },
+  appliance:  { label: 'Appliance',  icon: Lightbulb,  color: '#6A1B9A' },
+  pest:       { label: 'Pest',       icon: Flame,      color: '#C62828' },
+  locks:      { label: 'Locks',      icon: Hammer,     color: '#546E7A' },
+  general:    { label: 'General',    icon: Wrench,     color: '#2E7D32' },
+  other:      { label: 'Other',      icon: Wrench,     color: '#757575' },
+};
+
+function priorityRank(p) {
+  const pl = (p || '').toLowerCase();
+  if (pl.includes('emerg') || pl.includes('urgent')) return 4;
+  if (pl.includes('high')) return 3;
+  if (pl.includes('med') || pl.includes('normal')) return 2;
+  if (pl.includes('low')) return 1;
+  return 2;
+}
+
+function priorityMeta(p) {
+  const r = priorityRank(p);
+  if (r === 4) return { label: 'Urgent', className: 'priority-urgent', icon: AlertTriangle };
+  if (r === 3) return { label: 'High',   className: 'priority-high',   icon: AlertCircle };
+  if (r === 2) return { label: 'Medium', className: 'priority-medium', icon: Clock };
+  return { label: 'Low', className: 'priority-low', icon: Clock };
+}
+
+function statusMeta(s) {
+  const sl = (s || '').toLowerCase();
+  if (sl.includes('complete') || sl.includes('closed') || sl.includes('resolved')) {
+    return { label: 'Completed', className: 'status-completed', isOpen: false };
+  }
+  if (sl.includes('progress') || sl.includes('active') || sl.includes('working')) {
+    return { label: 'In Progress', className: 'status-in_progress', isOpen: true };
+  }
+  if (sl.includes('assign') || sl.includes('scheduled')) {
+    return { label: 'Assigned', className: 'status-assigned', isOpen: true };
+  }
+  if (sl.includes('hold') || sl.includes('wait')) {
+    return { label: 'On Hold', className: 'status-onhold', isOpen: true };
+  }
+  return { label: s || 'Open', className: 'status-open', isOpen: true };
+}
+
+function formatDate(d) {
+  if (!d) return '—';
+  try {
+    return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  } catch {
+    return d;
+  }
+}
+
+// ── Detail view ──────────────────────────────────────────────────
+
+function WorkOrderDetail({ workOrder, onBack }) {
+  const catKey = normalizeCategory(workOrder.category);
+  const cat = CATEGORY_META[catKey];
+  const CatIcon = cat.icon;
+  const pri = priorityMeta(workOrder.priority);
+  const PriIcon = pri.icon;
+  const status = statusMeta(workOrder.status);
+
+  return (
+    <div className="properties-page">
+      <button className="back-link" onClick={onBack}>
+        <ChevronLeft size={14} /> Back to all maintenance
+      </button>
+
+      <div className="property-detail-header">
+        <div
+          className="wo-detail-icon"
+          style={{ background: cat.color + '15', color: cat.color }}
+        >
+          <CatIcon size={28} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <h2>{workOrder.summary || `Work Order ${workOrder.id}`}</h2>
+          <p className="property-detail-address">
+            <span className={`unit-status ${status.className}`}>{status.label}</span>
+            <span className={`unit-status ${pri.className}`} style={{ marginLeft: 6 }}>
+              <PriIcon size={12} /> {pri.label}
+            </span>
+            <span className="tenant-display-id">#{workOrder.displayId || workOrder.id}</span>
+          </p>
+        </div>
+      </div>
+
+      <div className="dashboard-card">
+        <div className="card-header">
+          <h3><Wrench size={18} /> Work Order Details</h3>
+        </div>
+        <div className="tenant-detail-list">
+          <DetailRow icon={CatIcon} label="Category" value={workOrder.category || cat.label} />
+          <DetailRow
+            icon={Building2}
+            label="Property"
+            value={workOrder.propertyName || (workOrder.propertyId ? `Property #${workOrder.propertyId}` : '—')}
+          />
+          <DetailRow
+            icon={Home}
+            label="Unit"
+            value={workOrder.unitName || (workOrder.unitId ? `Unit #${workOrder.unitId}` : '—')}
+          />
+          <DetailRow icon={UserIcon} label="Assigned to" value={workOrder.assignedTo || '—'} />
+          <DetailRow icon={Calendar} label="Created" value={formatDate(workOrder.createdDate)} />
+          <DetailRow icon={Calendar} label="Scheduled" value={formatDate(workOrder.scheduledDate)} />
+          {workOrder.completedDate && (
+            <DetailRow icon={CheckCircle2} label="Completed" value={formatDate(workOrder.completedDate)} />
+          )}
+        </div>
+      </div>
+
+      {workOrder.description && workOrder.description !== workOrder.summary && (
+        <div className="dashboard-card">
+          <div className="card-header">
+            <h3><Wrench size={18} /> Description</h3>
+          </div>
+          <p className="tenant-notes">{workOrder.description}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DetailRow({ icon: Icon, label, value }) {
+  return (
+    <div className="tenant-detail-row">
+      <div className="tenant-detail-icon"><Icon size={18} /></div>
+      <div className="tenant-detail-info">
+        <span className="tenant-detail-label">{label}</span>
+        <span className="tenant-detail-value">{value}</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Main page ───────────────────────────────────────────────────
+
+export default function MaintenancePage() {
+  const [workOrders, setWorkOrders] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [isLive, setIsLive] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('open');
+  const [selectedId, setSelectedId] = useState(null);
+
+  useEffect(() => {
+    async function fetchData() {
+      setLoading(true);
+      const data = await getWorkOrders();
+      if (data) {
+        setWorkOrders(data);
+        setIsLive(true);
+      }
+      setLoading(false);
+    }
+    fetchData();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="properties-page">
+        <div className="loading-state">
+          <Loader2 size={28} className="spin" />
+          <span>Loading maintenance tickets from Rent Manager...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!workOrders || workOrders.length === 0) {
+    return (
+      <div className="properties-page">
+        <div className="empty-state">
+          <WifiOff size={40} />
+          <h3>No maintenance tickets found</h3>
+          <p>Couldn't reach Rent Manager, or there are no service orders on file.</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Detail view
+  if (selectedId) {
+    const wo = workOrders.find((w) => w.id === selectedId);
+    if (!wo) {
+      setSelectedId(null);
+      return null;
+    }
+    return <WorkOrderDetail workOrder={wo} onBack={() => setSelectedId(null)} />;
+  }
+
+  // ── Counts used for filter chip labels ─────────────────────────
+  const categoryCounts = workOrders.reduce((acc, w) => {
+    const k = normalizeCategory(w.category);
+    acc[k] = (acc[k] || 0) + 1;
+    return acc;
+  }, {});
+
+  const openCount = workOrders.filter((w) => statusMeta(w.status).isOpen).length;
+  const completedCount = workOrders.length - openCount;
+  const urgentOpenCount = workOrders.filter(
+    (w) => statusMeta(w.status).isOpen && priorityRank(w.priority) >= 3,
+  ).length;
+
+  // ── Apply filters ──────────────────────────────────────────────
+  const filtered = workOrders
+    .filter((w) => {
+      if (categoryFilter !== 'all' && normalizeCategory(w.category) !== categoryFilter) return false;
+      const s = statusMeta(w.status);
+      if (statusFilter === 'open' && !s.isOpen) return false;
+      if (statusFilter === 'completed' && s.isOpen) return false;
+      if (searchTerm) {
+        const q = searchTerm.toLowerCase();
+        return (
+          (w.summary || '').toLowerCase().includes(q) ||
+          (w.description || '').toLowerCase().includes(q) ||
+          (w.propertyName || '').toLowerCase().includes(q) ||
+          (w.unitName || '').toLowerCase().includes(q) ||
+          (w.category || '').toLowerCase().includes(q)
+        );
+      }
+      return true;
+    })
+    // Sort open items by priority desc, then date desc
+    .sort((a, b) => {
+      const ap = priorityRank(a.priority);
+      const bp = priorityRank(b.priority);
+      if (ap !== bp) return bp - ap;
+      const ad = new Date(a.createdDate || 0).getTime();
+      const bd = new Date(b.createdDate || 0).getTime();
+      return bd - ad;
+    });
+
+  // Only show category chips that actually have items
+  const visibleCategories = Object.keys(CATEGORY_META).filter((k) => categoryCounts[k] > 0);
+
+  return (
+    <div className="properties-page">
+      <div className="data-source-banner" style={{
+        display: 'flex', alignItems: 'center', gap: '8px',
+        padding: '8px 14px', marginBottom: '16px', borderRadius: '8px',
+        fontSize: '12px', fontWeight: 600,
+        background: isLive ? '#E8F5E9' : '#FFF3E0',
+        color: isLive ? '#2E7D32' : '#E65100',
+        border: `1px solid ${isLive ? '#C8E6C9' : '#FFE0B2'}`,
+      }}>
+        {isLive ? (
+          <><CheckCircle2 size={14} /> Live data — {workOrders.length} tickets ({openCount} open, {urgentOpenCount} urgent/high)</>
+        ) : (
+          <><WifiOff size={14} /> Demo data</>
+        )}
+      </div>
+
+      {/* Status filter row */}
+      <div className="status-filter-row">
+        <button
+          className={`status-filter-chip ${statusFilter === 'open' ? 'active' : ''}`}
+          onClick={() => setStatusFilter('open')}
+        >
+          Open <span className="chip-count">{openCount}</span>
+        </button>
+        <button
+          className={`status-filter-chip ${statusFilter === 'completed' ? 'active' : ''}`}
+          onClick={() => setStatusFilter('completed')}
+        >
+          Completed <span className="chip-count">{completedCount}</span>
+        </button>
+        <button
+          className={`status-filter-chip ${statusFilter === 'all' ? 'active' : ''}`}
+          onClick={() => setStatusFilter('all')}
+        >
+          All <span className="chip-count">{workOrders.length}</span>
+        </button>
+      </div>
+
+      {/* Category filter row */}
+      <div className="status-filter-row" style={{ marginTop: 8 }}>
+        <button
+          className={`status-filter-chip ${categoryFilter === 'all' ? 'active' : ''}`}
+          onClick={() => setCategoryFilter('all')}
+        >
+          All types
+        </button>
+        {visibleCategories.map((key) => {
+          const meta = CATEGORY_META[key];
+          const Icon = meta.icon;
+          return (
+            <button
+              key={key}
+              className={`status-filter-chip ${categoryFilter === key ? 'active' : ''}`}
+              onClick={() => setCategoryFilter(key)}
+              style={
+                categoryFilter === key
+                  ? { background: meta.color + '15', color: meta.color, borderColor: meta.color + '66' }
+                  : undefined
+              }
+            >
+              <Icon size={12} style={{ marginRight: 4 }} />
+              {meta.label} <span className="chip-count">{categoryCounts[key]}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="dashboard-search">
+        <Search size={18} />
+        <input
+          type="text"
+          placeholder="Search by description, property, unit, or type..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+      </div>
+
+      <div className="tenants-list">
+        {filtered.map((w) => {
+          const catKey = normalizeCategory(w.category);
+          const cat = CATEGORY_META[catKey];
+          const CatIcon = cat.icon;
+          const pri = priorityMeta(w.priority);
+          const PriIcon = pri.icon;
+          const status = statusMeta(w.status);
+
+          return (
+            <button
+              key={w.id}
+              className="tenant-row"
+              onClick={() => setSelectedId(w.id)}
+            >
+              <div
+                className="tenant-avatar"
+                style={{ background: cat.color + '15', color: cat.color }}
+              >
+                <CatIcon size={22} />
+              </div>
+              <div className="tenant-info">
+                <span className="tenant-name">{w.summary || `Work Order ${w.id}`}</span>
+                <div className="tenant-contact">
+                  {w.propertyName && (
+                    <span className="tenant-contact-item">
+                      <Building2 size={12} /> {w.propertyName}
+                    </span>
+                  )}
+                  {w.unitName && (
+                    <span className="tenant-contact-item">
+                      <Home size={12} /> {w.unitName}
+                    </span>
+                  )}
+                  {w.category && (
+                    <span className="tenant-contact-item">
+                      {w.category}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="wo-badges">
+                <span className={`unit-status ${pri.className}`}>
+                  <PriIcon size={12} />
+                  {pri.label}
+                </span>
+                <span className={`unit-status ${status.className}`}>
+                  {status.label}
+                </span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {filtered.length === 0 && (
+        <div className="empty-state">
+          <Search size={32} />
+          <p>No tickets match your filters</p>
+        </div>
+      )}
+    </div>
+  );
+}

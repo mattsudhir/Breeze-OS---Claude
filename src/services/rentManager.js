@@ -200,19 +200,51 @@ export async function updateTenant(id, patch) {
 // ── Service Manager (Maintenance / Work Orders) ─────────────────
 
 export async function getWorkOrders() {
-  const data = await rmFetch('/ServiceManagerOrders');
+  // Ask RM for related entities so we can show property name, unit, category, etc.
+  const data = await rmFetch(
+    '/ServiceManagerOrders?embeds=Property,Unit,Category,ServiceManagerIssues',
+  );
   if (!data || !Array.isArray(data)) return null;
 
-  return data.map((wo) => ({
-    id: wo.ServiceManagerOrderID || wo.OrderID,
-    summary: wo.Summary || wo.Description || '',
-    status: wo.Status || '',
-    priority: wo.Priority || '',
-    propertyId: wo.PropertyID,
-    unitId: wo.UnitID,
-    createdDate: wo.CreateDate || wo.DateCreated,
-    raw: wo,
-  }));
+  return data.map((wo) => {
+    // RM field names vary by version; try a few
+    const category =
+      wo.Category?.Name ||
+      wo.CategoryName ||
+      wo.ServiceType ||
+      wo.Type ||
+      wo.Trade ||
+      '';
+    const issues = Array.isArray(wo.ServiceManagerIssues) ? wo.ServiceManagerIssues : [];
+    const firstIssue = issues[0] || {};
+    const summary =
+      wo.Summary ||
+      wo.Description ||
+      firstIssue.Description ||
+      firstIssue.Summary ||
+      '';
+
+    return {
+      id: wo.ServiceManagerOrderID || wo.OrderID || wo.ID,
+      displayId: wo.ServiceManagerOrderDisplayID || `WO-${wo.ServiceManagerOrderID || wo.OrderID}`,
+      summary,
+      description: wo.Description || firstIssue.Description || '',
+      status: wo.Status || '',
+      priority: wo.Priority || 'normal',
+      category,
+      propertyId: wo.PropertyID,
+      propertyName: wo.Property?.Name || wo.Property?.ShortName || '',
+      unitId: wo.UnitID,
+      unitName: wo.Unit?.Name || '',
+      createdDate: wo.CreateDate || wo.DateCreated || wo.CreatedDate,
+      updatedDate: wo.UpdateDate || wo.DateUpdated,
+      scheduledDate: wo.ScheduledDate,
+      completedDate: wo.CompletedDate || wo.DateCompleted,
+      assignedTo: wo.AssignedTo || wo.AssignedUser || '',
+      issueCount: issues.length,
+      raw: wo,
+    };
+  });
 }
 
 // ── Charges / Accounting ────────────────────────────────────────

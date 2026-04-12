@@ -2006,3 +2006,75 @@
   color: #C62828;
   border: 1px solid #FFCDD2;
 }
+
+/* ── Maintenance page ────────────────────────────────────────── */
+
+/* Priority pills — fill in the colors the existing priority- classes
+   assumed but didn't set when used with .unit-status */
+.unit-status.priority-urgent {
+  background: #FFEBEE;
+  color: #B71C1C;
+  border: 1px solid #FFCDD2;
+}
+.unit-status.priority-high {
+  background: #FFF3E0;
+  color: #BF360C;
+  border: 1px solid #FFE0B2;
+}
+.unit-status.priority-medium {
+  background: #FFF8E1;
+  color: #E65100;
+  border: 1px solid #FFECB3;
+}
+.unit-status.priority-low {
+  background: #E8F5E9;
+  color: #2E7D32;
+  border: 1px solid #C8E6C9;
+}
+
+/* Status pills on the maintenance list */
+.unit-status.status-open {
+  background: #E3F2FD;
+  color: #1565C0;
+  border: 1px solid #BBDEFB;
+}
+.unit-status.status-assigned {
+  background: #FFF3E0;
+  color: #E65100;
+  border: 1px solid #FFE0B2;
+}
+.unit-status.status-in_progress {
+  background: #F3E5F5;
+  color: #6A1B9A;
+  border: 1px solid #E1BEE7;
+}
+.unit-status.status-completed {
+  background: #E8F5E9;
+  color: #2E7D32;
+  border: 1px solid #C8E6C9;
+}
+.unit-status.status-onhold {
+  background: #ECEFF1;
+  color: #546E7A;
+  border: 1px solid #CFD8DC;
+}
+
+/* Stack priority + status pills vertically on each list row */
+.wo-badges {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* Large icon in the work order detail header — matches tenant-avatar-large */
+.wo-detail-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
