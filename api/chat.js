@@ -22,15 +22,17 @@ const TOOLS = [
   {
     name: 'search_tenants',
     description:
-      'Search for tenants by name, email, or phone. Use this when the user asks about a specific person. ' +
-      'Returns a list of matching tenants with id, name, email, phone, status, and current unit/property if available. ' +
-      'If the user asks a follow-up question about one tenant, use get_tenant_details with the id from this list.',
+      'Find tenants by name. Use this as a lookup step when the user asks about a specific person — ' +
+      'it returns only id, display_id, name, and status. ' +
+      'IMPORTANT: This tool does NOT return email, phone, lease, or balance. To get contact info or any ' +
+      'other detail about a specific tenant, ALWAYS call get_tenant_details with the id from this list. ' +
+      'Never answer questions about a tenant\'s email, phone, lease, or balance using only search_tenants results.',
     input_schema: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
-          description: 'Partial or full name, email, or phone number to search for. Leave empty to list all tenants.',
+          description: 'Partial or full name to search for. Leave empty to list all tenants.',
         },
       },
       required: [],
@@ -102,16 +104,24 @@ async function executeTool(name, input) {
           return { error: `Could not fetch tenants: ${res.status}` };
         }
         const q = (input.query || '').toLowerCase().trim();
-        let tenants = res.data.map(mapTenantSummary);
+        // Only return lookup fields — no email/phone — so the model is forced
+        // to call get_tenant_details for any contact info, which hits the
+        // individual endpoint (fresh) rather than the list endpoint (can be stale).
+        let tenants = res.data.map((t) => ({
+          id: t.TenantID,
+          display_id: t.TenantDisplayID || `t${t.TenantID}`,
+          name:
+            [t.FirstName, t.LastName].filter(Boolean).join(' ') || `Tenant ${t.TenantID}`,
+          status: t.Status || '',
+        }));
         if (q) {
-          tenants = tenants.filter(
-            (t) =>
-              t.name.toLowerCase().includes(q) ||
-              (t.email || '').toLowerCase().includes(q) ||
-              (t.phone || '').toLowerCase().includes(q),
-          );
+          tenants = tenants.filter((t) => t.name.toLowerCase().includes(q));
         }
-        return { count: tenants.length, tenants: tenants.slice(0, 20) };
+        return {
+          count: tenants.length,
+          tenants: tenants.slice(0, 20),
+          note: 'Contact info not included. Call get_tenant_details for email, phone, lease, or balance.',
+        };
       }
 
       case 'get_tenant_details': {
@@ -195,19 +205,6 @@ async function executeTool(name, input) {
   }
 }
 
-function mapTenantSummary(t) {
-  return {
-    id: t.TenantID,
-    display_id: t.TenantDisplayID,
-    name: [t.FirstName, t.LastName].filter(Boolean).join(' ') || `Tenant ${t.TenantID}`,
-    email: t.Email || '',
-    phone: t.Phone || t.CellPhone || '',
-    status: t.Status || '',
-    property_id: t.PropertyID,
-    unit_id: t.UnitID,
-  };
-}
-
 function mapTenantFull(t) {
   if (!t) return { error: 'Tenant not found' };
   const leases = Array.isArray(t.Leases) ? t.Leases : [];
@@ -259,7 +256,11 @@ function mapTenantFull(t) {
 
 const SYSTEM_PROMPT = `You are Breeze AI, a friendly and efficient property-management assistant built on top of Rent Manager. You help property managers answer questions about their portfolio — tenants, properties, units, leases, maintenance, and balances.
 
-You have tools to query Rent Manager live. Use them whenever the user asks about real data. Prefer calling tools over guessing. When a user asks about a specific person, start with search_tenants, then drill into get_tenant_details if you need lease, balance, or contact specifics.
+You have tools to query Rent Manager live. Use them whenever the user asks about real data. Prefer calling tools over guessing.
+
+When a user asks about a specific tenant:
+1. Call search_tenants first to find the right TenantID (it returns only name/id/status — no contact info).
+2. For ANY question about that tenant's email, phone, lease, balance, or address, you MUST call get_tenant_details with that id. Do not answer contact or financial questions using only search_tenants — that data is not included there.
 
 Style:
 - Conversational and concise. Don't over-explain unless asked.
