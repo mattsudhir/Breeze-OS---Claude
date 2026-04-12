@@ -294,40 +294,29 @@ export async function getWorkOrder(id) {
   return Array.isArray(data) ? data[0] : data;
 }
 
-// Update a work order using the same fetch-merge-POST pattern as tenants.
+// Update a work order via a MINIMAL PATCH-style POST.
 //
-// Per the RM schema, writable work order fields are:
-//   Title (string)     — NOT "Summary"
-//   Description (string)
-//   CategoryID (number) — NOT "ServiceManagerCategoryID"
-//   StatusID (number)   — NOT "ServiceManagerStatusID"
-//   PriorityID (number) — NOT "Priority" string. RM rejects strings like
-//                         "High" with an enum conversion error.
+// Writable fields per the RM schema (issue.schema.js):
+//   Title, Description, CategoryID, StatusID, PriorityID
+//
+// Earlier we tried merging the full existing record, but POSTing the whole
+// blob back caused RM to recompute derived fields (Status, IsClosed, etc.)
+// from nested objects in the GET response, which mutated fields the user
+// hadn't touched. Sending only the PK plus the changed fields avoids that
+// because RM leaves anything we don't send alone.
 export async function updateWorkOrder(id, patch) {
   if (!id) throw new Error('updateWorkOrder requires an id');
 
-  const existing = await rmFetch(`/ServiceManagerIssues/${id}`);
-  if (!existing) throw new Error('Could not load work order before update');
-  const current = Array.isArray(existing) ? existing[0] : existing;
+  const record = { ServiceManagerIssueID: id };
 
-  const record = { ...current };
   if ('summary' in patch) {
     record.Title = patch.summary;
-    // Keep Summary too in case the record round-trips via a different version
-    record.Summary = patch.summary;
   }
   if ('description' in patch) record.Description = patch.description;
-  if ('priorityId' in patch) {
-    record.PriorityID = Number(patch.priorityId);
-    // Clear any inherited string Priority so RM's converter doesn't see it
-    delete record.Priority;
-  }
+  if ('priorityId' in patch) record.PriorityID = Number(patch.priorityId);
   if ('categoryId' in patch) record.CategoryID = Number(patch.categoryId);
-  if ('statusId' in patch) record.StatusID = Number(patch.statusId);
-  if ('assignedTo' in patch) record.AssignedTo = patch.assignedTo;
-
-  // Ensure PK stays set
-  record.ServiceManagerIssueID = id;
+  if ('statusId' in patch)   record.StatusID   = Number(patch.statusId);
+  if ('assignedTo' in patch) record.AssignedToUserID = patch.assignedTo;
 
   return rmFetch(`/ServiceManagerIssues`, {
     method: 'POST',

@@ -8,7 +8,7 @@ import {
 import {
   getWorkOrders, getProperties, getUnits,
   getWorkOrderCategories, getWorkOrderStatuses, getWorkOrderPriorities,
-  updateWorkOrder,
+  updateWorkOrder, getWorkOrder,
 } from '../services/rentManager';
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -91,12 +91,19 @@ function WorkOrderDetail({ workOrder, categories, statuses, priorities, onBack, 
   const status = statusMeta(workOrder.status);
 
   const [editing, setEditing] = useState(false);
+  const [editLoading, setEditLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [saveOk, setSaveOk] = useState(false);
   const [form, setForm] = useState({});
 
-  const startEdit = () => {
+  const startEdit = async () => {
+    setSaveError(null);
+    setSaveOk(false);
+    setEditing(true);
+    setEditLoading(true);
+
+    // Seed from the list-view record first for an instant UI
     setForm({
       summary: workOrder.summary || '',
       description: workOrder.description || '',
@@ -104,9 +111,25 @@ function WorkOrderDetail({ workOrder, categories, statuses, priorities, onBack, 
       categoryId: workOrder.categoryId || '',
       statusId: workOrder.statusId || '',
     });
-    setSaveError(null);
-    setSaveOk(false);
-    setEditing(true);
+
+    // Then overwrite with a fresh record so the form reflects the current
+    // server state rather than whatever was cached in the list
+    try {
+      const fresh = await getWorkOrder(workOrder.id);
+      if (fresh) {
+        setForm({
+          summary: fresh.Title || fresh.Summary || fresh.Description || '',
+          description: fresh.Description || '',
+          priorityId: fresh.PriorityID || '',
+          categoryId: fresh.CategoryID || '',
+          statusId: fresh.StatusID || '',
+        });
+      }
+    } catch {
+      // fall through — form already has list-view values as a fallback
+    } finally {
+      setEditLoading(false);
+    }
   };
 
   const cancelEdit = () => {
@@ -186,7 +209,14 @@ function WorkOrderDetail({ workOrder, categories, statuses, priorities, onBack, 
       {editing ? (
         <div className="dashboard-card">
           <div className="card-header">
-            <h3><Edit3 size={18} /> Edit Work Order</h3>
+            <h3>
+              <Edit3 size={18} /> Edit Work Order
+              {editLoading && (
+                <span style={{ marginLeft: 10, fontSize: 12, color: '#6c757d', fontWeight: 400 }}>
+                  <Loader2 size={12} className="spin" /> refreshing...
+                </span>
+              )}
+            </h3>
           </div>
           <form
             className="tenant-edit-form"
