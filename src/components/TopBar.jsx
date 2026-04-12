@@ -1,9 +1,12 @@
-import { Bell, Search, ToggleLeft, ToggleRight, MessageSquare, LayoutDashboard } from 'lucide-react';
+import { Bell, Menu, MessageSquare, LayoutDashboard } from 'lucide-react';
 
-export default function TopBar({ showClassic, onToggleClassic, activeView }) {
+export default function TopBar({ showClassic, onToggleClassic, activeView, onMenuToggle }) {
   return (
     <header className="topbar">
       <div className="topbar-left">
+        <button className="mobile-menu-btn" onClick={onMenuToggle} title="Menu">
+          <Menu size={22} />
+        </button>
         <h1 className="topbar-title">
           {activeView === 'chat' ? 'Chat Home' :
            activeView === 'dashboard' ? 'Dashboard' :

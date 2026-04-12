@@ -20,9 +20,9 @@ const NAV_ITEMS = [
   { id: 'help', icon: HelpCircle, label: 'Help', section: 'bottom' },
 ];
 
-export default function Sidebar({ activeView, onNavigate, collapsed, onToggleCollapse }) {
+export default function Sidebar({ activeView, onNavigate, collapsed, onToggleCollapse, mobileOpen }) {
   return (
-    <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+    <aside className={`sidebar ${collapsed ? 'collapsed' : ''} ${mobileOpen ? 'mobile-open' : ''}`}>
       <div className="sidebar-header">
         <BreezeLogo size={collapsed ? 32 : 36} showText={!collapsed} />
         <button className="sidebar-collapse-btn" onClick={onToggleCollapse}>

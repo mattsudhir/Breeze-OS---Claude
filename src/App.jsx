@@ -9,9 +9,11 @@ function App() {
   const [activeView, setActiveView] = useState('chat');
   const [showClassic, setShowClassic] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const handleNavigate = (viewId) => {
     setActiveView(viewId);
+    setMobileMenuOpen(false);
     if (viewId === 'chat') {
       setShowClassic(false);
     } else if (viewId === 'dashboard') {
@@ -29,17 +31,22 @@ function App() {
 
   return (
     <div className={`app-layout ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      {mobileMenuOpen && (
+        <div className="mobile-overlay" onClick={() => setMobileMenuOpen(false)} />
+      )}
       <Sidebar
         activeView={activeView}
         onNavigate={handleNavigate}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+        mobileOpen={mobileMenuOpen}
       />
       <div className="main-content">
         <TopBar
           showClassic={showClassicView}
           onToggleClassic={handleToggleClassic}
           activeView={activeView}
+          onMenuToggle={() => setMobileMenuOpen(!mobileMenuOpen)}
         />
         <main className="content-area">
           {showClassicView ? <ClassicDashboard /> : <ChatHome />}
