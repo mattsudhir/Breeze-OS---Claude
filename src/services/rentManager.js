@@ -226,11 +226,13 @@ export async function updateTenant(id, patch) {
 // tickets live under /ServiceManagerIssues (not /ServiceManagerOrders).
 // Categories and statuses are their own endpoints we can resolve from.
 
-export async function getWorkOrders() {
+export async function getWorkOrders(opts = {}) {
   // Keep pageSize small enough to survive a cold-start. 50 is a safe
   // middle ground — the list sorts by priority/date client-side so the
   // most interesting tickets surface first anyway.
-  const data = await rmFetch('/ServiceManagerIssues?pageSize=50&pageNumber=1');
+  const data = await rmFetch('/ServiceManagerIssues?pageSize=50&pageNumber=1', {
+    throwOnError: opts.throwOnError,
+  });
   if (!data || !Array.isArray(data)) return null;
 
   return data.map((wo) => ({

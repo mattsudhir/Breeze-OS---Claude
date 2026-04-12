@@ -363,6 +363,8 @@ export default function MaintenancePage() {
   const [statusLookup, setStatusLookup] = useState({});
   const [priorityLookup, setPriorityLookup] = useState({});
   const [fetchFailed, setFetchFailed] = useState(false);
+  const [fetchError, setFetchError] = useState(null);
+  const [fetchMs, setFetchMs] = useState(null);
   const [reloadTick, setReloadTick] = useState(0);
 
   // Critical path: fetch work orders first on their own so the list renders
@@ -374,15 +376,28 @@ export default function MaintenancePage() {
     async function fetchTickets() {
       setLoading(true);
       setFetchFailed(false);
-      const woData = await getWorkOrders();
-      if (cancelled) return;
-      if (woData) {
-        setWorkOrders(woData);
-        setIsLive(true);
-      } else {
+      setFetchError(null);
+      setFetchMs(null);
+      const startedAt = Date.now();
+      try {
+        const woData = await getWorkOrders({ throwOnError: true });
+        if (cancelled) return;
+        setFetchMs(Date.now() - startedAt);
+        if (woData) {
+          setWorkOrders(woData);
+          setIsLive(true);
+        } else {
+          setFetchFailed(true);
+          setFetchError('Empty response from Rent Manager');
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setFetchMs(Date.now() - startedAt);
         setFetchFailed(true);
+        setFetchError(err?.message || String(err));
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      setLoading(false);
     }
     fetchTickets();
     return () => { cancelled = true; };
@@ -474,7 +489,25 @@ export default function MaintenancePage() {
         <div className="empty-state">
           <WifiOff size={40} />
           <h3>Couldn't reach Rent Manager</h3>
-          <p>The work order endpoint didn't respond in time. This is usually a cold-start timeout.</p>
+          <p>The work order endpoint didn't respond successfully.</p>
+          {fetchError && (
+            <div style={{
+              marginTop: 12,
+              padding: '10px 14px',
+              background: '#FFEBEE',
+              border: '1px solid #FFCDD2',
+              borderRadius: 8,
+              color: '#C62828',
+              fontSize: 12,
+              fontFamily: 'monospace',
+              wordBreak: 'break-word',
+              textAlign: 'left',
+              maxWidth: 520,
+            }}>
+              <strong>Error:</strong> {fetchError}
+              {fetchMs != null && <div style={{ marginTop: 4 }}>Elapsed: {fetchMs}ms</div>}
+            </div>
+          )}
           <button
             className="btn-primary"
             style={{ marginTop: 16 }}
