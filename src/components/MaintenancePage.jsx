@@ -408,6 +408,14 @@ export default function MaintenancePage({ initialFilters }) {
   );
   const [selectedId, setSelectedId] = useState(null);
 
+  const [categoryLookup, setCategoryLookup] = useState({});
+  const [statusLookup, setStatusLookup] = useState({});
+  const [priorityLookup, setPriorityLookup] = useState({});
+  const [fetchFailed, setFetchFailed] = useState(false);
+  const [fetchError, setFetchError] = useState(null);
+  const [fetchMs, setFetchMs] = useState(null);
+  const [reloadTick, setReloadTick] = useState(0);
+
   // When an initial chat filter specified a priority keyword like "urgent"
   // but the priority lookup hadn't loaded yet, resolve it to the matching
   // priorityId as soon as the lookup is populated.
@@ -423,14 +431,6 @@ export default function MaintenancePage({ initialFilters }) {
     }
     setPendingPriorityKeyword(null);
   }, [pendingPriorityKeyword, priorityLookup]);
-
-  const [categoryLookup, setCategoryLookup] = useState({});
-  const [statusLookup, setStatusLookup] = useState({});
-  const [priorityLookup, setPriorityLookup] = useState({});
-  const [fetchFailed, setFetchFailed] = useState(false);
-  const [fetchError, setFetchError] = useState(null);
-  const [fetchMs, setFetchMs] = useState(null);
-  const [reloadTick, setReloadTick] = useState(0);
 
   // Critical path: fetch work orders AND priorities in parallel. Priorities
   // must be loaded before the filter dropdown renders or we fall back to
