@@ -11,7 +11,7 @@ const NAV_ITEMS = [
   { id: 'divider1', type: 'divider' },
   { id: 'properties', icon: Building2, label: 'Properties', section: 'manage' },
   { id: 'tenants', icon: Users, label: 'Tenants', section: 'manage' },
-  { id: 'leases', icon: FileText, label: 'Leases', section: 'manage' },
+  { id: 'leasing', icon: FileText, label: 'Leasing', section: 'manage' },
   { id: 'accounting', icon: DollarSign, label: 'Accounting', section: 'manage' },
   { id: 'maintenance', icon: Wrench, label: 'Maintenance', section: 'manage' },
   { id: 'tasks', icon: CheckSquare, label: 'Tasks', section: 'manage' },
