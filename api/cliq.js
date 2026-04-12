@@ -140,11 +140,16 @@ export default async function handler(req, res) {
   }
 
   const body = req.body || {};
-  const handlerName = body?.handler?.name || body?.name || '';
+  // Accept both Cliq's native nested shape (body.handler.name) and a
+  // flat `handler_name` field — Deluge's Map.toString() doesn't reliably
+  // serialise nested maps as JSON, so the Deluge handlers we ship send
+  // the field flat to avoid that hazard.
+  const handlerName = body?.handler?.name || body?.handler_name || body?.name || '';
   const userName =
     body?.user?.first_name ||
     body?.user?.name ||
     body?.user?.email ||
+    body?.user_name ||
     'there';
 
   // Welcome handler — Cliq fires this when a user first installs /
