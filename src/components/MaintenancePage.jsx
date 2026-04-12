@@ -3,10 +3,12 @@ import {
   Wrench, Search, CheckCircle2, AlertCircle, Loader2, WifiOff,
   ChevronLeft, Building2, Home, Clock, Calendar, User as UserIcon,
   AlertTriangle, Zap, Droplet, Flame, Wind, Lightbulb, Hammer,
+  Edit3, Save, X,
 } from 'lucide-react';
 import {
   getWorkOrders, getProperties, getUnits,
   getWorkOrderCategories, getWorkOrderStatuses,
+  updateWorkOrder,
 } from '../services/rentManager';
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -80,7 +82,9 @@ function formatDate(d) {
 
 // ── Detail view ──────────────────────────────────────────────────
 
-function WorkOrderDetail({ workOrder, onBack }) {
+const PRIORITY_OPTIONS = ['Urgent', 'High', 'Medium', 'Low'];
+
+function WorkOrderDetail({ workOrder, categories, statuses, onBack, onUpdated }) {
   const catKey = normalizeCategory(workOrder.category);
   const cat = CATEGORY_META[catKey];
   const CatIcon = cat.icon;
@@ -88,63 +92,213 @@ function WorkOrderDetail({ workOrder, onBack }) {
   const PriIcon = pri.icon;
   const status = statusMeta(workOrder.status);
 
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+  const [saveOk, setSaveOk] = useState(false);
+  const [form, setForm] = useState({});
+
+  const startEdit = () => {
+    setForm({
+      summary: workOrder.summary || '',
+      description: workOrder.description || '',
+      priority: workOrder.priority || 'Medium',
+      categoryId: workOrder.categoryId || '',
+      statusId: workOrder.statusId || '',
+    });
+    setSaveError(null);
+    setSaveOk(false);
+    setEditing(true);
+  };
+
+  const cancelEdit = () => {
+    setEditing(false);
+    setSaveError(null);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      // Coerce id fields to numbers if RM expects them
+      const patch = {
+        summary: form.summary,
+        description: form.description,
+        priority: form.priority,
+      };
+      if (form.categoryId) patch.categoryId = Number(form.categoryId);
+      if (form.statusId) patch.statusId = Number(form.statusId);
+
+      await updateWorkOrder(workOrder.id, patch);
+      setEditing(false);
+      setSaveOk(true);
+      if (onUpdated) onUpdated(workOrder.id);
+      setTimeout(() => setSaveOk(false), 3000);
+    } catch (err) {
+      setSaveError(err.message || 'Failed to save changes');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="properties-page">
       <button className="back-link" onClick={onBack}>
         <ChevronLeft size={14} /> Back to all maintenance
       </button>
 
-      <div className="property-detail-header">
-        <div
-          className="wo-detail-icon"
-          style={{ background: cat.color + '15', color: cat.color }}
-        >
-          <CatIcon size={28} />
+      <div className="tenant-detail-topbar">
+        <div className="property-detail-header" style={{ flex: 1 }}>
+          <div
+            className="wo-detail-icon"
+            style={{ background: cat.color + '15', color: cat.color }}
+          >
+            <CatIcon size={28} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <h2>{workOrder.summary || `Work Order ${workOrder.id}`}</h2>
+            <p className="property-detail-address">
+              <span className={`unit-status ${status.className}`}>{status.label}</span>
+              <span className={`unit-status ${pri.className}`} style={{ marginLeft: 6 }}>
+                <PriIcon size={12} /> {pri.label}
+              </span>
+              <span className="tenant-display-id">#{workOrder.displayId || workOrder.id}</span>
+            </p>
+          </div>
         </div>
-        <div style={{ flex: 1 }}>
-          <h2>{workOrder.summary || `Work Order ${workOrder.id}`}</h2>
-          <p className="property-detail-address">
-            <span className={`unit-status ${status.className}`}>{status.label}</span>
-            <span className={`unit-status ${pri.className}`} style={{ marginLeft: 6 }}>
-              <PriIcon size={12} /> {pri.label}
-            </span>
-            <span className="tenant-display-id">#{workOrder.displayId || workOrder.id}</span>
-          </p>
-        </div>
+        {!editing && (
+          <button className="btn-primary tenant-edit-btn" onClick={startEdit}>
+            <Edit3 size={14} /> Edit
+          </button>
+        )}
       </div>
 
-      <div className="dashboard-card">
-        <div className="card-header">
-          <h3><Wrench size={18} /> Work Order Details</h3>
+      {saveOk && (
+        <div className="save-toast save-toast-ok">
+          <CheckCircle2 size={14} /> Changes saved to Rent Manager
         </div>
-        <div className="tenant-detail-list">
-          <DetailRow icon={CatIcon} label="Category" value={workOrder.category || cat.label} />
-          <DetailRow
-            icon={Building2}
-            label="Property"
-            value={workOrder.propertyName || (workOrder.propertyId ? `Property #${workOrder.propertyId}` : '—')}
-          />
-          <DetailRow
-            icon={Home}
-            label="Unit"
-            value={workOrder.unitName || (workOrder.unitId ? `Unit #${workOrder.unitId}` : '—')}
-          />
-          <DetailRow icon={UserIcon} label="Assigned to" value={workOrder.assignedTo || '—'} />
-          <DetailRow icon={Calendar} label="Created" value={formatDate(workOrder.createdDate)} />
-          <DetailRow icon={Calendar} label="Scheduled" value={formatDate(workOrder.scheduledDate)} />
-          {workOrder.completedDate && (
-            <DetailRow icon={CheckCircle2} label="Completed" value={formatDate(workOrder.completedDate)} />
-          )}
+      )}
+      {saveError && (
+        <div className="save-toast save-toast-err">
+          <AlertCircle size={14} /> {saveError}
         </div>
-      </div>
+      )}
 
-      {workOrder.description && workOrder.description !== workOrder.summary && (
+      {editing ? (
         <div className="dashboard-card">
           <div className="card-header">
-            <h3><Wrench size={18} /> Description</h3>
+            <h3><Edit3 size={18} /> Edit Work Order</h3>
           </div>
-          <p className="tenant-notes">{workOrder.description}</p>
+          <form
+            className="tenant-edit-form"
+            onSubmit={(e) => { e.preventDefault(); save(); }}
+          >
+            <label>
+              <span>Summary</span>
+              <input
+                type="text"
+                value={form.summary}
+                onChange={(e) => setForm({ ...form, summary: e.target.value })}
+              />
+            </label>
+
+            <label>
+              <span>Description</span>
+              <textarea
+                rows={4}
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+              />
+            </label>
+
+            <div className="form-row">
+              <label>
+                <span>Priority</span>
+                <select
+                  value={form.priority}
+                  onChange={(e) => setForm({ ...form, priority: e.target.value })}
+                >
+                  {PRIORITY_OPTIONS.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                <span>Category</span>
+                <select
+                  value={form.categoryId}
+                  onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
+                >
+                  <option value="">—</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <label>
+              <span>Status</span>
+              <select
+                value={form.statusId}
+                onChange={(e) => setForm({ ...form, statusId: e.target.value })}
+              >
+                <option value="">—</option>
+                {statuses.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </label>
+
+            <div className="form-actions">
+              <button type="button" className="btn-secondary" onClick={cancelEdit} disabled={saving}>
+                <X size={14} /> Cancel
+              </button>
+              <button type="submit" className="btn-primary" disabled={saving}>
+                {saving
+                  ? <><Loader2 size={14} className="spin" /> Saving...</>
+                  : <><Save size={14} /> Save Changes</>}
+              </button>
+            </div>
+          </form>
         </div>
+      ) : (
+        <>
+          <div className="dashboard-card">
+            <div className="card-header">
+              <h3><Wrench size={18} /> Work Order Details</h3>
+            </div>
+            <div className="tenant-detail-list">
+              <DetailRow icon={CatIcon} label="Category" value={workOrder.category || cat.label} />
+              <DetailRow
+                icon={Building2}
+                label="Property"
+                value={workOrder.propertyName || (workOrder.propertyId ? `Property #${workOrder.propertyId}` : '—')}
+              />
+              <DetailRow
+                icon={Home}
+                label="Unit"
+                value={workOrder.unitName || (workOrder.unitId ? `Unit #${workOrder.unitId}` : '—')}
+              />
+              <DetailRow icon={UserIcon} label="Assigned to" value={workOrder.assignedTo || '—'} />
+              <DetailRow icon={Calendar} label="Created" value={formatDate(workOrder.createdDate)} />
+              <DetailRow icon={Calendar} label="Scheduled" value={formatDate(workOrder.scheduledDate)} />
+              {workOrder.completedDate && (
+                <DetailRow icon={CheckCircle2} label="Completed" value={formatDate(workOrder.completedDate)} />
+              )}
+            </div>
+          </div>
+
+          {workOrder.description && workOrder.description !== workOrder.summary && (
+            <div className="dashboard-card">
+              <div className="card-header">
+                <h3><Wrench size={18} /> Description</h3>
+              </div>
+              <p className="tenant-notes">{workOrder.description}</p>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -264,7 +418,25 @@ export default function MaintenancePage() {
       setSelectedId(null);
       return null;
     }
-    return <WorkOrderDetail workOrder={wo} onBack={() => setSelectedId(null)} />;
+    const categoriesList = Object.entries(categoryLookup).map(([id, name]) => ({
+      id: Number(id), name,
+    }));
+    const statusesList = Object.entries(statusLookup).map(([id, s]) => ({
+      id: Number(id), name: s.name || s,
+    }));
+    return (
+      <WorkOrderDetail
+        workOrder={wo}
+        categories={categoriesList}
+        statuses={statusesList}
+        onBack={() => setSelectedId(null)}
+        onUpdated={async () => {
+          // Refetch the list so the updated ticket reflects on the list view
+          const fresh = await getWorkOrders();
+          if (fresh) setWorkOrders(fresh);
+        }}
+      />
+    );
   }
 
   // ── Counts used for filter chip labels ─────────────────────────

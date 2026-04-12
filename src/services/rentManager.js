@@ -271,6 +271,43 @@ export async function getWorkOrderStatuses() {
   }));
 }
 
+// Fetch a single work order by ID (fresh from RM, not from the list cache).
+export async function getWorkOrder(id) {
+  if (!id) return null;
+  const data = await rmFetch(`/ServiceManagerIssues/${id}`);
+  if (!data) return null;
+  return Array.isArray(data) ? data[0] : data;
+}
+
+// Update a work order using the same fetch-merge-POST pattern as tenants.
+// Rent Manager's POST on the collection endpoint acts as upsert when the
+// primary key is present in the payload.
+export async function updateWorkOrder(id, patch) {
+  if (!id) throw new Error('updateWorkOrder requires an id');
+
+  const existing = await rmFetch(`/ServiceManagerIssues/${id}`);
+  if (!existing) throw new Error('Could not load work order before update');
+  const current = Array.isArray(existing) ? existing[0] : existing;
+
+  const record = { ...current };
+  if ('summary' in patch) record.Summary = patch.summary;
+  if ('description' in patch) record.Description = patch.description;
+  if ('priority' in patch) record.Priority = patch.priority;
+  if ('categoryId' in patch) record.ServiceManagerCategoryID = patch.categoryId;
+  if ('statusId' in patch) record.ServiceManagerStatusID = patch.statusId;
+  if ('assignedTo' in patch) record.AssignedTo = patch.assignedTo;
+
+  // Ensure PK stays set
+  record.ServiceManagerIssueID = id;
+
+  return rmFetch(`/ServiceManagerIssues`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify([record]),
+    throwOnError: true,
+  });
+}
+
 // ── Charges / Accounting ────────────────────────────────────────
 
 export async function getCharges() {
