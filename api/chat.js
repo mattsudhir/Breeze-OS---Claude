@@ -177,7 +177,11 @@ async function executeTool(name, input) {
       case 'list_work_orders': {
         const res = await rmCall('/ServiceManagerIssues');
         if (!res.ok || !Array.isArray(res.data)) {
-          return { error: `Could not fetch work orders: ${res.status}` };
+          return {
+            error: `Could not fetch work orders (HTTP ${res.status}): ${
+              typeof res.data === 'string' ? res.data : JSON.stringify(res.data)
+            }`,
+          };
         }
         let orders = res.data.map((w) => ({
           id: w.ServiceManagerIssueID || w.IssueID,
