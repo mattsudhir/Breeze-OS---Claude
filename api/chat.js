@@ -191,10 +191,14 @@ async function executeTool(name, input) {
       }
 
       case 'list_work_orders': {
-        // Fetch tickets + categories in parallel so we can resolve IDs to names
-        const [woRes, catRes] = await Promise.all([
+        // Fetch tickets, categories, AND priorities in parallel so we can
+        // resolve IDs to canonical names. RM's legacy Priority string field
+        // is unreliable on sample15 — use PriorityID + the priorities
+        // lookup table as the source of truth.
+        const [woRes, catRes, priRes] = await Promise.all([
           rmCall('/ServiceManagerIssues'),
           rmCall('/ServiceManagerCategories'),
+          rmCall('/ServiceManagerPriorities'),
         ]);
         if (!woRes.ok || !Array.isArray(woRes.data)) {
           return {
@@ -214,6 +218,16 @@ async function executeTool(name, input) {
           }
         }
 
+        // Build priority id → name map
+        const priMap = {};
+        if (priRes.ok && Array.isArray(priRes.data)) {
+          for (const p of priRes.data) {
+            const id = p.ServiceManagerPriorityID || p.PriorityID || p.ID;
+            const name = p.Name || p.PriorityName || '';
+            if (id) priMap[id] = name;
+          }
+        }
+
         // Helpers
         const rankPriority = (p) => {
           const pl = (p || '').toLowerCase();
@@ -223,20 +237,22 @@ async function executeTool(name, input) {
           if (pl.includes('low')) return 1;
           return 2;
         };
-        const isOpenStatus = (s) => {
-          const sl = (s || '').toLowerCase();
-          return !sl.includes('complete') && !sl.includes('closed') && !sl.includes('resolved');
-        };
+        // RM has a literal IsClosed bool — that's our source of truth.
+        const isOpen = (o) => !o.is_closed;
 
-        // Map + enrich
+        // Map + enrich. Resolve priority and category via ID lookups so we
+        // don't trust the stale string fields on the record itself.
         let orders = woRes.data.map((w) => {
-          const catId = w.ServiceManagerCategoryID || w.CategoryID;
-          const categoryName = w.CategoryName || catMap[catId] || '';
+          const catId = w.CategoryID || w.ServiceManagerCategoryID;
+          const priId = w.PriorityID;
+          const categoryName = catMap[catId] || w.CategoryName || '';
+          const priorityName = priMap[priId] || w.Priority || w.PriorityName || '';
           return {
             id: w.ServiceManagerIssueID || w.IssueID,
-            summary: w.Summary || w.Description || '',
+            summary: w.Title || w.Summary || w.Description || '',
             status: w.StatusName || w.Status || '',
-            priority: w.Priority || w.PriorityName || 'normal',
+            is_closed: w.IsClosed === true,
+            priority: priorityName,
             category: categoryName,
             property_id: w.PropertyID,
             unit_id: w.UnitID,
@@ -248,9 +264,9 @@ async function executeTool(name, input) {
 
         // Status filter
         if (input.status_filter === 'open') {
-          orders = orders.filter((o) => isOpenStatus(o.status));
+          orders = orders.filter(isOpen);
         } else if (input.status_filter === 'completed') {
-          orders = orders.filter((o) => !isOpenStatus(o.status));
+          orders = orders.filter((o) => !isOpen(o));
         }
 
         // Priority filter (minimum)
