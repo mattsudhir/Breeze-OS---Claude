@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { getProperties, getUnits } from '../services/rentManager';
 
-export default function PropertiesPage() {
+export default function PropertiesPage({ onNavigate }) {
   const [properties, setProperties] = useState(null);
   const [units, setUnits] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -214,9 +214,16 @@ export default function PropertiesPage() {
         )}
       </div>
 
-      {/* Summary stats */}
+      {/* Summary stats. The Properties card is a clickable entry point
+          into the portfolio drilldown — the other three remain static
+          since they already summarise the data right below. */}
       <div className="stats-row">
-        <div className="stat-card">
+        <button
+          type="button"
+          className="stat-card stat-card-clickable"
+          onClick={() => onNavigate && onNavigate('properties-drilldown')}
+          title="Open portfolio drilldown"
+        >
           <div className="stat-icon" style={{ backgroundColor: '#0077B615', color: '#0077B6' }}>
             <Building2 size={22} />
           </div>
@@ -224,7 +231,7 @@ export default function PropertiesPage() {
             <span className="stat-value">{properties.length}</span>
             <span className="stat-label">Properties</span>
           </div>
-        </div>
+        </button>
         <div className="stat-card">
           <div className="stat-icon" style={{ backgroundColor: '#1565C015', color: '#1565C0' }}>
             <Home size={22} />

@@ -48,7 +48,7 @@ function App() {
   // Decide which view to render
   const renderContent = () => {
     if (activeView === 'chat') return <ChatHome onNavigate={handleNavigate} />;
-    if (activeView === 'properties') return <PropertiesPage />;
+    if (activeView === 'properties') return <PropertiesPage onNavigate={handleNavigate} />;
     if (activeView === 'tenants') return <TenantsPage />;
     if (activeView === 'maintenance') {
       return <MaintenancePage initialFilters={pendingFilters.maintenance} />;
