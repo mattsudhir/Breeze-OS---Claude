@@ -157,13 +157,26 @@ export async function getTenant(id) {
 }
 
 // Update a tenant. `patch` is a plain object of the fields to change.
-// Rent Manager uses a batch-upsert convention: PUT /Tenants with an ARRAY
-// of tenant objects in the body. Each object must include TenantID.
+//
+// Rent Manager's update semantics (verified on sample15):
+//   PUT   /Tenants/{id} → "method not supported"
+//   PATCH /Tenants/{id} → "method not supported"
+//   PUT   /Tenants      → "no resource"
+//   POST  /Tenants      → interpreted as create; validates required fields
+//
+// RM's upsert behavior appears to trigger when POSTing the FULL tenant
+// record (with TenantID present and all required fields populated).
+// So we fetch the current tenant, merge in the patch, and POST back.
 export async function updateTenant(id, patch) {
   if (!id) throw new Error('updateTenant requires an id');
 
-  // Build the RM-shaped payload from our camelCase patch
-  const record = { TenantID: id };
+  // Fetch the raw existing tenant record from RM
+  const existing = await rmFetch(`/Tenants/${id}`);
+  if (!existing) throw new Error('Could not load tenant record before update');
+  const current = Array.isArray(existing) ? existing[0] : existing;
+
+  // Merge patch into the full record using RM field names
+  const record = { ...current };
   if ('firstName' in patch) record.FirstName = patch.firstName;
   if ('lastName' in patch) record.LastName = patch.lastName;
   if ('email' in patch) record.Email = patch.email;
@@ -173,15 +186,13 @@ export async function updateTenant(id, patch) {
   if ('status' in patch) record.Status = patch.status;
   if ('comment' in patch) record.Comment = patch.comment;
 
-  // Rent Manager's update semantics vary by version. We've verified:
-  //   PUT /Tenants/{id} → "method not supported"
-  //   PUT /Tenants      → "no resource"
-  //   POST /Tenants     → treated as CREATE (requires PropertyID)
-  // Next try: PATCH /Tenants/{id} with a single object body.
-  return rmFetch(`/Tenants/${id}`, {
-    method: 'PATCH',
+  // Make sure TenantID stays set
+  record.TenantID = id;
+
+  return rmFetch(`/Tenants`, {
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(record),
+    body: JSON.stringify([record]),
     throwOnError: true,
   });
 }
