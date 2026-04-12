@@ -4,6 +4,7 @@ import TopBar from './components/TopBar';
 import ChatHome from './components/ChatHome';
 import ClassicDashboard from './components/ClassicDashboard';
 import PropertiesPage from './components/PropertiesPage';
+import TenantsPage from './components/TenantsPage';
 import './App.css';
 
 function App() {
@@ -31,6 +32,7 @@ function App() {
   const renderContent = () => {
     if (activeView === 'chat') return <ChatHome />;
     if (activeView === 'properties') return <PropertiesPage />;
+    if (activeView === 'tenants') return <TenantsPage />;
     if (activeView === 'dashboard' || showClassic) {
       return <ClassicDashboard onNavigate={handleNavigate} />;
     }

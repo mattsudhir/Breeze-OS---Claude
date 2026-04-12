@@ -1352,6 +1352,210 @@
   color: #E65100;
 }
 
+/* ===== TENANTS PAGE ===== */
+.status-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.status-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: white;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-xl);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gray-600);
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.status-filter-chip:hover {
+  border-color: var(--blue-200);
+  color: var(--gray-800);
+}
+
+.status-filter-chip.active {
+  background: var(--blue-500);
+  border-color: var(--blue-500);
+  color: white;
+}
+
+.status-filter-chip .chip-count {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--gray-100);
+  color: var(--gray-600);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.status-filter-chip.active .chip-count {
+  background: rgba(255, 255, 255, 0.25);
+  color: white;
+}
+
+.tenants-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.tenant-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  text-align: left;
+  padding: 14px 18px;
+  background: white;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.2s;
+  font: inherit;
+  color: inherit;
+}
+
+.tenant-row:hover {
+  border-color: var(--blue-200);
+  box-shadow: var(--shadow-sm);
+  transform: translateX(2px);
+}
+
+.tenant-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 700;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.tenant-avatar-large {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 700;
+  font-size: 22px;
+  flex-shrink: 0;
+}
+
+.tenant-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.tenant-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gray-800);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tenant-contact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--gray-500);
+}
+
+.tenant-contact-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.tenant-status-past {
+  background: var(--gray-100);
+  color: var(--gray-600);
+}
+
+.tenant-status-future {
+  background: #E3F2FD;
+  color: #1565C0;
+}
+
+/* Tenant detail */
+.tenant-detail-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.tenant-detail-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--gray-100);
+}
+
+.tenant-detail-row:last-child {
+  border-bottom: none;
+}
+
+.tenant-detail-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: var(--gray-100);
+  color: var(--gray-600);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.tenant-detail-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tenant-detail-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gray-500);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.tenant-detail-value {
+  font-size: 14px;
+  color: var(--gray-800);
+}
+
+.tenant-detail-value a {
+  color: var(--blue-500);
+  text-decoration: none;
+}
+
+.tenant-detail-value a:hover {
+  text-decoration: underline;
+}
+
 /* Loading / empty states */
 .loading-state,
 .empty-state {
@@ -1469,5 +1673,15 @@
   }
   .properties-grid {
     grid-template-columns: 1fr;
+  }
+  .tenant-row {
+    padding: 12px 14px;
+    gap: 10px;
+  }
+  .tenant-contact {
+    gap: 8px;
+  }
+  .tenant-contact-item {
+    font-size: 11px;
   }
 }
