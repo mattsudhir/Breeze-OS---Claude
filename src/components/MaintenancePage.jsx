@@ -370,15 +370,13 @@ function DetailRow({ icon: Icon, label, value }) {
 // ── Main page ───────────────────────────────────────────────────
 
 // Translate chat-supplied filters into the page's internal filter state.
-// Chat sends keys like { status, min_priority, category, search }. The
-// page uses exact-match priorities ('all' | 'urgent' | 'high' | 'medium' | 'low'),
-// so we collapse the chat's cumulative min_priority to the single level
-// the user most likely cares about — the lowest bucket they named.
+// Chat sends keys like { status, min_priority, category, search }.
+// min_priority is a keyword ("urgent" | "high" | "medium" | "low") but the
+// page now filters by numeric priorityId. We stash the keyword on a
+// separate field and resolve it to an ID in an effect once the lookup
+// has loaded.
 function normalizeInitialFilters(initial) {
   if (!initial) return {};
-  const priorityFilter = initial.min_priority
-    ? initial.min_priority  // chat min_priority=urgent → page priority=urgent
-    : undefined;
   return {
     statusFilter:
       initial.status === 'completed' ? 'completed'
@@ -388,7 +386,7 @@ function normalizeInitialFilters(initial) {
     categoryFilter: initial.category
       ? normalizeCategory(initial.category)
       : undefined,
-    priorityFilter,
+    priorityKeyword: initial.min_priority || undefined,
     searchTerm: initial.search || undefined,
   };
 }
@@ -404,8 +402,27 @@ export default function MaintenancePage({ initialFilters }) {
   const [searchTerm, setSearchTerm] = useState(applied.searchTerm || '');
   const [categoryFilter, setCategoryFilter] = useState(applied.categoryFilter || 'all');
   const [statusFilter, setStatusFilter] = useState(applied.statusFilter || 'open');
-  const [priorityFilter, setPriorityFilter] = useState(applied.priorityFilter || 'all');
+  const [priorityFilter, setPriorityFilter] = useState('all');
+  const [pendingPriorityKeyword, setPendingPriorityKeyword] = useState(
+    applied.priorityKeyword || null,
+  );
   const [selectedId, setSelectedId] = useState(null);
+
+  // When an initial chat filter specified a priority keyword like "urgent"
+  // but the priority lookup hadn't loaded yet, resolve it to the matching
+  // priorityId as soon as the lookup is populated.
+  useEffect(() => {
+    if (!pendingPriorityKeyword) return;
+    if (!priorityLookup || Object.keys(priorityLookup).length === 0) return;
+    const targetRank = priorityRank(pendingPriorityKeyword);
+    const match = Object.entries(priorityLookup).find(
+      ([, name]) => priorityRank(name) === targetRank,
+    );
+    if (match) {
+      setPriorityFilter(String(match[0]));
+    }
+    setPendingPriorityKeyword(null);
+  }, [pendingPriorityKeyword, priorityLookup]);
 
   const [categoryLookup, setCategoryLookup] = useState({});
   const [statusLookup, setStatusLookup] = useState({});
@@ -415,10 +432,9 @@ export default function MaintenancePage({ initialFilters }) {
   const [fetchMs, setFetchMs] = useState(null);
   const [reloadTick, setReloadTick] = useState(0);
 
-  // Critical path: fetch work orders first on their own so the list renders
-  // as soon as possible and isn't blocked on lookup cold-starts. Everything
-  // else runs in a second phase so they don't compete for the same Vercel
-  // serverless instance during cold-start.
+  // Critical path: fetch work orders AND priorities in parallel. Priorities
+  // must be loaded before the filter dropdown renders or we fall back to
+  // unreliable legacy string guessing.
   useEffect(() => {
     let cancelled = false;
     async function fetchTickets() {
@@ -428,15 +444,26 @@ export default function MaintenancePage({ initialFilters }) {
       setFetchMs(null);
       const startedAt = Date.now();
       try {
-        const woData = await getWorkOrders({ throwOnError: true });
+        const [woResult, prioritiesResult] = await Promise.allSettled([
+          getWorkOrders({ throwOnError: true }),
+          getWorkOrderPriorities(),
+        ]);
         if (cancelled) return;
         setFetchMs(Date.now() - startedAt);
-        if (woData) {
-          setWorkOrders(woData);
+
+        if (woResult.status === 'fulfilled' && woResult.value) {
+          setWorkOrders(woResult.value);
           setIsLive(true);
         } else {
           setFetchFailed(true);
-          setFetchError('Empty response from Rent Manager');
+          const err = woResult.status === 'rejected' ? woResult.reason : null;
+          setFetchError(err?.message || 'Empty response from Rent Manager');
+        }
+
+        if (prioritiesResult.status === 'fulfilled' && prioritiesResult.value) {
+          const map = {};
+          prioritiesResult.value.forEach((p) => { map[p.id] = p.name; });
+          setPriorityLookup(map);
         }
       } catch (err) {
         if (cancelled) return;
@@ -451,10 +478,7 @@ export default function MaintenancePage({ initialFilters }) {
     return () => { cancelled = true; };
   }, [reloadTick]);
 
-  // Phase two: once work orders have loaded, fetch lookups one at a time
-  // so we don't create a concurrent pile-up on the same serverless instance.
-  // These are not blocking — they just enrich names and populate dropdowns
-  // whenever they land.
+  // Phase two: the remaining lookups aren't on the critical path.
   useEffect(() => {
     if (!workOrders) return;
     let cancelled = false;
@@ -480,11 +504,6 @@ export default function MaintenancePage({ initialFilters }) {
           const map = {};
           data.forEach((s) => { map[s.id] = s; });
           setStatusLookup(map);
-        }},
-        { fn: getWorkOrderPriorities, apply: (data) => {
-          const map = {};
-          data.forEach((p) => { map[p.id] = p.name; });
-          setPriorityLookup(map);
         }},
       ];
 
@@ -633,26 +652,20 @@ export default function MaintenancePage({ initialFilters }) {
   ).length;
 
   // ── Apply filters ──────────────────────────────────────────────
-  // Count tickets per priority level (open items only by default, so the
-  // numbers reflect "stuff you might need to act on")
-  const priorityCounts = enriched.reduce(
-    (acc, w) => {
-      const r = priorityRank(w.priority);
-      if (r === 4) acc.urgent += 1;
-      else if (r === 3) acc.high += 1;
-      else if (r === 2) acc.medium += 1;
-      else if (r === 1) acc.low += 1;
-      return acc;
-    },
-    { urgent: 0, high: 0, medium: 0, low: 0 },
-  );
+  // Build a list of priorities from the lookup, ordered high → low by
+  // keyword severity so the dropdown reads naturally. Using priorityId as
+  // the filter key avoids all keyword-guessing on the legacy string field.
+  const priorityOptions = Object.entries(priorityLookup)
+    .map(([id, name]) => ({ id: Number(id), name, rank: priorityRank(name) }))
+    .sort((a, b) => b.rank - a.rank || a.name.localeCompare(b.name));
 
-  const selectedPriorityRank =
-    priorityFilter === 'urgent' ? 4
-    : priorityFilter === 'high' ? 3
-    : priorityFilter === 'medium' ? 2
-    : priorityFilter === 'low' ? 1
-    : null;
+  // Count tickets per priorityId
+  const priorityCountsById = enriched.reduce((acc, w) => {
+    if (w.priorityId != null) {
+      acc[w.priorityId] = (acc[w.priorityId] || 0) + 1;
+    }
+    return acc;
+  }, {});
 
   const filtered = enriched
     .filter((w) => {
@@ -660,7 +673,7 @@ export default function MaintenancePage({ initialFilters }) {
       const s = statusMetaFromWo(w, statusLookup);
       if (statusFilter === 'open' && !s.isOpen) return false;
       if (statusFilter === 'completed' && s.isOpen) return false;
-      if (selectedPriorityRank != null && priorityRank(w.priority) !== selectedPriorityRank) return false;
+      if (priorityFilter !== 'all' && String(w.priorityId) !== String(priorityFilter)) return false;
       if (searchTerm) {
         const q = searchTerm.toLowerCase();
         return (
@@ -730,10 +743,11 @@ export default function MaintenancePage({ initialFilters }) {
           <span className="filter-select-label">Priority</span>
           <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)}>
             <option value="all">Any</option>
-            <option value="urgent">Urgent ({priorityCounts.urgent})</option>
-            <option value="high">High ({priorityCounts.high})</option>
-            <option value="medium">Medium ({priorityCounts.medium})</option>
-            <option value="low">Low ({priorityCounts.low})</option>
+            {priorityOptions.map((p) => (
+              <option key={p.id} value={String(p.id)}>
+                {p.name} ({priorityCountsById[p.id] || 0})
+              </option>
+            ))}
           </select>
         </label>
       </div>
