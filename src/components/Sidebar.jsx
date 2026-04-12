@@ -11,7 +11,7 @@ const NAV_ITEMS = [
   { id: 'divider1', type: 'divider' },
   { id: 'properties', icon: Building2, label: 'Properties', section: 'manage' },
   { id: 'tenants', icon: Users, label: 'Tenants', section: 'manage' },
-  { id: 'leases', icon: FileText, label: 'Leases', section: 'manage' },
+  { id: 'leasing', icon: FileText, label: 'Leasing', section: 'manage' },
   { id: 'accounting', icon: DollarSign, label: 'Accounting', section: 'manage' },
   { id: 'maintenance', icon: Wrench, label: 'Maintenance', section: 'manage' },
   { id: 'tasks', icon: CheckSquare, label: 'Tasks', section: 'manage' },
@@ -26,7 +26,26 @@ export default function Sidebar({ activeView, onNavigate, collapsed, onToggleCol
   return (
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''} ${mobileOpen ? 'mobile-open' : ''}`}>
       <div className="sidebar-header">
-        <BreezeLogo size={collapsed ? 32 : 36} showText={!collapsed} />
+        {/* The logo doubles as a collapse toggle — clicking it has the
+            same effect as the chevron button next to it. Wrapped in a
+            borderless <button> so it's keyboard-accessible without
+            needing any CSS changes. */}
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          style={{
+            background: 'none',
+            border: 'none',
+            padding: 0,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+          }}
+        >
+          <BreezeLogo size={collapsed ? 32 : 36} showText={!collapsed} />
+        </button>
         <button className="sidebar-collapse-btn" onClick={onToggleCollapse}>
           {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
         </button>
