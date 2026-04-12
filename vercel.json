@@ -6,5 +6,10 @@
     { "source": "/api/chat", "destination": "/api/chat" },
     { "source": "/api/tts", "destination": "/api/tts" },
     { "source": "/api/(.*)", "destination": "/api/rentmanager" }
-  ]
+  ],
+  "functions": {
+    "api/rentmanager.js": { "maxDuration": 30 },
+    "api/chat.js":        { "maxDuration": 45 },
+    "api/tts.js":         { "maxDuration": 30 }
+  }
 }

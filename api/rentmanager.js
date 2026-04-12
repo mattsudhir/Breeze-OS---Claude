@@ -17,6 +17,7 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
+  const startedAt = Date.now();
   try {
     // Extract the Rent Manager endpoint path from the request URL
     // e.g. /api/Properties?filters=... → /Properties?filters=...
@@ -30,11 +31,18 @@ export default async function handler(req, res) {
       body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
     }
 
+    console.log(`[rmProxy] → ${req.method} ${fullPath}`);
     const result = await rmCall(fullPath, { method: req.method, body });
+    const ms = Date.now() - startedAt;
+    console.log(
+      `[rmProxy] ← ${req.method} ${fullPath} ${result.status} (${ms}ms)` +
+      (Array.isArray(result.data) ? ` [${result.data.length} items]` : ''),
+    );
 
     return res.status(result.status).json(result);
   } catch (err) {
-    console.error('Rent Manager proxy error:', err);
+    const ms = Date.now() - startedAt;
+    console.error(`[rmProxy] ✗ ${req.method} ${req.url} failed after ${ms}ms:`, err);
     return res.status(500).json({ ok: false, error: err.message });
   }
 }
