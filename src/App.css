@@ -1684,4 +1684,289 @@
   .tenant-contact-item {
     font-size: 11px;
   }
+  .tenant-tabs {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+  .tenant-tab {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .tenant-detail-topbar {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 12px;
+  }
+  .tenant-edit-btn {
+    align-self: stretch;
+    justify-content: center;
+  }
+  .form-row {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ── Tenant detail: tabs + edit form ─────────────────────────── */
+.tenant-detail-topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.tenant-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  border: none;
+}
+.tenant-display-id {
+  font-size: 12px;
+  color: var(--gray-500, #6c757d);
+  margin-left: 10px;
+  font-weight: 500;
+}
+.tenant-detail-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--gray-500, #6c757d);
+  padding: 8px 0;
+  margin-bottom: 8px;
+}
+
+.tenant-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--gray-200, #E9ECEF);
+  margin-bottom: 16px;
+  padding-bottom: 0;
+}
+.tenant-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--gray-600, #495057);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-bottom: -1px;
+}
+.tenant-tab:hover {
+  color: var(--blue-500, #0077B6);
+  background: rgba(0, 119, 182, 0.04);
+}
+.tenant-tab.active {
+  color: var(--blue-500, #0077B6);
+  border-bottom-color: var(--blue-500, #0077B6);
+  font-weight: 600;
+}
+
+/* ── Balance summary ─────────────────────────────────────────── */
+.balance-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: var(--gray-50, #F8F9FA);
+  border-radius: 8px;
+  margin: 12px 0 4px;
+}
+.balance-label {
+  font-size: 13px;
+  color: var(--gray-600, #495057);
+  font-weight: 500;
+}
+.balance-amount {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--gray-800, #212529);
+}
+.balance-amount.owed {
+  color: #C62828;
+}
+.muted-text {
+  color: var(--gray-500, #6c757d);
+  font-size: 13px;
+}
+
+/* ── Lease history ───────────────────────────────────────────── */
+.lease-history {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--gray-200, #E9ECEF);
+}
+.lease-history h4 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gray-700, #343A40);
+  margin: 0 0 10px;
+}
+.lease-history ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.lease-history li {
+  padding: 6px 0;
+  font-size: 13px;
+  color: var(--gray-600, #495057);
+}
+.lease-rent {
+  color: var(--gray-500, #6c757d);
+}
+
+/* ── Contacts list ───────────────────────────────────────────── */
+.contacts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.contact-row {
+  padding: 12px 16px;
+  background: var(--gray-50, #F8F9FA);
+  border-radius: 8px;
+}
+.contact-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gray-800, #212529);
+  margin-bottom: 4px;
+}
+.contact-meta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--gray-600, #495057);
+}
+.contact-meta a {
+  color: var(--blue-500, #0077B6);
+  text-decoration: none;
+}
+.tenant-notes {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--gray-700, #343A40);
+  white-space: pre-wrap;
+  padding: 8px 0;
+}
+
+/* ── Edit form ───────────────────────────────────────────────── */
+.tenant-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 8px;
+}
+.tenant-edit-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gray-700, #343A40);
+}
+.tenant-edit-form input,
+.tenant-edit-form select,
+.tenant-edit-form textarea {
+  font-family: inherit;
+  padding: 10px 12px;
+  font-size: 14px;
+  border: 1px solid var(--gray-300, #DEE2E6);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--gray-800, #212529);
+  transition: border-color 0.15s, box-shadow 0.15s;
+  font-weight: 400;
+}
+.tenant-edit-form input:focus,
+.tenant-edit-form select:focus,
+.tenant-edit-form textarea:focus {
+  outline: none;
+  border-color: var(--blue-500, #0077B6);
+  box-shadow: 0 0 0 3px rgba(0, 119, 182, 0.12);
+}
+.tenant-edit-form textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.form-row:has(label:nth-child(3)) {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--gray-200, #E9ECEF);
+  margin-top: 4px;
+}
+.btn-primary,
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s;
+}
+.btn-primary {
+  background: var(--blue-500, #0077B6);
+  color: #fff;
+}
+.btn-primary:hover:not(:disabled) {
+  background: #005f92;
+}
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.btn-secondary {
+  background: var(--gray-100, #F1F3F5);
+  color: var(--gray-700, #343A40);
+}
+.btn-secondary:hover:not(:disabled) {
+  background: var(--gray-200, #E9ECEF);
+}
+
+/* ── Save toast ──────────────────────────────────────────────── */
+.save-toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+.save-toast-ok {
+  background: #E8F5E9;
+  color: #2E7D32;
+  border: 1px solid #C8E6C9;
+}
+.save-toast-err {
+  background: #FFEBEE;
+  color: #C62828;
+  border: 1px solid #FFCDD2;
 }
