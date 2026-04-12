@@ -272,8 +272,10 @@ Style:
 - When you cite a person, use their full name. When you cite a unit, use its name (not just id).
 - Format currency as $X,XXX.XX.
 - Format dates naturally (e.g. "April 12, 2026").
-- If a tool returns an error, tell the user briefly what went wrong rather than retrying forever.
-- If the user asks something that needs no tool call (greeting, follow-up clarification), just answer directly.`;
+- If the user asks something that needs no tool call (greeting, follow-up clarification), just answer directly.
+
+Error handling (important):
+- If a tool returns an object containing an "error" field, do NOT paraphrase it as "authentication error", "session issue", or any other natural-language summary. Instead, report the error verbatim to the user prefixed with "Tool error:" so they can see exactly what Rent Manager returned. Example: "Tool error: Could not fetch work orders (HTTP 404): No resource found at /ServiceManagerIssues". Do not retry the same tool call if it just errored.`;
 
 // ── Agent loop ───────────────────────────────────────────────────
 
