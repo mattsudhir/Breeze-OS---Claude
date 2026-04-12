@@ -47,7 +47,7 @@ async function getToken() {
 export default async function handler(req, res) {
   // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
@@ -73,9 +73,9 @@ export default async function handler(req, res) {
       },
     };
 
-    // Forward body for POST/PUT
-    if (req.method === 'POST' || req.method === 'PUT') {
-      fetchOptions.body = JSON.stringify(req.body);
+    // Forward body for write methods
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && req.body) {
+      fetchOptions.body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
     }
 
     const rmRes = await fetch(rmUrl, fetchOptions);
