@@ -1,8 +1,83 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="8 12 188 200">
-  <!-- Square-cropped favicon for Breeze Property Group. References the
-       full-banner /breeze-logo.png and uses viewBox to crop to just the
-       building mark on the left side, so the favicon stays in sync with
-       whatever /breeze-logo.png is set to without maintaining a second
-       asset. Update the viewBox if the banner layout changes. -->
-  <image href="/breeze-logo.png" width="655" height="226" x="0" y="0"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Breeze Property Group favicon — pure-SVG recreation of the three-
+       building mark from the full brand banner. Self-contained (no
+       external image references), so it renders in every modern browser's
+       favicon slot without hitting the favicon SVG security restrictions.
+       Matches the silver/gray gradient aesthetic of the banner logo. -->
+  <defs>
+    <linearGradient id="bldg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#D1D6DD"/>
+      <stop offset="55%" stop-color="#9CA3AE"/>
+      <stop offset="100%" stop-color="#7A8291"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Left building (shortest) -->
+  <rect x="18" y="82" width="42" height="98" fill="url(#bldg)" stroke="#4A5262" stroke-width="2.5"/>
+  <rect x="25" y="92"  width="7" height="7" fill="#4A5262"/>
+  <rect x="36" y="92"  width="7" height="7" fill="#4A5262"/>
+  <rect x="47" y="92"  width="7" height="7" fill="#4A5262"/>
+  <rect x="25" y="108" width="7" height="7" fill="#4A5262"/>
+  <rect x="36" y="108" width="7" height="7" fill="#4A5262"/>
+  <rect x="47" y="108" width="7" height="7" fill="#4A5262"/>
+  <rect x="25" y="124" width="7" height="7" fill="#4A5262"/>
+  <rect x="36" y="124" width="7" height="7" fill="#4A5262"/>
+  <rect x="47" y="124" width="7" height="7" fill="#4A5262"/>
+  <rect x="25" y="140" width="7" height="7" fill="#4A5262"/>
+  <rect x="36" y="140" width="7" height="7" fill="#4A5262"/>
+  <rect x="47" y="140" width="7" height="7" fill="#4A5262"/>
+  <rect x="25" y="156" width="7" height="7" fill="#4A5262"/>
+  <rect x="36" y="156" width="7" height="7" fill="#4A5262"/>
+  <rect x="47" y="156" width="7" height="7" fill="#4A5262"/>
+
+  <!-- Middle building (tallest) -->
+  <rect x="68" y="28" width="50" height="152" fill="url(#bldg)" stroke="#4A5262" stroke-width="2.5"/>
+  <rect x="76"  y="38"  width="8" height="8" fill="#4A5262"/>
+  <rect x="89"  y="38"  width="8" height="8" fill="#4A5262"/>
+  <rect x="102" y="38"  width="8" height="8" fill="#4A5262"/>
+  <rect x="76"  y="56"  width="8" height="8" fill="#4A5262"/>
+  <rect x="89"  y="56"  width="8" height="8" fill="#4A5262"/>
+  <rect x="102" y="56"  width="8" height="8" fill="#4A5262"/>
+  <rect x="76"  y="74"  width="8" height="8" fill="#4A5262"/>
+  <rect x="89"  y="74"  width="8" height="8" fill="#4A5262"/>
+  <rect x="102" y="74"  width="8" height="8" fill="#4A5262"/>
+  <rect x="76"  y="92"  width="8" height="8" fill="#4A5262"/>
+  <rect x="89"  y="92"  width="8" height="8" fill="#4A5262"/>
+  <rect x="102" y="92"  width="8" height="8" fill="#4A5262"/>
+  <rect x="76"  y="110" width="8" height="8" fill="#4A5262"/>
+  <rect x="89"  y="110" width="8" height="8" fill="#4A5262"/>
+  <rect x="102" y="110" width="8" height="8" fill="#4A5262"/>
+  <rect x="76"  y="128" width="8" height="8" fill="#4A5262"/>
+  <rect x="89"  y="128" width="8" height="8" fill="#4A5262"/>
+  <rect x="102" y="128" width="8" height="8" fill="#4A5262"/>
+  <rect x="76"  y="146" width="8" height="8" fill="#4A5262"/>
+  <rect x="89"  y="146" width="8" height="8" fill="#4A5262"/>
+  <rect x="102" y="146" width="8" height="8" fill="#4A5262"/>
+  <rect x="76"  y="162" width="8" height="8" fill="#4A5262"/>
+  <rect x="89"  y="162" width="8" height="8" fill="#4A5262"/>
+  <rect x="102" y="162" width="8" height="8" fill="#4A5262"/>
+
+  <!-- Right building (medium) -->
+  <rect x="126" y="58" width="44" height="122" fill="url(#bldg)" stroke="#4A5262" stroke-width="2.5"/>
+  <rect x="134" y="68"  width="7" height="7" fill="#4A5262"/>
+  <rect x="145" y="68"  width="7" height="7" fill="#4A5262"/>
+  <rect x="156" y="68"  width="7" height="7" fill="#4A5262"/>
+  <rect x="134" y="84"  width="7" height="7" fill="#4A5262"/>
+  <rect x="145" y="84"  width="7" height="7" fill="#4A5262"/>
+  <rect x="156" y="84"  width="7" height="7" fill="#4A5262"/>
+  <rect x="134" y="100" width="7" height="7" fill="#4A5262"/>
+  <rect x="145" y="100" width="7" height="7" fill="#4A5262"/>
+  <rect x="156" y="100" width="7" height="7" fill="#4A5262"/>
+  <rect x="134" y="116" width="7" height="7" fill="#4A5262"/>
+  <rect x="145" y="116" width="7" height="7" fill="#4A5262"/>
+  <rect x="156" y="116" width="7" height="7" fill="#4A5262"/>
+  <rect x="134" y="132" width="7" height="7" fill="#4A5262"/>
+  <rect x="145" y="132" width="7" height="7" fill="#4A5262"/>
+  <rect x="156" y="132" width="7" height="7" fill="#4A5262"/>
+  <rect x="134" y="148" width="7" height="7" fill="#4A5262"/>
+  <rect x="145" y="148" width="7" height="7" fill="#4A5262"/>
+  <rect x="156" y="148" width="7" height="7" fill="#4A5262"/>
+  <rect x="134" y="164" width="7" height="7" fill="#4A5262"/>
+  <rect x="145" y="164" width="7" height="7" fill="#4A5262"/>
+  <rect x="156" y="164" width="7" height="7" fill="#4A5262"/>
 </svg>
