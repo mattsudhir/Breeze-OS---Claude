@@ -26,7 +26,24 @@ export default function Sidebar({ activeView, onNavigate, collapsed, onToggleCol
   return (
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''} ${mobileOpen ? 'mobile-open' : ''}`}>
       <div className="sidebar-header">
-        <BreezeLogo size={collapsed ? 32 : 36} showText={!collapsed} />
+        <button
+          type="button"
+          className="sidebar-logo-btn"
+          onClick={onToggleCollapse}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          style={{
+            background: 'none',
+            border: 'none',
+            padding: 0,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            flex: 1,
+            minWidth: 0,
+          }}
+        >
+          <BreezeLogo size={collapsed ? 32 : 36} showText={!collapsed} />
+        </button>
         <button className="sidebar-collapse-btn" onClick={onToggleCollapse}>
           {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
         </button>
