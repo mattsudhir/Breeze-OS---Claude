@@ -110,7 +110,16 @@ export function startListeningServerSide({ onInterim, onFinal, onError } = {}) {
   // still pending.
   (async () => {
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Request mic with voice-optimised processing on. Without these
+      // constraints some Edge/Chromium builds deliver nearly silent audio
+      // because they default to music-capture levels.
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
       currentMediaStream = stream;
 
       // Pick a MIME type the browser supports AND /api/stt can handle.
@@ -177,7 +186,16 @@ export function startListeningServerSide({ onInterim, onFinal, onError } = {}) {
 
           const text = (data.text || '').trim();
           if (!text) {
-            onError?.(new Error("Couldn't transcribe that. Try speaking a bit louder or closer to the mic."));
+            // Log the full debug payload so it's inspectable in DevTools
+            console.warn('[voice] STT returned empty text — debug:', data.debug);
+            const bytesInfo = data.debug?.audio_bytes
+              ? ` (${data.debug.audio_bytes} bytes captured, type ${data.debug?.content_type})`
+              : '';
+            onError?.(new Error(
+              `Couldn't transcribe that${bytesInfo}. Check the browser console for details — ` +
+              `common fixes: turn up your mic volume, get closer to the mic, or check Windows ` +
+              `→ Settings → System → Sound → Input to confirm the right mic is selected.`
+            ));
             return;
           }
           onFinal?.(text);

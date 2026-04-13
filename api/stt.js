@@ -64,17 +64,24 @@ export default async function handler(req, res) {
       return res.status(400).json({ ok: false, error: 'empty audio body' });
     }
 
-    const contentType = req.headers['content-type'] || 'audio/webm';
-    // Map the browser's MIME to a sensible file extension for ElevenLabs.
-    // Scribe is format-aware so as long as the extension matches the actual
-    // encoding it'll accept it.
+    const rawContentType = req.headers['content-type'] || 'audio/webm';
+    // Strip any codec suffix — "audio/webm;codecs=opus" → "audio/webm".
+    // ElevenLabs Scribe parses the file by the actual bytes, but some
+    // multipart implementations get confused by parameterised MIME types.
+    const bareType = rawContentType.split(';')[0].trim();
+
+    // Map to a sensible extension for the multipart filename. Scribe
+    // detects format from content, but a matching extension keeps the
+    // API happy on strict paths.
     const ext =
-      contentType.includes('webm') ? 'webm'
-        : contentType.includes('ogg') ? 'ogg'
-        : contentType.includes('wav') ? 'wav'
-        : contentType.includes('mpeg') || contentType.includes('mp3') ? 'mp3'
-        : contentType.includes('mp4') || contentType.includes('m4a') ? 'm4a'
+      bareType.includes('webm') ? 'webm'
+        : bareType.includes('ogg') ? 'ogg'
+        : bareType.includes('wav') ? 'wav'
+        : bareType.includes('mpeg') || bareType.includes('mp3') ? 'mp3'
+        : bareType.includes('mp4') || bareType.includes('m4a') ? 'm4a'
         : 'webm';
+
+    console.log(`[stt] received ${audioBuffer.length} bytes, type=${rawContentType}, bareType=${bareType}, ext=${ext}`);
 
     // ElevenLabs Scribe expects multipart/form-data with the audio file
     // and a model_id field. Node's built-in FormData + Blob handle this.
@@ -82,7 +89,7 @@ export default async function handler(req, res) {
     form.append('model_id', 'scribe_v1');
     form.append(
       'file',
-      new Blob([audioBuffer], { type: contentType }),
+      new Blob([audioBuffer], { type: bareType }),
       `recording.${ext}`,
     );
 
@@ -96,25 +103,52 @@ export default async function handler(req, res) {
       body: form,
     });
 
+    const responseText = await elResponse.text();
+    console.log(`[stt] ElevenLabs status=${elResponse.status}, body=${responseText.slice(0, 500)}`);
+
     if (!elResponse.ok) {
-      const errText = await elResponse.text();
-      console.error('[stt] ElevenLabs error:', elResponse.status, errText);
+      console.error('[stt] ElevenLabs error:', elResponse.status, responseText);
       const isQuota =
         elResponse.status === 401 ||
         elResponse.status === 402 ||
-        /quota/i.test(errText);
+        /quota/i.test(responseText);
       return res.status(elResponse.status).json({
         ok: false,
-        error: `ElevenLabs ${elResponse.status}: ${errText.slice(0, 400)}`,
+        error: `ElevenLabs ${elResponse.status}: ${responseText.slice(0, 400)}`,
         quota_exceeded: isQuota,
       });
     }
 
-    const data = await elResponse.json();
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (parseErr) {
+      console.error('[stt] Failed to parse ElevenLabs response as JSON:', parseErr);
+      return res.status(500).json({
+        ok: false,
+        error: `Scribe returned non-JSON response: ${responseText.slice(0, 200)}`,
+      });
+    }
+
     // Scribe returns { text, language_code, language_probability, words[] }
     const text = (data.text || '').trim();
 
-    console.log(`[stt] transcribed ${audioBuffer.length} bytes → "${text.slice(0, 80)}"`);
+    console.log(`[stt] transcribed ${audioBuffer.length} bytes → "${text.slice(0, 100)}" (lang=${data.language_code})`);
+
+    // If transcription came back empty, include the full Scribe response
+    // in the error so the client can surface what's actually happening.
+    if (!text) {
+      return res.status(200).json({
+        ok: true,
+        text: '',
+        language: data.language_code,
+        debug: {
+          audio_bytes: audioBuffer.length,
+          content_type: rawContentType,
+          scribe_raw: data,
+        },
+      });
+    }
 
     return res.status(200).json({
       ok: true,
