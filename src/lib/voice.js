@@ -9,6 +9,8 @@ let currentRecognition = null;
 let currentUtterance = null;
 let currentAudio = null;
 let currentAudioUrl = null;
+let currentMediaRecorder = null;
+let currentMediaStream = null;
 let elevenLabsDisabled = false; // set to true after a quota/auth failure so we stop retrying
 
 // ── Feature detection ────────────────────────────────────────────
@@ -18,8 +20,24 @@ const SpeechRecognition =
     ? window.SpeechRecognition || window.webkitSpeechRecognition
     : null;
 
+// Detect Edge (Chromium-based, "Edg/" in UA) and Firefox/Safari. On these
+// browsers the built-in SpeechRecognition is either absent or routes
+// through a speech service that's unreliable, so we skip straight to the
+// server-side /api/stt path (ElevenLabs Scribe).
+function isEdgeBrowser() {
+  if (typeof navigator === 'undefined') return false;
+  return / Edg\//.test(navigator.userAgent);
+}
+
+const MediaRecorderSupported =
+  typeof window !== 'undefined' &&
+  typeof window.MediaRecorder !== 'undefined' &&
+  !!navigator?.mediaDevices?.getUserMedia;
+
 export function isListeningSupported() {
-  return !!SpeechRecognition;
+  // Server-side fallback works in any modern browser with MediaRecorder,
+  // so we're "supported" whenever either path is available.
+  return !!SpeechRecognition || MediaRecorderSupported;
 }
 
 export function isSpeakingSupported() {
@@ -61,10 +79,172 @@ async function primeMicPermission() {
   }
 }
 
+// ── Server-side listening (MediaRecorder + /api/stt) ──────────────
+//
+// Captures audio from the mic with MediaRecorder, uploads the blob to
+// /api/stt (which proxies to ElevenLabs Scribe), and returns the
+// transcript via onFinal. No interim results — Scribe is batch-only.
+// Used on Edge (where native SpeechRecognition is flaky) and as the
+// only option on Firefox/Safari.
+export function startListeningServerSide({ onInterim, onFinal, onError } = {}) {
+  if (!MediaRecorderSupported) {
+    onError?.(new Error('Microphone capture not supported in this browser'));
+    return () => {};
+  }
+
+  stopListening(); // cancel any in-flight native recognition
+
+  let didStop = false;
+  let stream = null;
+  let recorder = null;
+  const chunks = [];
+
+  vlog('server-side listening: requesting mic');
+
+  // The onInterim signal on the server-side path — there's no real
+  // interim transcript, so we just tell the UI "we're capturing" once.
+  onInterim?.('(listening...)');
+
+  // Kick off the async mic-grab + recording flow. We return a stop
+  // handle synchronously so the UI can cancel even if getUserMedia is
+  // still pending.
+  (async () => {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      currentMediaStream = stream;
+
+      // Pick a MIME type the browser supports AND /api/stt can handle.
+      const mimeCandidates = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus',
+        'audio/mp4',
+      ];
+      const mime = mimeCandidates.find((m) =>
+        window.MediaRecorder.isTypeSupported(m),
+      ) || 'audio/webm';
+
+      vlog('server-side listening: MediaRecorder mime =', mime);
+
+      recorder = new MediaRecorder(stream, { mimeType: mime });
+      currentMediaRecorder = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) chunks.push(e.data);
+      };
+
+      recorder.onerror = (e) => {
+        vlog('server-side MediaRecorder error', e);
+        cleanup();
+        onError?.(new Error('Microphone recording failed. Check permissions.'));
+      };
+
+      recorder.onstop = async () => {
+        vlog('server-side listening: recorder stopped, uploading');
+        cleanup();
+
+        if (didStop === false) return; // user didn't tap stop — probably an error
+        if (chunks.length === 0) {
+          onError?.(new Error('No audio was captured. Try again.'));
+          return;
+        }
+
+        const blob = new Blob(chunks, { type: mime });
+        if (blob.size < 1000) {
+          onError?.(new Error('Recording was too short. Hold the button a bit longer.'));
+          return;
+        }
+
+        try {
+          const res = await fetch('/api/stt', {
+            method: 'POST',
+            headers: { 'Content-Type': mime },
+            body: blob,
+          });
+          const data = await res.json();
+          vlog('server-side /api/stt response', { status: res.status, ok: data.ok });
+
+          if (!res.ok || !data.ok) {
+            onError?.(new Error(data.error || `STT failed: HTTP ${res.status}`));
+            return;
+          }
+
+          const text = (data.text || '').trim();
+          if (!text) {
+            onError?.(new Error("Couldn't transcribe that. Try speaking a bit louder or closer to the mic."));
+            return;
+          }
+          onFinal?.(text);
+        } catch (err) {
+          vlog('server-side /api/stt threw', err);
+          onError?.(new Error(`Transcription request failed: ${err.message}`));
+        }
+      };
+
+      recorder.start();
+      vlog('server-side listening: recording');
+    } catch (err) {
+      vlog('server-side getUserMedia failed', err);
+      cleanup();
+      const friendly =
+        err.name === 'NotAllowedError'
+          ? 'Microphone access was denied. Click the lock icon in the address bar and allow mic access, then try again.'
+          : err.name === 'NotFoundError'
+          ? 'No microphone was found. Plug one in and try again.'
+          : `Could not access microphone: ${err.message}`;
+      onError?.(new Error(friendly));
+    }
+  })();
+
+  function cleanup() {
+    if (stream) {
+      stream.getTracks().forEach((t) => t.stop());
+    }
+    currentMediaStream = null;
+    currentMediaRecorder = null;
+  }
+
+  // Return a stop handle the UI can call when the user taps stop.
+  return () => {
+    if (didStop) return;
+    didStop = true;
+    try {
+      if (recorder && recorder.state !== 'inactive') {
+        recorder.stop();
+      } else {
+        // Mic-grab may still be pending. Make sure we release the stream
+        // and surface a graceful failure.
+        cleanup();
+        onError?.(new Error('Recording stopped before it started. Try again.'));
+      }
+    } catch (err) {
+      cleanup();
+      onError?.(new Error(`Failed to stop recording: ${err.message}`));
+    }
+  };
+}
+
 // Starts listening. Calls onInterim with partial transcripts as they arrive,
 // onFinal once with the final transcript, and onError on any failure.
 // Returns a stop function that halts listening immediately.
-export function startListening({ onInterim, onFinal, onError } = {}) {
+//
+// Routing:
+//   - Edge (Chromium-Edge) → server-side (native SpeechRecognition is broken)
+//   - No SpeechRecognition   → server-side (Firefox/Safari)
+//   - Otherwise             → browser-native (Chrome/Android Chrome)
+export function startListening(handlers = {}) {
+  const forceServerSide = isEdgeBrowser() || !SpeechRecognition;
+  if (forceServerSide) {
+    vlog('routing to server-side listener', {
+      edge: isEdgeBrowser(),
+      hasSpeechRecognition: !!SpeechRecognition,
+    });
+    return startListeningServerSide(handlers);
+  }
+  return startListeningNative(handlers);
+}
+
+function startListeningNative({ onInterim, onFinal, onError } = {}) {
   if (!SpeechRecognition) {
     onError?.(new Error('Speech recognition not supported in this browser'));
     return () => {};
@@ -209,6 +389,22 @@ export function stopListening() {
       // ignore
     }
     currentRecognition = null;
+  }
+  if (currentMediaRecorder) {
+    try {
+      if (currentMediaRecorder.state !== 'inactive') currentMediaRecorder.stop();
+    } catch {
+      // ignore
+    }
+    currentMediaRecorder = null;
+  }
+  if (currentMediaStream) {
+    try {
+      currentMediaStream.getTracks().forEach((t) => t.stop());
+    } catch {
+      // ignore
+    }
+    currentMediaStream = null;
   }
 }
 
