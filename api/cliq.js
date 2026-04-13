@@ -108,18 +108,17 @@ function verifyToken(req) {
   return { ok: true };
 }
 
-// Build a Cliq bot reply body. Cliq accepts `{ text, card, slides }`,
-// but when a `card` is present Cliq renders the card container and pulls
-// the body out of `slides` — it will IGNORE the top-level `text` and
-// fall back to its built-in "<bot> didn't return a response" placeholder
-// if `slides` is missing. So we keep the reply minimal: the plain `text`
-// field plus a `bot` name for attribution. This matches the shape the
-// outbound notify_team webhook uses in lib/breezeAgent.js.
+// Build a Cliq bot reply body. Cliq accepts `{ text, card, slides, bot }`,
+// BUT the moment any of `card`, `slides`, or `bot` is present Cliq renders
+// a card container and pulls the body out of `slides`. If there are no
+// slides, Cliq drops our `text` on the floor and shows its built-in
+// "<bot.name> didn't return a response" placeholder instead — which is
+// exactly what we were seeing on every message.
+//
+// The reliable shape is the plain `{text}` form. Bot attribution still
+// works because Cliq uses the bot name configured in the Bot Builder.
 function cliqReply(text) {
-  return {
-    text,
-    bot: { name: 'Breeze AI' },
-  };
+  return { text };
 }
 
 // ── HTTP handler ─────────────────────────────────────────────────
