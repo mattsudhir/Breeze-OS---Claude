@@ -52,6 +52,12 @@ export function startListening({ onInterim, onFinal, onError } = {}) {
   recognition.maxAlternatives = 1;
 
   let finalTranscript = '';
+  // Desktop Edge (and some older Chromium builds) doesn't reliably set
+  // result.isFinal when the user manually calls stop(). The transcript
+  // lives in interim results but never gets committed. Track the most
+  // recent interim text as a fallback so onend always has something to
+  // hand back to the UI.
+  let latestInterim = '';
   let didEnd = false;
 
   recognition.onresult = (event) => {
@@ -64,7 +70,19 @@ export function startListening({ onInterim, onFinal, onError } = {}) {
         interim += result[0].transcript;
       }
     }
-    if (interim) onInterim?.(interim);
+    if (interim) {
+      latestInterim = interim;
+      onInterim?.(interim);
+    }
+  };
+
+  // Pick whichever transcript actually has content. Final is authoritative
+  // when the browser bothered to commit it; otherwise fall back to the
+  // last interim we saw. Matches user expectation on Edge.
+  const bestTranscript = () => {
+    const finalTrim = finalTranscript.trim();
+    if (finalTrim) return finalTrim;
+    return latestInterim.trim();
   };
 
   recognition.onerror = (event) => {
@@ -72,7 +90,7 @@ export function startListening({ onInterim, onFinal, onError } = {}) {
     didEnd = true;
     // `no-speech` and `aborted` are common and not really errors
     if (event.error === 'no-speech' || event.error === 'aborted') {
-      onFinal?.(finalTranscript.trim());
+      onFinal?.(bestTranscript());
     } else {
       onError?.(new Error(event.error || 'Recognition error'));
     }
@@ -81,7 +99,7 @@ export function startListening({ onInterim, onFinal, onError } = {}) {
   recognition.onend = () => {
     if (didEnd) return;
     didEnd = true;
-    onFinal?.(finalTranscript.trim());
+    onFinal?.(bestTranscript());
     if (currentRecognition === recognition) currentRecognition = null;
   };
 
