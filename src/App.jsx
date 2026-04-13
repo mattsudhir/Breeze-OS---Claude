@@ -11,6 +11,8 @@ import WorkflowsPage from './components/WorkflowsPage';
 import LeasingPage from './components/LeasingPage';
 import AccountingPage from './components/AccountingPage';
 import ReportsPage from './components/ReportsPage';
+import SettingsPage from './components/SettingsPage';
+import HelpPage from './components/HelpPage';
 import PropertiesDrilldown from './components/PropertiesDrilldown';
 import './App.css';
 
@@ -58,6 +60,8 @@ function App() {
     if (activeView === 'leasing') return <LeasingPage />;
     if (activeView === 'accounting') return <AccountingPage />;
     if (activeView === 'reports') return <ReportsPage />;
+    if (activeView === 'settings') return <SettingsPage />;
+    if (activeView === 'help') return <HelpPage />;
     if (activeView === 'properties-drilldown') return <PropertiesDrilldown />;
     if (activeView === 'dashboard' || showClassic) {
       return <ClassicDashboard onNavigate={handleNavigate} />;

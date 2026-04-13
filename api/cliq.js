@@ -182,10 +182,10 @@ export default async function handler(req, res) {
     // Each inbound Cliq message is treated as a single-turn conversation.
     // Multi-turn memory would need a shared store (e.g. Vercel KV) since
     // serverless instances don't share RAM — out of scope for v1.
-    const { reply } = await runAgent({
-      messages: [{ role: 'user', content: userMessage }],
-      systemPrompt: CLIQ_SYSTEM_PROMPT,
-    });
+    const { reply } = await runAgent(
+      [{ role: 'user', content: userMessage }],
+      { systemPrompt: CLIQ_SYSTEM_PROMPT },
+    );
 
     const cleaned = toCliqMarkdown(stripShowMeMarkers(reply));
     return res.status(200).json(cliqReply(cleaned || 'No response.'));

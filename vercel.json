@@ -3,17 +3,25 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "rewrites": [
-    { "source": "/api/chat", "destination": "/api/chat" },
-    { "source": "/api/tts", "destination": "/api/tts" },
-    { "source": "/api/cliq", "destination": "/api/cliq" },
-    { "source": "/api/notify", "destination": "/api/notify" },
-    { "source": "/api/(.*)", "destination": "/api/rentmanager" }
+    { "source": "/api/chat",         "destination": "/api/chat" },
+    { "source": "/api/tts",          "destination": "/api/tts" },
+    { "source": "/api/stt",          "destination": "/api/stt" },
+    { "source": "/api/cliq",         "destination": "/api/cliq" },
+    { "source": "/api/notify",       "destination": "/api/notify" },
+    { "source": "/api/vapi-webhook", "destination": "/api/vapi-webhook" },
+    { "source": "/api/db-health",    "destination": "/api/db-health" },
+    { "source": "/api/db-migrate",   "destination": "/api/db-migrate" },
+    { "source": "/api/(.*)",         "destination": "/api/rentmanager" }
   ],
   "functions": {
-    "api/rentmanager.js": { "maxDuration": 30 },
-    "api/chat.js":        { "maxDuration": 45 },
-    "api/cliq.js":        { "maxDuration": 45 },
-    "api/notify.js":      { "maxDuration": 15 },
-    "api/tts.js":         { "maxDuration": 30 }
+    "api/rentmanager.js":  { "maxDuration": 30 },
+    "api/chat.js":         { "maxDuration": 45 },
+    "api/cliq.js":         { "maxDuration": 45 },
+    "api/notify.js":       { "maxDuration": 15 },
+    "api/tts.js":          { "maxDuration": 30 },
+    "api/stt.js":          { "maxDuration": 30 },
+    "api/vapi-webhook.js": { "maxDuration": 30 },
+    "api/db-health.js":    { "maxDuration": 10 },
+    "api/db-migrate.js":   { "maxDuration": 60 }
   }
 }
