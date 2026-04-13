@@ -238,6 +238,14 @@ export default function ChatHome({ onNavigate }) {
         stopListenRef.current = null;
         voiceInputPendingRef.current = false;
         console.warn('Voice recognition error:', err.message);
+        // Surface the error in-chat so the user can see what went wrong
+        // instead of the record button just silently resetting.
+        addMessage({
+          type: 'system',
+          sender: 'Breeze AI',
+          avatar: 'bot',
+          text: `Voice input failed: ${err.message}`,
+        });
       },
     });
     stopListenRef.current = stop;

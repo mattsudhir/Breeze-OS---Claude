@@ -33,6 +33,34 @@ export function isSpeakingSupported() {
 
 // ── Speech recognition (listen) ──────────────────────────────────
 
+// Verbose flag — flip on to get every recognition event in the console
+// for debugging. Logs are gated behind `[voice]` so they're easy to grep.
+const VOICE_DEBUG = true;
+const vlog = (...args) => {
+  if (VOICE_DEBUG) console.log('[voice]', ...args);
+};
+
+// Some browsers (desktop Edge, Firefox with Nightly flag on) expose
+// SpeechRecognition but won't produce results unless the mic permission
+// has been primed through getUserMedia first. Do a best-effort prime —
+// if it fails, we still let recognition.start() run and report whatever
+// error comes back.
+async function primeMicPermission() {
+  try {
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      vlog('getUserMedia not available — skipping mic prime');
+      return;
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // We don't actually need the stream — SpeechRecognition handles its
+    // own capture. Releasing the tracks avoids keeping the mic light on.
+    stream.getTracks().forEach((t) => t.stop());
+    vlog('mic permission primed');
+  } catch (err) {
+    vlog('mic permission denied or unavailable:', err?.name || err?.message);
+  }
+}
+
 // Starts listening. Calls onInterim with partial transcripts as they arrive,
 // onFinal once with the final transcript, and onError on any failure.
 // Returns a stop function that halts listening immediately.
@@ -45,11 +73,22 @@ export function startListening({ onInterim, onFinal, onError } = {}) {
   // Stop any currently-running recognition
   stopListening();
 
+  // Fire-and-forget mic prime. Doesn't block recognition.start() — on
+  // Chrome it's redundant, on Edge it unsticks browsers that otherwise
+  // ignore SpeechRecognition until the mic has been explicitly granted.
+  primeMicPermission();
+
   const recognition = new SpeechRecognition();
   recognition.continuous = false;
   recognition.interimResults = true;
   recognition.lang = 'en-US';
   recognition.maxAlternatives = 1;
+
+  vlog('created recognition', {
+    ua: navigator.userAgent,
+    lang: recognition.lang,
+    ctor: SpeechRecognition.name || '(webkit)',
+  });
 
   let finalTranscript = '';
   // Desktop Edge (and some older Chromium builds) doesn't reliably set
@@ -59,8 +98,19 @@ export function startListening({ onInterim, onFinal, onError } = {}) {
   // hand back to the UI.
   let latestInterim = '';
   let didEnd = false;
+  let sawAnyResult = false;
+
+  recognition.onstart = () => vlog('onstart');
+  recognition.onaudiostart = () => vlog('onaudiostart (mic capturing)');
+  recognition.onsoundstart = () => vlog('onsoundstart');
+  recognition.onspeechstart = () => vlog('onspeechstart');
+  recognition.onspeechend = () => vlog('onspeechend');
+  recognition.onsoundend = () => vlog('onsoundend');
+  recognition.onaudioend = () => vlog('onaudioend');
+  recognition.onnomatch = () => vlog('onnomatch');
 
   recognition.onresult = (event) => {
+    sawAnyResult = true;
     let interim = '';
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const result = event.results[i];
@@ -70,6 +120,7 @@ export function startListening({ onInterim, onFinal, onError } = {}) {
         interim += result[0].transcript;
       }
     }
+    vlog('onresult', { interim, final: finalTranscript });
     if (interim) {
       latestInterim = interim;
       onInterim?.(interim);
@@ -86,33 +137,64 @@ export function startListening({ onInterim, onFinal, onError } = {}) {
   };
 
   recognition.onerror = (event) => {
+    vlog('onerror', event.error, event.message);
     if (didEnd) return;
     didEnd = true;
     // `no-speech` and `aborted` are common and not really errors
     if (event.error === 'no-speech' || event.error === 'aborted') {
       onFinal?.(bestTranscript());
-    } else {
-      onError?.(new Error(event.error || 'Recognition error'));
+      return;
     }
+    // `not-allowed` means the user (or OS privacy setting) denied the mic.
+    // `service-not-allowed` on Edge usually means the Windows privacy setting
+    // "Online speech recognition" is disabled in Settings → Privacy.
+    // `network` means the browser couldn't reach its speech service (Edge
+    // proxies through Microsoft; Chrome through Google).
+    const friendly = {
+      'not-allowed': 'Microphone access was blocked. Allow mic access in the address bar and try again.',
+      'service-not-allowed': 'Speech recognition is disabled. On Windows: Settings → Privacy → Speech → turn on "Online speech recognition". Then reload.',
+      'network': 'The browser couldn\'t reach its speech service. Check your connection and try again.',
+      'audio-capture': 'No microphone found or it\'s in use by another app.',
+      'language-not-supported': 'en-US speech recognition isn\'t available in this browser.',
+    }[event.error] || `Recognition error: ${event.error}`;
+    onError?.(new Error(friendly));
   };
 
   recognition.onend = () => {
+    vlog('onend', {
+      sawAnyResult,
+      finalLen: finalTranscript.length,
+      interimLen: latestInterim.length,
+    });
     if (didEnd) return;
     didEnd = true;
-    onFinal?.(bestTranscript());
+    // If recognition never produced anything at all, bubble that up so
+    // the UI can show a helpful nudge instead of silently sending "".
+    if (!sawAnyResult && !finalTranscript && !latestInterim) {
+      onError?.(new Error(
+        'No speech was captured. Check that the microphone is working, ' +
+        'the site has mic permission, and (on Windows) that "Online speech ' +
+        'recognition" is enabled in Settings → Privacy → Speech.'
+      ));
+    } else {
+      onFinal?.(bestTranscript());
+    }
     if (currentRecognition === recognition) currentRecognition = null;
   };
 
   try {
     recognition.start();
     currentRecognition = recognition;
+    vlog('start() called');
   } catch (err) {
+    vlog('start() threw:', err?.message);
     onError?.(err);
   }
 
   return () => {
     try {
       recognition.stop();
+      vlog('stop() called');
     } catch {
       // already stopped
     }
