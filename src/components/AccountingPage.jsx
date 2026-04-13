@@ -1,55 +1,39 @@
-import {
-  DollarSign, TrendingUp, TrendingDown, AlertCircle, Clock, CheckCircle2,
-  ArrowUpRight, ArrowDownRight, Receipt,
-} from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Receipt, CreditCard, AlertCircle, CheckCircle2, Plus } from 'lucide-react';
 
-// Placeholder accounting data — when the RM GL / charges / payments
-// endpoints are wired, we'll swap the static figures below for a live
-// financial snapshot. Kept rough-order-of-magnitude realistic so
-// screenshots look credible during demos.
-
-const SUMMARY = {
-  monthRevenue: 148320.50,
-  monthRevenueDelta: 3.8, // percent vs last month
-  outstandingAR: 22845.00,
-  outstandingARDelta: -5.2,
-  monthExpenses: 41760.25,
-  monthExpensesDelta: 1.4,
-};
+// Placeholder accounting data — swap for real Rent Manager GL pulls later.
+const KPIS = [
+  { id: 'income', label: 'Income (MTD)', value: '$184,320.00', delta: '+8.2%', up: true, icon: TrendingUp, color: '#2E7D32' },
+  { id: 'expenses', label: 'Expenses (MTD)', value: '$62,115.47', delta: '+3.1%', up: false, icon: TrendingDown, color: '#C62828' },
+  { id: 'noi', label: 'Net Operating Income', value: '$122,204.53', delta: '+11.4%', up: true, icon: DollarSign, color: '#1565C0' },
+  { id: 'outstanding', label: 'Outstanding AR', value: '$14,782.00', delta: '-2.6%', up: true, icon: Receipt, color: '#E65100' },
+];
 
 const RECENT_TRANSACTIONS = [
-  { id: 'T-2104', date: 'Apr 11', type: 'payment', description: 'Rent payment — Priya Shah', amount: 2100.00, account: 'Pine Valley 508' },
-  { id: 'T-2103', date: 'Apr 11', type: 'expense', description: 'HVAC service — Maple Ridge', amount: -450.00, account: 'Maintenance' },
-  { id: 'T-2102', date: 'Apr 10', type: 'payment', description: 'Rent payment — Marcia Clark', amount: 2450.00, account: 'Oakwood 204' },
-  { id: 'T-2101', date: 'Apr 10', type: 'payment', description: 'Rent payment — Carlos Rivera', amount: 2250.00, account: 'Riverside 7' },
-  { id: 'T-2100', date: 'Apr 10', type: 'expense', description: 'Landscaping — Q2 invoice', amount: -1275.00, account: 'Maple Ridge' },
-  { id: 'T-2099', date: 'Apr 9', type: 'payment', description: 'Rent payment — Jonas Berg', amount: 1875.00, account: 'Maple Ridge 12B' },
-  { id: 'T-2098', date: 'Apr 9', type: 'expense', description: 'Insurance premium', amount: -3200.00, account: 'Portfolio' },
+  { id: 'txn-1042', date: 'Apr 11, 2026', description: 'Rent payment — Marcia Clark (Unit 204)', account: 'Income · Rent', amount: 2150.00, type: 'credit' },
+  { id: 'txn-1041', date: 'Apr 11, 2026', description: 'Plumbing repair — Oakwood #12', account: 'Expense · Maintenance', amount: -487.50, type: 'debit' },
+  { id: 'txn-1040', date: 'Apr 10, 2026', description: 'Rent payment — Daniel Kim (Unit 8B)', account: 'Income · Rent', amount: 1895.00, type: 'credit' },
+  { id: 'txn-1039', date: 'Apr 10, 2026', description: 'Electric utility — Birchwood Commons', account: 'Expense · Utilities', amount: -2340.18, type: 'debit' },
+  { id: 'txn-1038', date: 'Apr 9, 2026', description: 'Late fee — Unit 14C', account: 'Income · Fees', amount: 75.00, type: 'credit' },
+  { id: 'txn-1037', date: 'Apr 9, 2026', description: 'Landscaping contract — Q2', account: 'Expense · Grounds', amount: -1800.00, type: 'debit' },
+  { id: 'txn-1036', date: 'Apr 8, 2026', description: 'Security deposit — new lease (Unit 3A)', account: 'Liability · Deposits', amount: 2400.00, type: 'credit' },
 ];
 
-const OUTSTANDING = [
-  { tenant: 'Dmitri Volkov', unit: 'Oakwood 117', amount: 2625.00, daysLate: 11, severity: 'high' },
-  { tenant: 'Aisha Mohammed', unit: 'Cedar Court 3A', amount: 1950.00, daysLate: 4, severity: 'medium' },
-  { tenant: 'Lena Park', unit: 'Maple Ridge 8A', amount: 950.00, daysLate: 2, severity: 'low' },
-  { tenant: 'Sean O\'Malley', unit: 'Oakwood 303', amount: 2450.00, daysLate: 7, severity: 'medium' },
-  { tenant: 'Vera Hollings', unit: 'Pine Valley 112', amount: 14870.00, daysLate: 43, severity: 'high' },
+const OUTSTANDING_INVOICES = [
+  { id: 'INV-3391', tenant: 'Robert Hayes', unit: 'Unit 14C · Birchwood', amount: 2100.00, daysLate: 12, status: 'overdue' },
+  { id: 'INV-3388', tenant: 'Lena Park', unit: 'Unit 7 · Oakwood', amount: 1875.00, daysLate: 5, status: 'overdue' },
+  { id: 'INV-3385', tenant: 'Sam Patel', unit: 'Unit 22 · Maple Grove', amount: 945.00, daysLate: 2, status: 'due' },
+  { id: 'INV-3384', tenant: 'Jenna Wong', unit: 'Unit 11B · Birchwood', amount: 1650.00, daysLate: 0, status: 'due' },
 ];
 
-function formatCurrency(n, { signed = false } = {}) {
-  const abs = Math.abs(n).toLocaleString('en-US', {
-    minimumFractionDigits: 2, maximumFractionDigits: 2,
-  });
-  if (!signed) return `$${abs}`;
-  return `${n < 0 ? '-' : '+'}$${abs}`;
-}
-
-function severityBadge(s) {
-  if (s === 'high') return { className: 'priority-high', label: 'Collections', icon: AlertCircle };
-  if (s === 'medium') return { className: 'priority-medium', label: 'Past due', icon: Clock };
-  return { className: 'priority-low', label: 'Late', icon: Clock };
+function formatCurrency(n) {
+  const abs = Math.abs(n);
+  const sign = n < 0 ? '-' : '';
+  return `${sign}$${abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 export default function AccountingPage() {
+  const totalOutstanding = OUTSTANDING_INVOICES.reduce((s, i) => s + i.amount, 0);
+
   return (
     <div className="properties-page">
       <div className="data-source-banner" style={{
@@ -58,7 +42,7 @@ export default function AccountingPage() {
         fontSize: '12px', fontWeight: 600,
         background: '#FFF3E0', color: '#E65100', border: '1px solid #FFE0B2',
       }}>
-        <DollarSign size={14} /> Preview — accounting figures are sample content until the RM GL endpoints are connected
+        <DollarSign size={14} /> Preview — sample accounting data while GL integration is wired up
       </div>
 
       <div className="tenant-detail-topbar">
@@ -69,149 +53,102 @@ export default function AccountingPage() {
           <div style={{ flex: 1 }}>
             <h2>Accounting</h2>
             <p className="property-detail-address">
-              {formatCurrency(SUMMARY.monthRevenue)} collected this month · {formatCurrency(SUMMARY.outstandingAR)} outstanding
+              April 2026 · {OUTSTANDING_INVOICES.length} outstanding invoices · {formatCurrency(totalOutstanding)} due
             </p>
           </div>
         </div>
         <button className="btn-primary tenant-edit-btn">
-          <Receipt size={14} /> Record Transaction
+          <Plus size={14} /> New Transaction
         </button>
       </div>
 
-      {/* Three-up summary card row. Uses inline grid so we don't need
-          a new CSS class — matches the look of the dashboard cards. */}
       <div style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-        gap: '14px',
+        gap: '12px',
         marginBottom: '16px',
       }}>
-        <div className="dashboard-card" style={{ marginBottom: 0 }}>
-          <div style={{ padding: '18px 20px' }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#666', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Revenue this month
-            </div>
-            <div style={{ fontSize: 28, fontWeight: 700, color: '#222', marginTop: 6 }}>
-              {formatCurrency(SUMMARY.monthRevenue)}
-            </div>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 4, marginTop: 4,
-              fontSize: 12, fontWeight: 600,
-              color: SUMMARY.monthRevenueDelta >= 0 ? '#2E7D32' : '#C62828',
-            }}>
-              {SUMMARY.monthRevenueDelta >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-              {SUMMARY.monthRevenueDelta >= 0 ? '+' : ''}{SUMMARY.monthRevenueDelta}% vs last month
-            </div>
-          </div>
-        </div>
-
-        <div className="dashboard-card" style={{ marginBottom: 0 }}>
-          <div style={{ padding: '18px 20px' }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#666', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Outstanding A/R
-            </div>
-            <div style={{ fontSize: 28, fontWeight: 700, color: '#222', marginTop: 6 }}>
-              {formatCurrency(SUMMARY.outstandingAR)}
-            </div>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 4, marginTop: 4,
-              fontSize: 12, fontWeight: 600,
-              color: SUMMARY.outstandingARDelta <= 0 ? '#2E7D32' : '#C62828',
-            }}>
-              {SUMMARY.outstandingARDelta <= 0 ? <TrendingDown size={14} /> : <TrendingUp size={14} />}
-              {SUMMARY.outstandingARDelta}% vs last month
-            </div>
-          </div>
-        </div>
-
-        <div className="dashboard-card" style={{ marginBottom: 0 }}>
-          <div style={{ padding: '18px 20px' }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#666', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Expenses this month
-            </div>
-            <div style={{ fontSize: 28, fontWeight: 700, color: '#222', marginTop: 6 }}>
-              {formatCurrency(SUMMARY.monthExpenses)}
-            </div>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 4, marginTop: 4,
-              fontSize: 12, fontWeight: 600,
-              color: SUMMARY.monthExpensesDelta <= 0 ? '#2E7D32' : '#C62828',
-            }}>
-              {SUMMARY.monthExpensesDelta >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-              {SUMMARY.monthExpensesDelta >= 0 ? '+' : ''}{SUMMARY.monthExpensesDelta}% vs last month
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="dashboard-card">
-        <div className="card-header">
-          <h3><AlertCircle size={18} /> Outstanding Balances</h3>
-        </div>
-        <div className="tenants-list">
-          {OUTSTANDING.map((o) => {
-            const badge = severityBadge(o.severity);
-            const BadgeIcon = badge.icon;
-            return (
-              <div key={o.tenant} className="tenant-row" style={{ cursor: 'default' }}>
-                <div className="tenant-avatar" style={{ background: '#FFEBEE', color: '#C62828' }}>
-                  <DollarSign size={22} />
+        {KPIS.map((k) => {
+          const Icon = k.icon;
+          return (
+            <div key={k.id} className="dashboard-card" style={{ padding: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                <div className="tenant-avatar" style={{ background: `${k.color}15`, color: k.color, width: 36, height: 36 }}>
+                  <Icon size={18} />
                 </div>
-                <div className="tenant-info">
-                  <span className="tenant-name">{o.tenant}</span>
-                  <div className="tenant-contact">
-                    <span className="tenant-contact-item">{o.unit}</span>
-                    <span className="tenant-contact-item">
-                      <Clock size={12} /> {o.daysLate} days late
-                    </span>
-                    <span className="tenant-contact-item" style={{ fontWeight: 700 }}>
-                      {formatCurrency(o.amount)}
-                    </span>
-                  </div>
-                </div>
-                <span className={`unit-status ${badge.className}`}>
-                  <BadgeIcon size={12} /> {badge.label}
-                </span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>{k.label}</span>
               </div>
-            );
-          })}
-        </div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: '#1a1a1a' }}>{k.value}</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: k.up ? '#2E7D32' : '#C62828', marginTop: 4 }}>
+                {k.delta} vs last month
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       <div className="dashboard-card">
         <div className="card-header">
           <h3><Receipt size={18} /> Recent Transactions</h3>
         </div>
+        <table className="properties-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Description</th>
+              <th>Account</th>
+              <th style={{ textAlign: 'right' }}>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {RECENT_TRANSACTIONS.map((t) => (
+              <tr key={t.id}>
+                <td>{t.date}</td>
+                <td>{t.description}</td>
+                <td style={{ color: '#666', fontSize: 12 }}>{t.account}</td>
+                <td style={{
+                  textAlign: 'right',
+                  fontWeight: 600,
+                  color: t.type === 'credit' ? '#2E7D32' : '#C62828',
+                }}>
+                  {formatCurrency(t.amount)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="dashboard-card">
+        <div className="card-header">
+          <h3><CreditCard size={18} /> Outstanding Invoices</h3>
+        </div>
         <div className="tenants-list">
-          {RECENT_TRANSACTIONS.map((t) => {
-            const isPayment = t.type === 'payment';
-            return (
-              <div key={t.id} className="tenant-row" style={{ cursor: 'default' }}>
-                <div className="tenant-avatar" style={{
-                  background: isPayment ? '#E8F5E9' : '#FFF3E0',
-                  color: isPayment ? '#2E7D32' : '#E65100',
-                }}>
-                  {isPayment ? <ArrowUpRight size={22} /> : <ArrowDownRight size={22} />}
+          {OUTSTANDING_INVOICES.map((inv) => (
+            <div key={inv.id} className="tenant-row" style={{ cursor: 'default' }}>
+              <div className="tenant-avatar" style={{
+                background: inv.status === 'overdue' ? '#C6282815' : '#E6510015',
+                color: inv.status === 'overdue' ? '#C62828' : '#E65100',
+              }}>
+                {inv.status === 'overdue' ? <AlertCircle size={22} /> : <CheckCircle2 size={22} />}
+              </div>
+              <div className="tenant-info">
+                <span className="tenant-name">{inv.tenant} · {inv.id}</span>
+                <div className="tenant-contact">
+                  <span className="tenant-contact-item">{inv.unit}</span>
+                  <span className="tenant-contact-item">
+                    {inv.daysLate > 0 ? `${inv.daysLate} days late` : 'Due today'}
+                  </span>
                 </div>
-                <div className="tenant-info">
-                  <span className="tenant-name">{t.description}</span>
-                  <div className="tenant-contact">
-                    <span className="tenant-contact-item">{t.date}</span>
-                    <span className="tenant-contact-item">{t.account}</span>
-                    <span className="tenant-contact-item">#{t.id}</span>
-                  </div>
-                </div>
-                <span style={{
-                  fontWeight: 700,
-                  fontSize: 14,
-                  color: isPayment ? '#2E7D32' : '#C62828',
-                  whiteSpace: 'nowrap',
-                }}>
-                  {formatCurrency(t.amount, { signed: true })}
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontWeight: 700, color: '#1a1a1a' }}>{formatCurrency(inv.amount)}</div>
+                <span className={`unit-status ${inv.status === 'overdue' ? 'unit-vacant' : 'status-in_progress'}`}>
+                  {inv.status === 'overdue' ? 'Overdue' : 'Due'}
                 </span>
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
       </div>
     </div>

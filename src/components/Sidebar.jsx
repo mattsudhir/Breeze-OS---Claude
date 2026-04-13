@@ -32,6 +32,7 @@ export default function Sidebar({ activeView, onNavigate, collapsed, onToggleCol
             needing any CSS changes. */}
         <button
           type="button"
+          className="sidebar-logo-btn"
           onClick={onToggleCollapse}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -42,6 +43,8 @@ export default function Sidebar({ activeView, onNavigate, collapsed, onToggleCol
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
+            flex: 1,
+            minWidth: 0,
           }}
         >
           <BreezeLogo size={collapsed ? 32 : 36} showText={!collapsed} />

@@ -1,18 +1,83 @@
-<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Breeze Property Group favicon — pure-SVG recreation of the three-
+       building mark from the full brand banner. Self-contained (no
+       external image references), so it renders in every modern browser's
+       favicon slot without hitting the favicon SVG security restrictions.
+       Matches the silver/gray gradient aesthetic of the banner logo. -->
   <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#00B4D8"/>
-      <stop offset="50%" stop-color="#0077B6"/>
-      <stop offset="100%" stop-color="#023E8A"/>
+    <linearGradient id="bldg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#D1D6DD"/>
+      <stop offset="55%" stop-color="#9CA3AE"/>
+      <stop offset="100%" stop-color="#7A8291"/>
     </linearGradient>
   </defs>
-  <circle cx="60" cy="60" r="56" fill="url(#bg)"/>
-  <path d="M25 42 Q50 38, 72 42 Q82 44, 85 38 Q88 32, 80 30" stroke="rgba(255,255,255,0.85)" stroke-width="4" stroke-linecap="round" fill="none"/>
-  <path d="M20 58 Q48 52, 78 58 Q90 60, 94 52 Q98 44, 88 42" stroke="rgba(255,255,255,0.9)" stroke-width="4.5" stroke-linecap="round" fill="none"/>
-  <path d="M28 74 Q55 68, 82 74 Q92 76, 95 68" stroke="rgba(255,255,255,0.8)" stroke-width="3.5" stroke-linecap="round" fill="none"/>
-  <g transform="translate(38, 68) scale(0.7)">
-    <path d="M30 10 L5 30 L55 30 Z" fill="white" opacity="0.95"/>
-    <rect x="10" y="30" width="40" height="25" rx="2" fill="white" opacity="0.9"/>
-    <rect x="23" y="38" width="14" height="17" rx="1" fill="#0077B6" opacity="0.8"/>
-  </g>
+
+  <!-- Left building (shortest) -->
+  <rect x="18" y="82" width="42" height="98" fill="url(#bldg)" stroke="#4A5262" stroke-width="2.5"/>
+  <rect x="25" y="92"  width="7" height="7" fill="#4A5262"/>
+  <rect x="36" y="92"  width="7" height="7" fill="#4A5262"/>
+  <rect x="47" y="92"  width="7" height="7" fill="#4A5262"/>
+  <rect x="25" y="108" width="7" height="7" fill="#4A5262"/>
+  <rect x="36" y="108" width="7" height="7" fill="#4A5262"/>
+  <rect x="47" y="108" width="7" height="7" fill="#4A5262"/>
+  <rect x="25" y="124" width="7" height="7" fill="#4A5262"/>
+  <rect x="36" y="124" width="7" height="7" fill="#4A5262"/>
+  <rect x="47" y="124" width="7" height="7" fill="#4A5262"/>
+  <rect x="25" y="140" width="7" height="7" fill="#4A5262"/>
+  <rect x="36" y="140" width="7" height="7" fill="#4A5262"/>
+  <rect x="47" y="140" width="7" height="7" fill="#4A5262"/>
+  <rect x="25" y="156" width="7" height="7" fill="#4A5262"/>
+  <rect x="36" y="156" width="7" height="7" fill="#4A5262"/>
+  <rect x="47" y="156" width="7" height="7" fill="#4A5262"/>
+
+  <!-- Middle building (tallest) -->
+  <rect x="68" y="28" width="50" height="152" fill="url(#bldg)" stroke="#4A5262" stroke-width="2.5"/>
+  <rect x="76"  y="38"  width="8" height="8" fill="#4A5262"/>
+  <rect x="89"  y="38"  width="8" height="8" fill="#4A5262"/>
+  <rect x="102" y="38"  width="8" height="8" fill="#4A5262"/>
+  <rect x="76"  y="56"  width="8" height="8" fill="#4A5262"/>
+  <rect x="89"  y="56"  width="8" height="8" fill="#4A5262"/>
+  <rect x="102" y="56"  width="8" height="8" fill="#4A5262"/>
+  <rect x="76"  y="74"  width="8" height="8" fill="#4A5262"/>
+  <rect x="89"  y="74"  width="8" height="8" fill="#4A5262"/>
+  <rect x="102" y="74"  width="8" height="8" fill="#4A5262"/>
+  <rect x="76"  y="92"  width="8" height="8" fill="#4A5262"/>
+  <rect x="89"  y="92"  width="8" height="8" fill="#4A5262"/>
+  <rect x="102" y="92"  width="8" height="8" fill="#4A5262"/>
+  <rect x="76"  y="110" width="8" height="8" fill="#4A5262"/>
+  <rect x="89"  y="110" width="8" height="8" fill="#4A5262"/>
+  <rect x="102" y="110" width="8" height="8" fill="#4A5262"/>
+  <rect x="76"  y="128" width="8" height="8" fill="#4A5262"/>
+  <rect x="89"  y="128" width="8" height="8" fill="#4A5262"/>
+  <rect x="102" y="128" width="8" height="8" fill="#4A5262"/>
+  <rect x="76"  y="146" width="8" height="8" fill="#4A5262"/>
+  <rect x="89"  y="146" width="8" height="8" fill="#4A5262"/>
+  <rect x="102" y="146" width="8" height="8" fill="#4A5262"/>
+  <rect x="76"  y="162" width="8" height="8" fill="#4A5262"/>
+  <rect x="89"  y="162" width="8" height="8" fill="#4A5262"/>
+  <rect x="102" y="162" width="8" height="8" fill="#4A5262"/>
+
+  <!-- Right building (medium) -->
+  <rect x="126" y="58" width="44" height="122" fill="url(#bldg)" stroke="#4A5262" stroke-width="2.5"/>
+  <rect x="134" y="68"  width="7" height="7" fill="#4A5262"/>
+  <rect x="145" y="68"  width="7" height="7" fill="#4A5262"/>
+  <rect x="156" y="68"  width="7" height="7" fill="#4A5262"/>
+  <rect x="134" y="84"  width="7" height="7" fill="#4A5262"/>
+  <rect x="145" y="84"  width="7" height="7" fill="#4A5262"/>
+  <rect x="156" y="84"  width="7" height="7" fill="#4A5262"/>
+  <rect x="134" y="100" width="7" height="7" fill="#4A5262"/>
+  <rect x="145" y="100" width="7" height="7" fill="#4A5262"/>
+  <rect x="156" y="100" width="7" height="7" fill="#4A5262"/>
+  <rect x="134" y="116" width="7" height="7" fill="#4A5262"/>
+  <rect x="145" y="116" width="7" height="7" fill="#4A5262"/>
+  <rect x="156" y="116" width="7" height="7" fill="#4A5262"/>
+  <rect x="134" y="132" width="7" height="7" fill="#4A5262"/>
+  <rect x="145" y="132" width="7" height="7" fill="#4A5262"/>
+  <rect x="156" y="132" width="7" height="7" fill="#4A5262"/>
+  <rect x="134" y="148" width="7" height="7" fill="#4A5262"/>
+  <rect x="145" y="148" width="7" height="7" fill="#4A5262"/>
+  <rect x="156" y="148" width="7" height="7" fill="#4A5262"/>
+  <rect x="134" y="164" width="7" height="7" fill="#4A5262"/>
+  <rect x="145" y="164" width="7" height="7" fill="#4A5262"/>
+  <rect x="156" y="164" width="7" height="7" fill="#4A5262"/>
 </svg>
