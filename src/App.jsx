@@ -11,6 +11,8 @@ import WorkflowsPage from './components/WorkflowsPage';
 import AccountingPage from './components/AccountingPage';
 import LeasingPage from './components/LeasingPage';
 import ReportsPage from './components/ReportsPage';
+import SettingsPage from './components/SettingsPage';
+import HelpPage from './components/HelpPage';
 import './App.css';
 
 function App() {
@@ -53,6 +55,8 @@ function App() {
     if (activeView === 'accounting') return <AccountingPage />;
     if (activeView === 'leasing') return <LeasingPage />;
     if (activeView === 'reports') return <ReportsPage />;
+    if (activeView === 'settings') return <SettingsPage />;
+    if (activeView === 'help') return <HelpPage />;
     if (activeView === 'dashboard' || showClassic) {
       return <ClassicDashboard onNavigate={handleNavigate} />;
     }
