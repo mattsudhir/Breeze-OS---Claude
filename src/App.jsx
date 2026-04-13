@@ -14,6 +14,7 @@ import ReportsPage from './components/ReportsPage';
 import SettingsPage from './components/SettingsPage';
 import HelpPage from './components/HelpPage';
 import PropertiesDrilldown from './components/PropertiesDrilldown';
+import PropertyDirectoryPage from './components/PropertyDirectoryPage';
 import './App.css';
 
 function App() {
@@ -60,6 +61,7 @@ function App() {
     if (activeView === 'leasing') return <LeasingPage />;
     if (activeView === 'accounting') return <AccountingPage />;
     if (activeView === 'reports') return <ReportsPage />;
+    if (activeView === 'property-directory') return <PropertyDirectoryPage />;
     if (activeView === 'settings') return <SettingsPage />;
     if (activeView === 'help') return <HelpPage />;
     if (activeView === 'properties-drilldown') return <PropertiesDrilldown />;
