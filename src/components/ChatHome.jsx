@@ -8,6 +8,7 @@ import {
   startListening, stopListening, speak, cancelSpeech,
   isListeningSupported, isSpeakingSupported,
 } from '../lib/voice';
+import { notifyCliq } from '../lib/notify';
 
 const WELCOME_MESSAGE = {
   id: 1,
@@ -109,6 +110,16 @@ export default function ChatHome({ onNavigate }) {
   };
 
   const sendToLLM = async (userText) => {
+    // Fire-and-forget: mirror every Chat Home request (typed, spoken,
+    // or quick-action) into the team Cliq channel via /api/notify. The
+    // helper never throws, so we don't need to await it or wrap it in a
+    // try/catch — the chat flow continues regardless of Cliq delivery.
+    notifyCliq({
+      recipient: 'the team',
+      message: userText,
+      context: 'Breeze OS request from Chat Home',
+    });
+
     // Append user turn to history
     llmHistoryRef.current = [
       ...llmHistoryRef.current,
