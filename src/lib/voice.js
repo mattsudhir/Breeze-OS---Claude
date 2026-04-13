@@ -94,9 +94,18 @@ export function startListeningServerSide({ onInterim, onFinal, onError } = {}) {
 
   stopListening(); // cancel any in-flight native recognition
 
+  // Minimum time to keep recording before we honour a stop request. Without
+  // this, a quick tap-tap cycle or any stray re-render can stop the recorder
+  // before the mic has produced any real audio — the blob ends up as just
+  // the WebM container header (a few hundred bytes) with no speech in it.
+  const MIN_RECORD_MS = 600;
+  const recordStartedAt = Date.now();
+
   let didStop = false;
+  let pendingStop = false;
   let stream = null;
   let recorder = null;
+  let recorderReady = false;
   const chunks = [];
 
   vlog('server-side listening: requesting mic');
@@ -137,6 +146,16 @@ export function startListeningServerSide({ onInterim, onFinal, onError } = {}) {
 
       recorder = new MediaRecorder(stream, { mimeType: mime });
       currentMediaRecorder = recorder;
+
+      // Log the audio track state so we can verify the mic is actually live
+      const tracks = stream.getAudioTracks();
+      vlog('server-side: audio tracks', tracks.map((t) => ({
+        label: t.label,
+        enabled: t.enabled,
+        muted: t.muted,
+        readyState: t.readyState,
+        settings: t.getSettings?.(),
+      })));
 
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) {
@@ -205,12 +224,20 @@ export function startListeningServerSide({ onInterim, onFinal, onError } = {}) {
         }
       };
 
-      // Start with a 250ms timeslice so ondataavailable fires continuously
-      // instead of only when stop() is called. This way even very short
-      // recordings produce real audio chunks, and we don't lose buffered
-      // data if the recorder is interrupted.
-      recorder.start(250);
-      vlog('server-side listening: recording started with 250ms timeslice');
+      // Start WITHOUT a timeslice so MediaRecorder buffers the entire
+      // recording and flushes once on stop(). Timeslice-mode is fine in
+      // theory but in practice has caused tiny-blob symptoms where the
+      // recorder stops mid-first-chunk and we lose most of the audio.
+      recorder.start();
+      recorderReady = true;
+      vlog('server-side listening: recording started');
+
+      // If the user tapped stop during getUserMedia (before recorder was
+      // ready), honour that now.
+      if (pendingStop) {
+        vlog('server-side listening: honouring pending stop');
+        finaliseStop();
+      }
     } catch (err) {
       vlog('server-side getUserMedia failed', err);
       cleanup();
@@ -232,23 +259,55 @@ export function startListeningServerSide({ onInterim, onFinal, onError } = {}) {
     currentMediaRecorder = null;
   }
 
-  // Return a stop handle the UI can call when the user taps stop.
-  return () => {
+  // Actually stop the recorder. Called either directly by the UI (after
+  // the minimum duration has elapsed) or deferred if the user hit stop
+  // before the mic was fully warmed up.
+  function finaliseStop() {
     if (didStop) return;
     didStop = true;
     try {
       if (recorder && recorder.state !== 'inactive') {
+        vlog('finaliseStop: calling recorder.stop()');
         recorder.stop();
-      } else {
-        // Mic-grab may still be pending. Make sure we release the stream
-        // and surface a graceful failure.
+      } else if (!recorderReady) {
+        vlog('finaliseStop: recorder not ready — deferring');
+        // Shouldn't happen — pendingStop handles this — but be defensive.
         cleanup();
         onError?.(new Error('Recording stopped before it started. Try again.'));
+      } else {
+        vlog('finaliseStop: recorder already inactive');
+        cleanup();
       }
     } catch (err) {
       cleanup();
       onError?.(new Error(`Failed to stop recording: ${err.message}`));
     }
+  }
+
+  // Return a stop handle the UI can call when the user taps stop.
+  return () => {
+    if (didStop) return;
+
+    // If getUserMedia hasn't finished yet, queue the stop for when it does
+    if (!recorderReady) {
+      vlog('stop requested before recorder ready — queuing');
+      pendingStop = true;
+      return;
+    }
+
+    // Enforce a minimum recording duration. If the user stopped too fast,
+    // wait out the remaining time before actually stopping. This prevents
+    // the tiny-blob symptom where the recorder flushes before any audio
+    // frames have been captured.
+    const elapsed = Date.now() - recordStartedAt;
+    if (elapsed < MIN_RECORD_MS) {
+      const remaining = MIN_RECORD_MS - elapsed;
+      vlog(`stop requested after only ${elapsed}ms — holding for ${remaining}ms more`);
+      setTimeout(finaliseStop, remaining);
+      return;
+    }
+
+    finaliseStop();
   };
 }
 
