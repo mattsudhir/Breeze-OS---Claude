@@ -119,16 +119,11 @@ export function startListeningServerSide({ onInterim, onFinal, onError } = {}) {
   // still pending.
   (async () => {
     try {
-      // Request mic with voice-optimised processing on. Without these
-      // constraints some Edge/Chromium builds deliver nearly silent audio
-      // because they default to music-capture levels.
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      // Request mic. Start with constraints OFF — earlier experiments
+      // with echoCancellation/noiseSuppression/autoGainControl sometimes
+      // yielded silent audio on Edge. Bare-minimum config is more likely
+      // to give usable audio across devices.
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       currentMediaStream = stream;
 
       // Pick a MIME type the browser supports AND /api/stt can handle.
@@ -157,6 +152,42 @@ export function startListeningServerSide({ onInterim, onFinal, onError } = {}) {
         settings: t.getSettings?.(),
       })));
 
+      // Sample the input signal level while recording via Web Audio API.
+      // If the peak never crosses a small threshold during the recording,
+      // we know the mic is physically silent even though bytes are flowing.
+      // This lets us give a much more specific error than "empty transcript".
+      let peakLevel = 0;
+      let audioCtx = null;
+      let analyser = null;
+      let levelInterval = null;
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (AudioCtx) {
+          audioCtx = new AudioCtx();
+          const src = audioCtx.createMediaStreamSource(stream);
+          analyser = audioCtx.createAnalyser();
+          analyser.fftSize = 2048;
+          src.connect(analyser);
+          const buf = new Uint8Array(analyser.fftSize);
+          levelInterval = setInterval(() => {
+            analyser.getByteTimeDomainData(buf);
+            // Compute peak deviation from silence (center = 128 for 8-bit)
+            let peak = 0;
+            for (let i = 0; i < buf.length; i++) {
+              const v = Math.abs(buf[i] - 128);
+              if (v > peak) peak = v;
+            }
+            if (peak > peakLevel) peakLevel = peak;
+          }, 100);
+        }
+      } catch (err) {
+        vlog('audio level monitor setup failed (non-fatal):', err?.message);
+      }
+      // Expose so cleanup can tear it down
+      recorder._levelInterval = levelInterval;
+      recorder._audioCtx = audioCtx;
+      recorder._getPeakLevel = () => peakLevel;
+
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) {
           chunks.push(e.data);
@@ -171,14 +202,22 @@ export function startListeningServerSide({ onInterim, onFinal, onError } = {}) {
       };
 
       recorder.onstop = async () => {
-        // Compute blob stats before cleanup (cleanup doesn't touch chunks,
-        // but being explicit helps with debugging).
+        // Capture peak audio level BEFORE teardown
+        const peakLevel = recorder._getPeakLevel?.() ?? 0;
         const totalBytes = chunks.reduce((sum, c) => sum + (c.size || 0), 0);
         vlog('server-side listening: recorder stopped', {
           chunks: chunks.length,
           totalBytes,
+          peakLevel,
           didStop,
         });
+
+        // Tear down the audio level monitor
+        if (recorder._levelInterval) clearInterval(recorder._levelInterval);
+        if (recorder._audioCtx && recorder._audioCtx.state !== 'closed') {
+          try { recorder._audioCtx.close(); } catch {}
+        }
+
         cleanup();
 
         if (chunks.length === 0 || totalBytes === 0) {
@@ -187,7 +226,20 @@ export function startListeningServerSide({ onInterim, onFinal, onError } = {}) {
         }
 
         const blob = new Blob(chunks, { type: mime });
-        vlog('server-side: blob built', { size: blob.size, type: blob.type });
+        vlog('server-side: blob built', { size: blob.size, type: blob.type, peakLevel });
+
+        // If the live level meter never saw meaningful input during the
+        // entire recording, tell the user specifically instead of asking
+        // them to check their mic indirectly. peakLevel of ~5 or less
+        // out of 128 is effectively room tone / electrical noise.
+        if (peakLevel < 6) {
+          onError?.(new Error(
+            'Your microphone appears to be silent. The recording ran but no sound was detected. ' +
+            'Open Windows → Settings → System → Sound → Input and confirm the correct microphone ' +
+            'is selected and its level is above zero. Then reload this page and try again.'
+          ));
+          return;
+        }
 
         try {
           const res = await fetch('/api/stt', {
