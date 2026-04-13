@@ -34,8 +34,13 @@ function isAuthorized(req) {
 }
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ ok: false, error: 'POST only' });
+  // Accept both GET and POST. Migrations are idempotent, protected by
+  // the admin token, and called manually — pasting a URL into a mobile
+  // browser is a legitimate invocation pattern and far easier than
+  // reaching for a terminal. GET is safe here specifically because the
+  // operation is idempotent and authenticated.
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    return res.status(405).json({ ok: false, error: 'GET or POST only' });
   }
   if (!isAuthorized(req)) {
     return res.status(401).json({ ok: false, error: 'Unauthorized' });
