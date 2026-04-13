@@ -130,7 +130,10 @@ export function startListeningServerSide({ onInterim, onFinal, onError } = {}) {
       currentMediaRecorder = recorder;
 
       recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) chunks.push(e.data);
+        if (e.data && e.data.size > 0) {
+          chunks.push(e.data);
+          vlog('server-side: data chunk', { size: e.data.size, chunksCount: chunks.length });
+        }
       };
 
       recorder.onerror = (e) => {
@@ -140,20 +143,23 @@ export function startListeningServerSide({ onInterim, onFinal, onError } = {}) {
       };
 
       recorder.onstop = async () => {
-        vlog('server-side listening: recorder stopped, uploading');
+        // Compute blob stats before cleanup (cleanup doesn't touch chunks,
+        // but being explicit helps with debugging).
+        const totalBytes = chunks.reduce((sum, c) => sum + (c.size || 0), 0);
+        vlog('server-side listening: recorder stopped', {
+          chunks: chunks.length,
+          totalBytes,
+          didStop,
+        });
         cleanup();
 
-        if (didStop === false) return; // user didn't tap stop — probably an error
-        if (chunks.length === 0) {
-          onError?.(new Error('No audio was captured. Try again.'));
+        if (chunks.length === 0 || totalBytes === 0) {
+          onError?.(new Error('No audio was captured. Check that your microphone is working and try again.'));
           return;
         }
 
         const blob = new Blob(chunks, { type: mime });
-        if (blob.size < 1000) {
-          onError?.(new Error('Recording was too short. Hold the button a bit longer.'));
-          return;
-        }
+        vlog('server-side: blob built', { size: blob.size, type: blob.type });
 
         try {
           const res = await fetch('/api/stt', {
@@ -162,7 +168,7 @@ export function startListeningServerSide({ onInterim, onFinal, onError } = {}) {
             body: blob,
           });
           const data = await res.json();
-          vlog('server-side /api/stt response', { status: res.status, ok: data.ok });
+          vlog('server-side /api/stt response', { status: res.status, ok: data.ok, text: data.text });
 
           if (!res.ok || !data.ok) {
             onError?.(new Error(data.error || `STT failed: HTTP ${res.status}`));
@@ -181,8 +187,12 @@ export function startListeningServerSide({ onInterim, onFinal, onError } = {}) {
         }
       };
 
-      recorder.start();
-      vlog('server-side listening: recording');
+      // Start with a 250ms timeslice so ondataavailable fires continuously
+      // instead of only when stop() is called. This way even very short
+      // recordings produce real audio chunks, and we don't lose buffered
+      // data if the recorder is interrupted.
+      recorder.start(250);
+      vlog('server-side listening: recording started with 250ms timeslice');
     } catch (err) {
       vlog('server-side getUserMedia failed', err);
       cleanup();
