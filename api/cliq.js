@@ -108,16 +108,17 @@ function verifyToken(req) {
   return { ok: true };
 }
 
-// Build a Cliq bot reply body. Cliq accepts `{ text, card, slides }`.
-// We include a minimal card so the message is clearly attributed to
-// Breeze AI in channels.
+// Build a Cliq bot reply body. Cliq accepts `{ text, card, slides }`,
+// but when a `card` is present Cliq renders the card container and pulls
+// the body out of `slides` — it will IGNORE the top-level `text` and
+// fall back to its built-in "<bot> didn't return a response" placeholder
+// if `slides` is missing. So we keep the reply minimal: the plain `text`
+// field plus a `bot` name for attribution. This matches the shape the
+// outbound notify_team webhook uses in lib/breezeAgent.js.
 function cliqReply(text) {
   return {
     text,
-    card: {
-      title: 'Breeze AI',
-      theme: 'modern-inline',
-    },
+    bot: { name: 'Breeze AI' },
   };
 }
 
