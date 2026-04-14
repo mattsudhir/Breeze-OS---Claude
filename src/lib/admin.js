@@ -118,6 +118,16 @@ export const seed = {
   run: () => adminFetch('/api/admin/seed', { method: 'POST' }),
 };
 
+// ── Assign providers by city ─────────────────────────────────────
+
+export const assignProvidersByCity = {
+  run: ({ overwrite = false, cityFilter = null } = {}) =>
+    adminFetch('/api/admin/assign-providers-by-city', {
+      method: 'POST',
+      body: { overwrite, cityFilter },
+    }),
+};
+
 // ── Bulk import ──────────────────────────────────────────────────
 
 export const bulkImport = {

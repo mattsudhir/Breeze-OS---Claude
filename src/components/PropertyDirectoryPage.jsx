@@ -15,6 +15,7 @@ import {
   propertyUtilities as propertyUtilitiesApi,
   utilityProviders as providersApi,
   seed as seedApi,
+  assignProvidersByCity as assignProvidersByCityApi,
   bulkImport as bulkImportApi,
   bulkUtilityConfig as bulkUtilityConfigApi,
   gridImport as gridImportApi,
@@ -1319,6 +1320,8 @@ function ProvidersTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [seeding, setSeeding] = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const [assignResult, setAssignResult] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1343,21 +1346,63 @@ function ProvidersTab() {
     load();
   };
 
+  const handleAssignByCity = async () => {
+    const overwrite = confirm(
+      'Assign providers to property_utilities rows based on each property\'s service_city.\n\n' +
+      'Click OK to ONLY fill rows that currently have no provider (safer).\n' +
+      'Click Cancel to abort.\n\n' +
+      'To overwrite existing provider_ids too, use the advanced flow later.',
+    );
+    if (!overwrite) return;
+    setAssigning(true);
+    setAssignResult(null);
+    const res = await assignProvidersByCityApi.run({ overwrite: false });
+    setAssigning(false);
+    if (!res.ok) {
+      alert(res.error);
+      return;
+    }
+    setAssignResult(res);
+  };
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <div>
           <strong>{rows.length} provider{rows.length === 1 ? '' : 's'}</strong>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button type="button" onClick={load} style={smallButtonStyle}>
             <RefreshCw size={14} style={{ marginRight: 4 }} /> Refresh
           </button>
           <button type="button" onClick={handleSeed} disabled={seeding} style={smallButtonStyle}>
             {seeding ? 'Seeding…' : 'Run seed'}
           </button>
+          <button type="button" onClick={handleAssignByCity} disabled={assigning || rows.length === 0} style={smallButtonStyle}>
+            {assigning ? 'Assigning…' : 'Assign by city'}
+          </button>
         </div>
       </div>
+
+      {assignResult && (
+        <div style={{ padding: 12, marginBottom: 12, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6, fontSize: 13, color: '#166534' }}>
+          <strong>✅ {assignResult.message}</strong>
+          <ul style={{ marginTop: 4, marginBottom: 4 }}>
+            <li>Properties scanned: {assignResult.propertiesScanned}</li>
+            <li>Properties mapped: {assignResult.propertiesMapped}</li>
+            <li>Properties unmapped (city not in map): {assignResult.propertiesUnmapped}</li>
+            <li>Total provider_id writes: {assignResult.updateCount}</li>
+          </ul>
+          {assignResult.propertiesUnmapped > 0 && (
+            <details style={{ marginTop: 4 }}>
+              <summary style={{ cursor: 'pointer' }}>Show {assignResult.propertiesUnmapped} unmapped properties</summary>
+              <pre style={{ fontSize: 11, maxHeight: 200, overflow: 'auto', background: 'white', padding: 8, borderRadius: 4, marginTop: 4 }}>
+                {JSON.stringify(assignResult.unmapped, null, 2)}
+              </pre>
+            </details>
+          )}
+        </div>
+      )}
       {loading && <p style={{ color: '#888' }}>Loading…</p>}
       {error && <ErrorBox message={error} />}
       {!loading && !error && rows.length === 0 && (
