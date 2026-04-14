@@ -24,7 +24,15 @@ import {
 import { parseTSV } from '../lib/tsvImport';
 
 const UTILITY_TYPES = ['electric', 'gas', 'water', 'sewer', 'trash', 'internet', 'cable'];
-const ACCOUNT_HOLDERS = ['owner_llc', 'tenant'];
+// Display labels for account_holder enum values. 'none' means
+// "this utility isn't supplied at the property at all" — distinct
+// from "not yet configured" (no row) and "LLC-held" (we pay).
+const ACCOUNT_HOLDER_OPTIONS = [
+  { value: 'tenant', label: 'tenant (responsibility is theirs)' },
+  { value: 'owner_llc', label: 'owner_llc (we hold the account)' },
+  { value: 'none', label: 'none (utility not supplied here — N/A)' },
+];
+const ACCOUNT_HOLDERS = ACCOUNT_HOLDER_OPTIONS.map((o) => o.value);
 const PROPERTY_TYPES = ['sfr', 'multi_family', 'commercial', 'mixed'];
 const US_STATES = ['OH', 'MI', 'IN', 'KY', 'PA', 'WV', 'IL'];
 
@@ -303,10 +311,7 @@ function BulkConfigTab() {
             label="Account holder"
             value={form.accountHolder}
             onChange={update('accountHolder')}
-            select={[
-              { value: 'tenant', label: 'tenant (responsibility is theirs)' },
-              { value: 'owner_llc', label: 'owner_llc (we hold the account)' },
-            ]}
+            select={ACCOUNT_HOLDER_OPTIONS}
           />
         </div>
         <FormRow
@@ -1001,7 +1006,15 @@ function PropertyUtilitiesPanel({ propertyId, utilities, loading, onChanged }) {
           <div>
             <strong>{u.utilityType}</strong>
             <span style={{ color: '#666', marginLeft: 8 }}>
-              → {u.accountHolder === 'owner_llc' ? 'LLC-held' : 'Tenant-held'}
+              → {
+                u.accountHolder === 'owner_llc'
+                  ? 'LLC-held'
+                  : u.accountHolder === 'tenant'
+                  ? 'Tenant-held'
+                  : u.accountHolder === 'none'
+                  ? 'Not applicable'
+                  : u.accountHolder
+              }
             </span>
             {u.billbackTenant && <span style={{ color: '#E65100', marginLeft: 8 }}>billback</span>}
             {u.providerId && (
@@ -1023,7 +1036,7 @@ function PropertyUtilitiesPanel({ propertyId, utilities, loading, onChanged }) {
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <FormRow style={{ flex: 1, minWidth: 120 }} label="Type" value={form.utilityType} onChange={(e) => setForm({ ...form, utilityType: e.target.value })} select={UTILITY_TYPES} />
             <FormRow style={{ flex: 2, minWidth: 160 }} label="Provider" value={form.providerId} onChange={(e) => setForm({ ...form, providerId: e.target.value })} select={[{ value: '', label: '(none)' }, ...providers.map((p) => ({ value: p.id, label: p.name }))]} />
-            <FormRow style={{ flex: 1, minWidth: 120 }} label="Account holder" value={form.accountHolder} onChange={(e) => setForm({ ...form, accountHolder: e.target.value })} select={ACCOUNT_HOLDERS} />
+            <FormRow style={{ flex: 1, minWidth: 120 }} label="Account holder" value={form.accountHolder} onChange={(e) => setForm({ ...form, accountHolder: e.target.value })} select={ACCOUNT_HOLDER_OPTIONS} />
           </div>
           <FormRow label="Account # (optional)" value={form.currentAccountNumber} onChange={(e) => setForm({ ...form, currentAccountNumber: e.target.value })} />
           <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>

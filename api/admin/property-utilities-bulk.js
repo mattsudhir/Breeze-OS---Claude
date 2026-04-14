@@ -48,7 +48,7 @@ import {
 const VALID_UTILITY_TYPES = [
   'electric', 'gas', 'water', 'sewer', 'trash', 'internet', 'cable',
 ];
-const VALID_ACCOUNT_HOLDERS = ['tenant', 'owner_llc'];
+const VALID_ACCOUNT_HOLDERS = ['tenant', 'owner_llc', 'none'];
 
 function buildWhereClause(orgId, filter) {
   const clauses = [eq(schema.properties.organizationId, orgId)];

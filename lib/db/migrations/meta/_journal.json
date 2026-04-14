@@ -15,6 +15,13 @@
       "when": 1744657200000,
       "tag": "0001_units_and_bulk_import",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1744743600000,
+      "tag": "0002_account_holder_none",
+      "breakpoints": true
     }
   ]
 }
