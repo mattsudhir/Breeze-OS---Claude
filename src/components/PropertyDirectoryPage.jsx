@@ -8,7 +8,7 @@
 // PR, we can upgrade the primitives.
 
 import { useEffect, useState, useCallback } from 'react';
-import { Building2, Users, Zap, Database, RefreshCw, Plus, Trash2, Upload } from 'lucide-react';
+import { Building2, Users, Zap, Database, RefreshCw, Plus, Trash2, Upload, Settings2 } from 'lucide-react';
 import {
   owners as ownersApi,
   properties as propertiesApi,
@@ -16,6 +16,7 @@ import {
   utilityProviders as providersApi,
   seed as seedApi,
   bulkImport as bulkImportApi,
+  bulkUtilityConfig as bulkUtilityConfigApi,
   getAdminToken,
   setAdminToken,
   hasAdminToken,
@@ -95,12 +96,13 @@ export default function PropertyDirectoryPage() {
           </span>
         </div>
 
-        <div style={{ display: 'flex', gap: 8, marginBottom: 24, borderBottom: '1px solid #eee' }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 24, borderBottom: '1px solid #eee', flexWrap: 'wrap' }}>
           {[
             { id: 'owners', label: 'Owners (LLCs)', icon: Users },
             { id: 'properties', label: 'Properties', icon: Building2 },
             { id: 'providers', label: 'Utility Providers', icon: Zap },
             { id: 'import', label: 'Bulk Import', icon: Upload },
+            { id: 'bulkConfig', label: 'Bulk Config', icon: Settings2 },
           ].map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -130,8 +132,277 @@ export default function PropertyDirectoryPage() {
         {tab === 'properties' && <PropertiesTab />}
         {tab === 'providers' && <ProvidersTab />}
         {tab === 'import' && <BulkImportTab />}
+        {tab === 'bulkConfig' && <BulkConfigTab />}
       </div>
     </TokenGate>
+  );
+}
+
+// ── Bulk Config tab — bulk apply property_utilities by filter ────
+
+function BulkConfigTab() {
+  const [providers, setProviders] = useState([]);
+  const [form, setForm] = useState({
+    filterMode: 'rmPropertyIds', // 'rmPropertyIds' | 'city' | 'zipPrefix' | 'namePattern' | 'allProperties'
+    rmPropertyIdsText: '',
+    city: '',
+    state: 'OH',
+    zipPrefix: '',
+    namePattern: '',
+    utilityType: 'electric',
+    accountHolder: 'tenant',
+    providerId: '',
+    billbackTenant: false,
+    notes: '',
+  });
+  const [preview, setPreview] = useState(null);
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    providersApi.list().then((res) => {
+      if (res.ok) setProviders(res.providers || []);
+    });
+  }, []);
+
+  const buildFilter = () => {
+    const f = {};
+    switch (form.filterMode) {
+      case 'rmPropertyIds': {
+        const ids = form.rmPropertyIdsText
+          .split(/[,\s\n]+/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .map((s) => parseInt(s, 10))
+          .filter((n) => Number.isFinite(n));
+        f.rmPropertyIds = ids;
+        break;
+      }
+      case 'city':
+        f.city = form.city.trim();
+        if (form.state) f.state = form.state;
+        break;
+      case 'zipPrefix':
+        f.zipPrefix = form.zipPrefix.trim();
+        break;
+      case 'namePattern':
+        f.namePattern = form.namePattern.trim();
+        break;
+      case 'allProperties':
+        f.allProperties = true;
+        break;
+      default:
+        break;
+    }
+    return f;
+  };
+
+  const buildBody = (dryRun) => ({
+    filter: buildFilter(),
+    utilityType: form.utilityType,
+    accountHolder: form.accountHolder,
+    providerId: form.providerId || null,
+    billbackTenant: form.billbackTenant,
+    notes: form.notes || null,
+    dryRun,
+  });
+
+  const handlePreview = async () => {
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    const res = await bulkUtilityConfigApi.apply(buildBody(true));
+    setBusy(false);
+    if (!res.ok) return setError(res.error);
+    setPreview(res);
+  };
+
+  const handleApply = async () => {
+    if (
+      !preview ||
+      !confirm(
+        `Apply ${form.utilityType}=${form.accountHolder} to ${preview.matchedCount} properties? ` +
+          'Any existing property-level utility row for this type will be updated in place.',
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    const res = await bulkUtilityConfigApi.apply(buildBody(false));
+    setBusy(false);
+    if (!res.ok) return setError(res.error);
+    setResult(res);
+    setPreview(null);
+  };
+
+  const update = (k) => (e) => {
+    const val = e?.target?.type === 'checkbox' ? e.target.checked : e?.target?.value ?? e;
+    setForm((prev) => ({ ...prev, [k]: val }));
+  };
+
+  return (
+    <div>
+      <div style={{ marginBottom: 16, padding: 12, background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, fontSize: 13, color: '#0c4a6e' }}>
+        <strong>Bulk configure utility assignments across many properties at once.</strong>
+        Pick a filter, choose a utility type + account holder, preview the match, then apply.
+        Existing property-level utility rows matching the utility type will be updated in place
+        (unit-level rows are never touched).
+      </div>
+
+      <div style={{ padding: 16, background: '#fafafa', borderRadius: 8, marginBottom: 16 }}>
+        <h3 style={{ marginTop: 0 }}>1. Choose a filter</h3>
+        <FormRow
+          label="Match by"
+          value={form.filterMode}
+          onChange={update('filterMode')}
+          select={[
+            { value: 'rmPropertyIds', label: 'Rent Manager IDs (paste list)' },
+            { value: 'city', label: 'City contains' },
+            { value: 'zipPrefix', label: 'ZIP starts with' },
+            { value: 'namePattern', label: 'Name contains' },
+            { value: 'allProperties', label: 'All properties (careful!)' },
+          ]}
+        />
+
+        {form.filterMode === 'rmPropertyIds' && (
+          <FormRow
+            label="Rent Manager Property IDs"
+            value={form.rmPropertyIdsText}
+            onChange={update('rmPropertyIdsText')}
+            placeholder="688, 689, 690 or one per line"
+          />
+        )}
+        {form.filterMode === 'city' && (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <FormRow style={{ flex: 2 }} label="City" value={form.city} onChange={update('city')} placeholder="Toledo" />
+            <FormRow style={{ flex: 1 }} label="State (optional)" value={form.state} onChange={update('state')} placeholder="OH" />
+          </div>
+        )}
+        {form.filterMode === 'zipPrefix' && (
+          <FormRow label="ZIP prefix" value={form.zipPrefix} onChange={update('zipPrefix')} placeholder="445 (Youngstown area)" />
+        )}
+        {form.filterMode === 'namePattern' && (
+          <FormRow label="Name contains" value={form.namePattern} onChange={update('namePattern')} placeholder="Ottawa" />
+        )}
+      </div>
+
+      <div style={{ padding: 16, background: '#fafafa', borderRadius: 8, marginBottom: 16 }}>
+        <h3 style={{ marginTop: 0 }}>2. Utility to configure</h3>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <FormRow
+            style={{ flex: 1 }}
+            label="Utility type"
+            value={form.utilityType}
+            onChange={update('utilityType')}
+            select={['electric', 'gas', 'water', 'sewer', 'trash', 'internet', 'cable']}
+          />
+          <FormRow
+            style={{ flex: 1 }}
+            label="Account holder"
+            value={form.accountHolder}
+            onChange={update('accountHolder')}
+            select={[
+              { value: 'tenant', label: 'tenant (responsibility is theirs)' },
+              { value: 'owner_llc', label: 'owner_llc (we hold the account)' },
+            ]}
+          />
+        </div>
+        <FormRow
+          label="Provider (optional — skip to set later)"
+          value={form.providerId}
+          onChange={update('providerId')}
+          select={[
+            { value: '', label: '(none — set later)' },
+            ...providers.map((p) => ({ value: p.id, label: p.name })),
+          ]}
+        />
+        <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+          <input type="checkbox" checked={form.billbackTenant} onChange={update('billbackTenant')} />
+          Bill back to tenant (for LLC-held utilities like SFR water)
+        </label>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <button type="button" onClick={handlePreview} disabled={busy} style={primaryButtonStyle}>
+          {busy ? 'Matching…' : 'Preview match'}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setPreview(null);
+            setResult(null);
+            setError(null);
+          }}
+          style={smallButtonStyle}
+        >
+          Reset
+        </button>
+      </div>
+
+      {error && <ErrorBox message={error} />}
+
+      {preview && (
+        <div style={{ padding: 16, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, marginBottom: 16 }}>
+          <h3 style={{ marginTop: 0 }}>Matched {preview.matchedCount} properties</h3>
+          {preview.matchedCount === 0 && <p style={{ color: '#888' }}>No properties matched. Adjust the filter.</p>}
+          {preview.matchedCount > 0 && (
+            <>
+              <div style={{ maxHeight: 260, overflow: 'auto', fontSize: 12, border: '1px solid #eee', borderRadius: 6, background: 'white' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead style={{ background: '#f3f4f6', position: 'sticky', top: 0 }}>
+                    <tr>
+                      <th style={thStyle}>RM ID</th>
+                      <th style={thStyle}>Name</th>
+                      <th style={thStyle}>City</th>
+                      <th style={thStyle}>State</th>
+                      <th style={thStyle}>ZIP</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.matchedPreview.map((p) => (
+                      <tr key={p.id}>
+                        <td style={tdStyle}>{p.rmPropertyId}</td>
+                        <td style={tdStyle}>{p.displayName}</td>
+                        <td style={tdStyle}>{p.serviceCity}</td>
+                        <td style={tdStyle}>{p.serviceState}</td>
+                        <td style={tdStyle}>{p.serviceZip}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {preview.matchedCount > preview.matchedPreview.length && (
+                <p style={{ fontSize: 12, color: '#888', margin: '8px 0' }}>
+                  Showing first {preview.matchedPreview.length} of {preview.matchedCount}.
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={handleApply}
+                disabled={busy}
+                style={{ ...primaryButtonStyle, background: '#15803d', marginTop: 12 }}
+              >
+                {busy ? 'Applying…' : `Apply ${form.utilityType}=${form.accountHolder} to ${preview.matchedCount} properties`}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {result && (
+        <div style={{ padding: 16, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, color: '#166534' }}>
+          <h3 style={{ marginTop: 0 }}>✅ Applied</h3>
+          <ul>
+            <li><strong>{result.matchedCount}</strong> properties matched</li>
+            <li><strong>{result.insertedCount}</strong> new utility rows inserted</li>
+            <li><strong>{result.updatedCount}</strong> existing utility rows updated</li>
+          </ul>
+          <p style={{ fontSize: 12, color: '#555' }}>{result.message}</p>
+        </div>
+      )}
+    </div>
   );
 }
 

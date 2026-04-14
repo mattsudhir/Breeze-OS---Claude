@@ -15,9 +15,10 @@
     { "source": "/api/admin/properties",         "destination": "/api/admin/properties" },
     { "source": "/api/admin/property-utilities", "destination": "/api/admin/property-utilities" },
     { "source": "/api/admin/utility-providers",  "destination": "/api/admin/utility-providers" },
-    { "source": "/api/admin/seed",               "destination": "/api/admin/seed" },
-    { "source": "/api/admin/bulk-import",        "destination": "/api/admin/bulk-import" },
-    { "source": "/api/(.*)",                     "destination": "/api/rentmanager" }
+    { "source": "/api/admin/seed",                    "destination": "/api/admin/seed" },
+    { "source": "/api/admin/bulk-import",             "destination": "/api/admin/bulk-import" },
+    { "source": "/api/admin/property-utilities-bulk", "destination": "/api/admin/property-utilities-bulk" },
+    { "source": "/api/(.*)",                          "destination": "/api/rentmanager" }
   ],
   "functions": {
     "api/rentmanager.js":                { "maxDuration": 30 },
@@ -33,7 +34,8 @@
     "api/admin/properties.js":           { "maxDuration": 15 },
     "api/admin/property-utilities.js":   { "maxDuration": 15 },
     "api/admin/utility-providers.js":    { "maxDuration": 15 },
-    "api/admin/seed.js":                 { "maxDuration": 15 },
-    "api/admin/bulk-import.js":          { "maxDuration": 60 }
+    "api/admin/seed.js":                      { "maxDuration": 15 },
+    "api/admin/bulk-import.js":               { "maxDuration": 60 },
+    "api/admin/property-utilities-bulk.js":   { "maxDuration": 30 }
   }
 }

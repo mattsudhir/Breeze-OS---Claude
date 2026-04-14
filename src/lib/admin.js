@@ -123,3 +123,12 @@ export const seed = {
 export const bulkImport = {
   run: (body) => adminFetch('/api/admin/bulk-import', { method: 'POST', body }),
 };
+
+// ── Bulk utility config ─────────────────────────────────────────
+
+export const bulkUtilityConfig = {
+  // Preview + apply share the same endpoint. Pass dryRun:true for
+  // preview, dryRun:false (or omit) to actually write.
+  apply: (body) =>
+    adminFetch('/api/admin/property-utilities-bulk', { method: 'POST', body }),
+};
