@@ -132,3 +132,14 @@ export const bulkUtilityConfig = {
   apply: (body) =>
     adminFetch('/api/admin/property-utilities-bulk', { method: 'POST', body }),
 };
+
+// ── Move events ──────────────────────────────────────────────────
+
+export const moveEvents = {
+  list: () => adminFetch('/api/admin/move-events'),
+  get: (id) => adminFetch('/api/admin/move-events', { query: { id } }),
+  create: (body) => adminFetch('/api/admin/move-events', { method: 'POST', body }),
+  update: (id, body) =>
+    adminFetch('/api/admin/move-events', { method: 'PATCH', query: { id }, body }),
+  delete: (id) => adminFetch('/api/admin/move-events', { method: 'DELETE', query: { id } }),
+};

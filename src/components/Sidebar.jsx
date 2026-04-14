@@ -2,6 +2,7 @@ import {
   MessageSquare, LayoutDashboard, Building2, Users, FileText,
   DollarSign, Wrench, BarChart3, Settings, HelpCircle, LogOut,
   ChevronLeft, ChevronRight, CheckSquare, Workflow, Database,
+  Calendar,
 } from 'lucide-react';
 import BreezeLogo from './BreezeLogo';
 
@@ -18,6 +19,7 @@ const NAV_ITEMS = [
   { id: 'workflows', icon: Workflow, label: 'Workflows', section: 'manage' },
   { id: 'reports', icon: BarChart3, label: 'Reports', section: 'manage' },
   { id: 'property-directory', icon: Database, label: 'Property Directory', section: 'manage' },
+  { id: 'move-events', icon: Calendar, label: 'Move Events', section: 'manage' },
   { id: 'divider2', type: 'divider' },
   { id: 'settings', icon: Settings, label: 'Settings', section: 'bottom' },
   { id: 'help', icon: HelpCircle, label: 'Help', section: 'bottom' },
