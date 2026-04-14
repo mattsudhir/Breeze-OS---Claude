@@ -175,7 +175,8 @@ export default withAdminHandler(async (req, res) => {
   }
 
   const propertyIdsByRm = new Map(); // rmPropertyId → uuid
-  let propertiesUpserted = 0;
+  let propertiesInserted = 0;
+  let propertiesUpdated = 0;
   let unitsInserted = 0;
 
   // Everything below runs inside a transaction.
@@ -185,25 +186,29 @@ export default withAdminHandler(async (req, res) => {
         const inferred = group.propertyFields.propertyType ||
           inferPropertyType(group.units.length);
 
-        // UPSERT the property. Drizzle's onConflictDoUpdate uses the
-        // target index we created in migration 0001.
-        const [upserted] = await tx
-          .insert(schema.properties)
-          .values({
-            organizationId: orgId,
-            ownerId,
-            rmPropertyId,
-            displayName: group.propertyFields.displayName,
-            propertyType: inferred,
-            serviceAddressLine1: group.propertyFields.serviceAddressLine1,
-            serviceAddressLine2: group.propertyFields.serviceAddressLine2,
-            serviceCity: group.propertyFields.serviceCity,
-            serviceState: group.propertyFields.serviceState,
-            serviceZip: group.propertyFields.serviceZip || '',
-          })
-          .onConflictDoUpdate({
-            target: [schema.properties.organizationId, schema.properties.rmPropertyId],
-            set: {
+        // Lookup-then-insert-or-update. Avoids depending on a partial
+        // unique index for ON CONFLICT inference — postgres requires an
+        // exact match including the WHERE predicate for partial
+        // indexes, which makes onConflictDoUpdate fragile. Three round
+        // trips per property × ~300 properties is still well under a
+        // second against Neon, so the clarity win is free.
+        const existing = await tx
+          .select({ id: schema.properties.id })
+          .from(schema.properties)
+          .where(
+            and(
+              eq(schema.properties.organizationId, orgId),
+              eq(schema.properties.rmPropertyId, rmPropertyId),
+            ),
+          )
+          .limit(1);
+
+        let propertyRowId;
+        if (existing.length > 0) {
+          const [updated] = await tx
+            .update(schema.properties)
+            .set({
+              ownerId,
               displayName: group.propertyFields.displayName,
               propertyType: inferred,
               serviceAddressLine1: group.propertyFields.serviceAddressLine1,
@@ -212,24 +217,44 @@ export default withAdminHandler(async (req, res) => {
               serviceState: group.propertyFields.serviceState,
               serviceZip: group.propertyFields.serviceZip || '',
               updatedAt: new Date(),
-            },
-          })
-          .returning();
+            })
+            .where(eq(schema.properties.id, existing[0].id))
+            .returning({ id: schema.properties.id });
+          propertyRowId = updated.id;
+          propertiesUpdated += 1;
+        } else {
+          const [created] = await tx
+            .insert(schema.properties)
+            .values({
+              organizationId: orgId,
+              ownerId,
+              rmPropertyId,
+              displayName: group.propertyFields.displayName,
+              propertyType: inferred,
+              serviceAddressLine1: group.propertyFields.serviceAddressLine1,
+              serviceAddressLine2: group.propertyFields.serviceAddressLine2,
+              serviceCity: group.propertyFields.serviceCity,
+              serviceState: group.propertyFields.serviceState,
+              serviceZip: group.propertyFields.serviceZip || '',
+            })
+            .returning({ id: schema.properties.id });
+          propertyRowId = created.id;
+          propertiesInserted += 1;
+        }
 
-        propertyIdsByRm.set(rmPropertyId, upserted.id);
-        propertiesUpserted += 1;
+        propertyIdsByRm.set(rmPropertyId, propertyRowId);
 
         // Replace-strategy for units: delete existing, re-insert from
         // paste. Safe and predictable; destructive on re-runs, which
         // we call out in the response.
         await tx
           .delete(schema.units)
-          .where(eq(schema.units.propertyId, upserted.id));
+          .where(eq(schema.units.propertyId, propertyRowId));
 
         if (group.units.length > 0) {
           const unitsToInsert = group.units.map((u) => ({
             organizationId: orgId,
-            propertyId: upserted.id,
+            propertyId: propertyRowId,
             rmUnitName: u.rmUnitName,
             sqft: u.sqft,
             bedrooms: u.bedrooms,
@@ -238,7 +263,7 @@ export default withAdminHandler(async (req, res) => {
           const insertedUnits = await tx
             .insert(schema.units)
             .values(unitsToInsert)
-            .returning();
+            .returning({ id: schema.units.id });
           unitsInserted += insertedUnits.length;
         }
       }
@@ -256,7 +281,9 @@ export default withAdminHandler(async (req, res) => {
     ok: true,
     ownerId,
     defaultOwnerName,
-    propertiesUpserted,
+    propertiesUpserted: propertiesInserted + propertiesUpdated,
+    propertiesInserted,
+    propertiesUpdated,
     unitsInserted,
     rowErrorCount: rowErrors.length,
     rowErrors: rowErrors.slice(0, 50), // cap to keep the response small
