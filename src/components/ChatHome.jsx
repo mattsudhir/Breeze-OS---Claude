@@ -2,8 +2,32 @@ import { useState, useRef, useEffect } from 'react';
 import {
   Mic, MicOff, Send, Paperclip, FileText, Home, DollarSign,
   Wrench, User, Bot, ChevronDown, Building2, Loader2,
-  Volume2, VolumeX, ArrowRight,
+  Volume2, VolumeX, ArrowRight, Database,
 } from 'lucide-react';
+
+// Backend toggle options shown under "Data source". Keep in sync with
+// lib/backends/index.js — the value field must match a registered
+// backend name.
+const DATA_SOURCES = [
+  {
+    value: 'breeze',
+    label: 'Breeze Production',
+    hint: 'Real Breeze portfolio (Postgres)',
+  },
+  {
+    value: 'rm-demo',
+    label: 'RM Demo',
+    hint: 'Rent Manager sample15 sandbox',
+  },
+  {
+    value: 'zoho-mcp',
+    label: 'Zoho MCP',
+    hint: 'Zoho CRM + Cliq via MCP server',
+  },
+];
+
+const DATA_SOURCE_STORAGE_KEY = 'breezeChatBackend';
+const DEFAULT_DATA_SOURCE = 'breeze';
 import {
   startListening, stopListening, speak, cancelSpeech,
   isListeningSupported, isSpeakingSupported,
@@ -80,6 +104,17 @@ export default function ChatHome({ onNavigate }) {
   const [showQuickActions, setShowQuickActions] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [ttsEnabled, setTtsEnabled] = useState(false);
+  const [dataSource, setDataSource] = useState(() => {
+    if (typeof window === 'undefined') return DEFAULT_DATA_SOURCE;
+    try {
+      const stored = window.localStorage.getItem(DATA_SOURCE_STORAGE_KEY);
+      if (stored && DATA_SOURCES.some((d) => d.value === stored)) return stored;
+    } catch {
+      // localStorage blocked (private mode / iframe) — fall back to default
+    }
+    return DEFAULT_DATA_SOURCE;
+  });
+  const [showDataSourceMenu, setShowDataSourceMenu] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -102,6 +137,39 @@ export default function ChatHome({ onNavigate }) {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Persist the data source choice and announce switches in-chat so
+  // the user sees when they've changed backends mid-conversation.
+  const handleDataSourceChange = (newValue) => {
+    if (newValue === dataSource) {
+      setShowDataSourceMenu(false);
+      return;
+    }
+    try {
+      window.localStorage.setItem(DATA_SOURCE_STORAGE_KEY, newValue);
+    } catch {
+      /* ignore */
+    }
+    setDataSource(newValue);
+    setShowDataSourceMenu(false);
+
+    // Reset the conversation history so the new backend doesn't see
+    // tool calls for tools it doesn't have.
+    llmHistoryRef.current = [];
+
+    const label = DATA_SOURCES.find((d) => d.value === newValue)?.label || newValue;
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: Date.now() + Math.random(),
+        type: 'system',
+        sender: 'Breeze AI',
+        avatar: 'bot',
+        text: `Switched data source to *${label}*. Previous conversation context has been cleared.`,
+        time: now(),
+      },
+    ]);
+  };
 
   const now = () => new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
@@ -131,7 +199,10 @@ export default function ChatHome({ onNavigate }) {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: llmHistoryRef.current }),
+        body: JSON.stringify({
+          messages: llmHistoryRef.current,
+          dataSource,
+        }),
       });
 
       const data = await res.json();
@@ -304,6 +375,83 @@ export default function ChatHome({ onNavigate }) {
             <span>{ttsEnabled ? 'Voice on' : 'Voice off'}</span>
           </button>
         )}
+
+        <div className="data-source-toggle-wrapper" style={{ position: 'relative' }}>
+          <button
+            className="data-source-toggle"
+            onClick={() => setShowDataSourceMenu((v) => !v)}
+            title="Choose which data source the chat queries"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 10px',
+              border: '1px solid #D0D7DE',
+              background: '#FFF',
+              borderRadius: 6,
+              cursor: 'pointer',
+              fontSize: 13,
+            }}
+          >
+            <Database size={14} />
+            <span>
+              {DATA_SOURCES.find((d) => d.value === dataSource)?.label || dataSource}
+            </span>
+            <ChevronDown
+              size={12}
+              style={{
+                transform: showDataSourceMenu ? 'rotate(180deg)' : 'rotate(0)',
+                transition: 'transform 0.2s',
+              }}
+            />
+          </button>
+          {showDataSourceMenu && (
+            <div
+              className="data-source-menu"
+              style={{
+                position: 'absolute',
+                top: 'calc(100% + 4px)',
+                right: 0,
+                minWidth: 240,
+                background: '#FFF',
+                border: '1px solid #D0D7DE',
+                borderRadius: 6,
+                boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                zIndex: 100,
+                overflow: 'hidden',
+              }}
+            >
+              {DATA_SOURCES.map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => handleDataSourceChange(option.value)}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '10px 12px',
+                    border: 'none',
+                    background: option.value === dataSource ? '#F2F6FA' : 'transparent',
+                    cursor: 'pointer',
+                    borderBottom: '1px solid #EEF0F2',
+                  }}
+                >
+                  <div style={{ fontWeight: 600, fontSize: 13, color: '#1A1A1A' }}>
+                    {option.label}
+                    {option.value === dataSource && (
+                      <span style={{ marginLeft: 6, color: '#1565C0', fontSize: 11 }}>
+                        • active
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#6A737D', marginTop: 2 }}>
+                    {option.hint}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         {showQuickActions && (
           <div className="quick-actions-grid">
             {QUICK_ACTIONS.map((action, i) => (

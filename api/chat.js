@@ -1,12 +1,16 @@
-// Vercel Serverless Function — LLM chat with Rent Manager tool use.
+// Vercel Serverless Function — LLM chat with tool use.
 //
 // Takes a list of chat messages from the frontend and delegates to the
 // shared Breeze agent in lib/breezeAgent.js. Returns the final natural-
-// language answer.
+// language answer. Accepts an optional `dataSource` field in the request
+// body selecting which backend ('breeze' | 'rm-demo' | 'zoho-mcp') the
+// agent should read from — defaults to 'breeze' (production Postgres).
 //
 // Environment variables:
-//   ANTHROPIC_API_KEY – from console.anthropic.com
-//   RM_BASE_URL, RM_USERNAME, RM_PASSWORD – inherited via lib/rmClient.js
+//   ANTHROPIC_API_KEY     – from console.anthropic.com
+//   DATABASE_URL          – used by the 'breeze' backend
+//   RM_BASE_URL / RM_USERNAME / RM_PASSWORD – used by 'rm-demo'
+//   ZOHO_MCP_SERVER_URL   – used by 'zoho-mcp'
 //   ZOHO_CLIQ_WEBHOOK_URL – optional, used by the notify_team tool
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -27,17 +31,18 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { messages: inputMessages = [] } = req.body || {};
+    const { messages: inputMessages = [], dataSource } = req.body || {};
     if (!Array.isArray(inputMessages) || inputMessages.length === 0) {
       return res.status(400).json({ error: 'messages array required' });
     }
 
-    const { reply, iterations } = await runAgent(inputMessages);
+    const { reply, iterations } = await runAgent(inputMessages, { dataSource });
 
     return res.status(200).json({
       ok: true,
       reply,
       iterations,
+      dataSource: dataSource || 'breeze',
     });
   } catch (err) {
     console.error('Chat handler error:', err);
