@@ -36,6 +36,13 @@
       "when": 1744916400000,
       "tag": "0004_billback_mode_enum",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1745002800000,
+      "tag": "0005_wipe_speculative_provider_data",
+      "breakpoints": true
     }
   ]
 }

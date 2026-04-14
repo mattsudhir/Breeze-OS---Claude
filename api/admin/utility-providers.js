@@ -63,10 +63,10 @@ export default withAdminHandler(async (req, res) => {
   if (req.method === 'POST') {
     const body = parseBody(req);
     const editable = pickEditable(body);
-    if (!editable.name || !editable.phoneNumber) {
+    if (!editable.name) {
       return res.status(400).json({
         ok: false,
-        error: 'name and phoneNumber are required',
+        error: 'name is required',
       });
     }
     const [created] = await db
