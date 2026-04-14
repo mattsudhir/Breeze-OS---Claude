@@ -30,7 +30,7 @@
 //
 // Wrapped in a transaction so mid-import failures roll back.
 
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { getDb, schema } from '../../lib/db/index.js';
 import {
   withAdminHandler,
@@ -296,6 +296,8 @@ export default withAdminHandler(async (req, res) => {
     await db.transaction(async (tx) => {
       for (const p of planned) {
         // Look for an existing row with the same (property, unit, type).
+        // Note: must use isNull() rather than eq(col, null) to match
+        // property-level rows — Postgres `col = NULL` is always false.
         const existing = await tx
           .select({ id: schema.propertyUtilities.id })
           .from(schema.propertyUtilities)
@@ -304,7 +306,7 @@ export default withAdminHandler(async (req, res) => {
               eq(schema.propertyUtilities.propertyId, p.propertyRowId),
               p.unitRowId
                 ? eq(schema.propertyUtilities.unitId, p.unitRowId)
-                : eq(schema.propertyUtilities.unitId, null),
+                : isNull(schema.propertyUtilities.unitId),
               eq(schema.propertyUtilities.utilityType, p.utilityType),
             ),
           )
