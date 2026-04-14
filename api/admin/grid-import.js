@@ -40,7 +40,23 @@ import {
 
 const UTILITY_TYPES = ['electric', 'gas', 'water', 'sewer', 'trash'];
 const VALID_HOLDERS = new Set(['tenant', 'owner_llc', 'none']);
-const VALID_BILLBACKS = new Set(['y', 'n']);
+
+// Billback cell value → { mode, tenantBool } lookup. Accepts friendly
+// aliases (y/n/split) alongside canonical enum values so the spreadsheet
+// stays human-readable.
+const BILLBACK_VALUE_MAP = {
+  'n':                { mode: 'none',        tenant: false },
+  'no':               { mode: 'none',        tenant: false },
+  'none':             { mode: 'none',        tenant: false },
+  'y':                { mode: 'full',        tenant: true },
+  'yes':              { mode: 'full',        tenant: true },
+  'full':             { mode: 'full',        tenant: true },
+  'split':            { mode: 'split_meter', tenant: true },
+  'split_meter':      { mode: 'split_meter', tenant: true },
+  'meter_split':      { mode: 'split_meter', tenant: true },
+  'yes-meter_split':  { mode: 'split_meter', tenant: true },
+  'y-split':          { mode: 'split_meter', tenant: true },
+};
 
 // ── Parser ───────────────────────────────────────────────────────
 
@@ -108,14 +124,15 @@ function parseGrid(tsv) {
       }
       if (bc !== undefined && cols[bc]) {
         const v = cols[bc].toLowerCase();
-        if (!VALID_BILLBACKS.has(v)) {
+        const mapped = BILLBACK_VALUE_MAP[v];
+        if (!mapped) {
           parseErrors.push({
             lineNumber: i + 1,
-            error: `${t}_billback: invalid value "${cols[bc]}" (expected y, n, or blank)`,
+            error: `${t}_billback: invalid value "${cols[bc]}" (expected n, y, split/yes-meter_split, or blank)`,
           });
           continue;
         }
-        row.billbacks[t] = v === 'y';
+        row.billbacks[t] = mapped; // { mode, tenant }
         hasAnyValue = true;
       }
     }
@@ -240,12 +257,14 @@ export default withAdminHandler(async (req, res) => {
 
     for (const t of UTILITY_TYPES) {
       if (row.holders[t] == null && row.billbacks[t] == null) continue;
+      const bb = row.billbacks[t]; // { mode, tenant } | undefined
       planned.push({
         propertyRowId,
         unitRowId,
         utilityType: t,
         accountHolder: row.holders[t] ?? null,
-        billbackTenant: row.billbacks[t] ?? null,
+        billbackMode: bb ? bb.mode : null,
+        billbackTenant: bb ? bb.tenant : null,
         lineNumber: row.lineNumber,
       });
     }
@@ -292,10 +311,15 @@ export default withAdminHandler(async (req, res) => {
           .limit(1);
 
         if (existing.length > 0) {
-          // Only touch columns explicitly set in the paste.
+          // Only touch columns explicitly set in the paste. billback_mode
+          // and billback_tenant are written as a pair so the shadow
+          // column stays in sync.
           const updates = { updatedAt: new Date() };
           if (p.accountHolder != null) updates.accountHolder = p.accountHolder;
-          if (p.billbackTenant != null) updates.billbackTenant = p.billbackTenant;
+          if (p.billbackMode != null) {
+            updates.billbackMode = p.billbackMode;
+            updates.billbackTenant = p.billbackTenant;
+          }
           await tx
             .update(schema.propertyUtilities)
             .set(updates)
@@ -316,6 +340,7 @@ export default withAdminHandler(async (req, res) => {
             unitId: p.unitRowId,
             utilityType: p.utilityType,
             accountHolder: p.accountHolder,
+            billbackMode: p.billbackMode ?? 'none',
             billbackTenant: p.billbackTenant ?? false,
           });
           insertedCount += 1;

@@ -29,6 +29,13 @@
       "when": 1744830000000,
       "tag": "0003_pms_abstraction",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1744916400000,
+      "tag": "0004_billback_mode_enum",
+      "breakpoints": true
     }
   ]
 }

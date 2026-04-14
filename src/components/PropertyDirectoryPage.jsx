@@ -258,7 +258,7 @@ function GridImportTab() {
                     <td style={tdStyle}>{p.unitRowId ? p.unitRowId.slice(0, 8) + '…' : '(prop)'}</td>
                     <td style={tdStyle}>{p.utilityType}</td>
                     <td style={tdStyle}>{p.accountHolder ?? '—'}</td>
-                    <td style={tdStyle}>{p.billbackTenant == null ? '—' : p.billbackTenant ? 'y' : 'n'}</td>
+                    <td style={tdStyle}>{p.billbackMode ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -395,7 +395,7 @@ function BulkConfigTab() {
     utilityType: 'electric',
     accountHolder: 'tenant',
     providerId: '',
-    billbackTenant: false,
+    billbackMode: 'none', // 'none' | 'full' | 'split_meter'
     notes: '',
   });
   const [preview, setPreview] = useState(null);
@@ -446,7 +446,10 @@ function BulkConfigTab() {
     utilityType: form.utilityType,
     accountHolder: form.accountHolder,
     providerId: form.providerId || null,
-    billbackTenant: form.billbackTenant,
+    // Send both billback_mode and the derived boolean so the server
+    // stays in sync even if it's still reading the old field.
+    billbackMode: form.billbackMode,
+    billbackTenant: form.billbackMode !== 'none',
     notes: form.notes || null,
     dryRun,
   });
@@ -559,10 +562,16 @@ function BulkConfigTab() {
           ]}
         />
         {form.utilityType === 'water' && (
-          <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-            <input type="checkbox" checked={form.billbackTenant} onChange={update('billbackTenant')} />
-            Bill back to tenant (for LLC-held water)
-          </label>
+          <FormRow
+            label="Billback (for LLC-held water)"
+            value={form.billbackMode}
+            onChange={update('billbackMode')}
+            select={[
+              { value: 'none', label: 'none (LLC absorbs the bill)' },
+              { value: 'full', label: 'full (LLC pays, tenant billed back 100%)' },
+              { value: 'split_meter', label: 'split_meter (shared meter, bill split across units)' },
+            ]}
+          />
         )}
       </div>
 
@@ -1193,7 +1202,7 @@ function PropertyUtilitiesPanel({ propertyId, utilities, loading, onChanged }) {
     utilityType: 'electric',
     providerId: '',
     accountHolder: 'tenant',
-    billbackTenant: false,
+    billbackMode: 'none',
     currentAccountNumber: '',
     notes: '',
   });
@@ -1209,11 +1218,13 @@ function PropertyUtilitiesPanel({ propertyId, utilities, loading, onChanged }) {
       propertyId,
       ...form,
       providerId: form.providerId || null,
+      // Derive the legacy boolean from billback_mode for backward compat.
+      billbackTenant: form.billbackMode !== 'none',
     };
     const res = await propertyUtilitiesApi.create(payload);
     if (!res.ok) return alert(res.error);
     setAdding(false);
-    setForm((f) => ({ ...f, currentAccountNumber: '', notes: '' }));
+    setForm((f) => ({ ...f, currentAccountNumber: '', notes: '', billbackMode: 'none' }));
     onChanged();
   };
 
@@ -1253,7 +1264,11 @@ function PropertyUtilitiesPanel({ propertyId, utilities, loading, onChanged }) {
                   : u.accountHolder
               }
             </span>
-            {u.billbackTenant && <span style={{ color: '#E65100', marginLeft: 8 }}>billback</span>}
+            {u.billbackMode && u.billbackMode !== 'none' && (
+              <span style={{ color: '#E65100', marginLeft: 8 }}>
+                {u.billbackMode === 'split_meter' ? 'billback (split meter)' : 'billback'}
+              </span>
+            )}
             {u.providerId && (
               <span style={{ color: '#888', marginLeft: 8 }}>
                 via {providerMap[u.providerId]?.name || u.providerId}
@@ -1277,10 +1292,16 @@ function PropertyUtilitiesPanel({ propertyId, utilities, loading, onChanged }) {
           </div>
           <FormRow label="Account # (optional)" value={form.currentAccountNumber} onChange={(e) => setForm({ ...form, currentAccountNumber: e.target.value })} />
           {form.utilityType === 'water' && (
-            <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <input type="checkbox" checked={form.billbackTenant} onChange={(e) => setForm({ ...form, billbackTenant: e.target.checked })} />
-              Bill back to tenant (for LLC-held water)
-            </label>
+            <FormRow
+              label="Billback (for LLC-held water)"
+              value={form.billbackMode}
+              onChange={(e) => setForm({ ...form, billbackMode: e.target.value })}
+              select={[
+                { value: 'none', label: 'none (LLC absorbs)' },
+                { value: 'full', label: 'full (tenant billed 100%)' },
+                { value: 'split_meter', label: 'split_meter (shared meter, split across units)' },
+              ]}
+            />
           )}
           <button type="button" onClick={handleAdd} style={{ ...primaryButtonStyle, marginTop: 8 }}>
             Add utility

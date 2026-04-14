@@ -98,7 +98,12 @@ export default withAdminHandler(async (req, res) => {
   const utilityType = body.utilityType;
   const accountHolder = body.accountHolder;
   const providerId = body.providerId || null;
-  const billbackTenant = !!body.billbackTenant;
+  // Accept either the new billbackMode enum or the legacy boolean.
+  // If both are present, billbackMode wins.
+  const billbackMode =
+    body.billbackMode ||
+    (body.billbackTenant ? 'full' : 'none');
+  const billbackTenant = billbackMode !== 'none';
   const notes = body.notes || null;
   const dryRun = !!body.dryRun;
 
@@ -201,6 +206,7 @@ export default withAdminHandler(async (req, res) => {
             .set({
               accountHolder,
               providerId,
+              billbackMode,
               billbackTenant,
               notes: notes || schema.propertyUtilities.notes, // only override if provided
               updatedAt: new Date(),
@@ -213,6 +219,7 @@ export default withAdminHandler(async (req, res) => {
             utilityType,
             accountHolder,
             providerId,
+            billbackMode,
             billbackTenant,
             notes,
           });

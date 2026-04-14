@@ -7,7 +7,7 @@
 //
 // Writable columns:
 //   propertyId, utilityType, providerId, accountHolder,
-//   billbackTenant, currentAccountNumber, notes
+//   billbackMode, billbackTenant, currentAccountNumber, notes
 
 import { eq } from 'drizzle-orm';
 import { getDb, schema } from '../../lib/db/index.js';
@@ -19,6 +19,7 @@ const EDITABLE_FIELDS = [
   'providerId',
   'accountHolder',
   'billbackTenant',
+  'billbackMode',
   'currentAccountNumber',
   'notes',
 ];
