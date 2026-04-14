@@ -32,7 +32,7 @@ import {
 
 const EDITABLE_FIELDS = [
   'propertyId',
-  'rmTenantId',
+  'sourceTenantId',
   'tenantDisplayName',
   'eventType',
   'effectiveDate',
@@ -211,7 +211,7 @@ export default withAdminHandler(async (req, res) => {
           .values({
             organizationId: orgId,
             propertyId: fields.propertyId,
-            rmTenantId: fields.rmTenantId || null,
+            sourceTenantId: fields.sourceTenantId || fields.rmTenantId || null,
             tenantDisplayName: fields.tenantDisplayName || null,
             eventType: fields.eventType,
             effectiveDate,

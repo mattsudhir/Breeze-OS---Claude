@@ -160,7 +160,7 @@ function CreateForm({ properties, onCreated }) {
   const [form, setForm] = useState({
     propertyId: properties[0]?.id || '',
     tenantDisplayName: '',
-    rmTenantId: '',
+    sourceTenantId: '',
     eventType: 'move_in',
     effectiveDate: new Date().toISOString().slice(0, 10),
     notes: '',
@@ -176,7 +176,7 @@ function CreateForm({ properties, onCreated }) {
     const payload = {
       propertyId: form.propertyId,
       tenantDisplayName: form.tenantDisplayName || null,
-      rmTenantId: form.rmTenantId ? parseInt(form.rmTenantId, 10) : null,
+      sourceTenantId: form.sourceTenantId ? parseInt(form.sourceTenantId, 10) : null,
       eventType: form.eventType,
       effectiveDate: new Date(form.effectiveDate).toISOString(),
       notes: form.notes || null,
@@ -233,8 +233,8 @@ function CreateForm({ properties, onCreated }) {
       />
       <FormRow
         label="Rent Manager Tenant ID (optional)"
-        value={form.rmTenantId}
-        onChange={update('rmTenantId')}
+        value={form.sourceTenantId}
+        onChange={update('sourceTenantId')}
         placeholder="12345"
       />
       <FormRow

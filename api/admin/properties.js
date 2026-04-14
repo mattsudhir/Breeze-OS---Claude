@@ -8,7 +8,7 @@
 // DELETE /api/admin/properties?id=<uuid>    — delete property
 //
 // Writable columns:
-//   ownerId, rmPropertyId, displayName, propertyType,
+//   ownerId, sourcePropertyId, displayName, propertyType,
 //   serviceAddressLine1..Zip, billingAddressLine1..Zip, notes
 
 import { and, eq } from 'drizzle-orm';
@@ -21,7 +21,7 @@ import {
 
 const EDITABLE_FIELDS = [
   'ownerId',
-  'rmPropertyId',
+  'sourcePropertyId',
   'displayName',
   'propertyType',
   'serviceAddressLine1',

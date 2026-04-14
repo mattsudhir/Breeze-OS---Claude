@@ -8,7 +8,7 @@
 // PR, we can upgrade the primitives.
 
 import { useEffect, useState, useCallback } from 'react';
-import { Building2, Users, Zap, Database, RefreshCw, Plus, Trash2, Upload, Settings2 } from 'lucide-react';
+import { Building2, Users, Zap, Database, RefreshCw, Plus, Trash2, Upload, Settings2, Grid3x3, Link2 } from 'lucide-react';
 import {
   owners as ownersApi,
   properties as propertiesApi,
@@ -17,6 +17,8 @@ import {
   seed as seedApi,
   bulkImport as bulkImportApi,
   bulkUtilityConfig as bulkUtilityConfigApi,
+  gridImport as gridImportApi,
+  backfillUnitIds as backfillUnitIdsApi,
   getAdminToken,
   setAdminToken,
   hasAdminToken,
@@ -111,6 +113,8 @@ export default function PropertyDirectoryPage() {
             { id: 'providers', label: 'Utility Providers', icon: Zap },
             { id: 'import', label: 'Bulk Import', icon: Upload },
             { id: 'bulkConfig', label: 'Bulk Config', icon: Settings2 },
+            { id: 'gridImport', label: 'Grid Import', icon: Grid3x3 },
+            { id: 'backfill', label: 'Backfill Unit IDs', icon: Link2 },
           ].map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -141,8 +145,239 @@ export default function PropertyDirectoryPage() {
         {tab === 'providers' && <ProvidersTab />}
         {tab === 'import' && <BulkImportTab />}
         {tab === 'bulkConfig' && <BulkConfigTab />}
+        {tab === 'gridImport' && <GridImportTab />}
+        {tab === 'backfill' && <BackfillUnitIdsTab />}
       </div>
     </TokenGate>
+  );
+}
+
+// ── Grid Import tab ──────────────────────────────────────────────
+
+function GridImportTab() {
+  const [tsv, setTsv] = useState('');
+  const [preview, setPreview] = useState(null);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const handlePreview = async () => {
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    const res = await gridImportApi.preview(tsv);
+    setBusy(false);
+    if (!res.ok) return setError(res.error + (res.parseErrors ? ' — see parse errors' : ''));
+    setPreview(res);
+  };
+
+  const handleCommit = async () => {
+    if (!preview) return;
+    if (
+      !confirm(
+        `Apply ${preview.plannedCount} utility upserts to the DB? ` +
+          'This will insert new property_utilities rows where missing and update existing rows in place.',
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    const res = await gridImportApi.commit(tsv);
+    setBusy(false);
+    if (!res.ok) return setError(res.error);
+    setResult(res);
+    setPreview(null);
+  };
+
+  const handleReset = () => {
+    setTsv('');
+    setPreview(null);
+    setResult(null);
+    setError(null);
+  };
+
+  return (
+    <div>
+      <div style={{ marginBottom: 16, padding: 12, background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, fontSize: 13, color: '#0c4a6e' }}>
+        <strong>Grid Import — upsert utility config from a spreadsheet paste.</strong><br />
+        Expected columns: <code>source_property_id</code>, optionally <code>unit_name</code>, then any of <code>electric</code>, <code>gas</code>, <code>water</code>, <code>sewer</code>, <code>trash</code> (values: <code>tenant</code>, <code>owner_llc</code>, <code>none</code>) and/or <code>electric_billback</code>, <code>gas_billback</code>, <code>water_billback</code>, <code>sewer_billback</code>, <code>trash_billback</code> (values: <code>y</code>, <code>n</code>).<br />
+        Blank cells are <strong>ignored</strong> (don't change existing rows). Unit name blank means property-level default; unit name set means unit-level override. Reference columns (<code>display_name</code>, <code>city</code>, <code>state</code>, <code>zip</code>) are accepted but not written.
+      </div>
+
+      <textarea
+        value={tsv}
+        onChange={(e) => setTsv(e.target.value)}
+        placeholder="Paste your wide-format utility grid here, including the header row…"
+        rows={12}
+        style={{
+          width: '100%',
+          padding: 10,
+          fontFamily: 'monospace',
+          fontSize: 12,
+          border: '1px solid #d1d5db',
+          borderRadius: 6,
+          boxSizing: 'border-box',
+          marginBottom: 12,
+        }}
+      />
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <button type="button" onClick={handlePreview} disabled={!tsv.trim() || busy} style={primaryButtonStyle}>
+          {busy ? 'Parsing…' : 'Preview'}
+        </button>
+        <button type="button" onClick={handleReset} style={smallButtonStyle}>
+          Reset
+        </button>
+      </div>
+
+      {error && <ErrorBox message={error} />}
+
+      {preview && !result && (
+        <div style={{ padding: 16, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8 }}>
+          <h3 style={{ marginTop: 0 }}>Preview: {preview.plannedCount} upserts planned</h3>
+          {preview.planErrorCount > 0 && (
+            <ErrorBox message={`${preview.planErrorCount} rows reference properties or units not in the DB — fix before commit`} />
+          )}
+          <div style={{ maxHeight: 240, overflow: 'auto', fontSize: 11, background: 'white', border: '1px solid #eee', borderRadius: 4 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead style={{ background: '#f3f4f6', position: 'sticky', top: 0 }}>
+                <tr>
+                  <th style={thStyle}>line</th>
+                  <th style={thStyle}>property</th>
+                  <th style={thStyle}>unit</th>
+                  <th style={thStyle}>utility</th>
+                  <th style={thStyle}>holder</th>
+                  <th style={thStyle}>billback</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preview.planPreview.map((p, i) => (
+                  <tr key={i}>
+                    <td style={tdStyle}>{p.lineNumber}</td>
+                    <td style={tdStyle}>{p.propertyRowId?.slice(0, 8)}…</td>
+                    <td style={tdStyle}>{p.unitRowId ? p.unitRowId.slice(0, 8) + '…' : '(prop)'}</td>
+                    <td style={tdStyle}>{p.utilityType}</td>
+                    <td style={tdStyle}>{p.accountHolder ?? '—'}</td>
+                    <td style={tdStyle}>{p.billbackTenant == null ? '—' : p.billbackTenant ? 'y' : 'n'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <button
+            type="button"
+            onClick={handleCommit}
+            disabled={busy || preview.planErrorCount > 0}
+            style={{ ...primaryButtonStyle, background: '#15803d', marginTop: 12 }}
+          >
+            {busy ? 'Committing…' : `Commit ${preview.plannedCount} upserts`}
+          </button>
+        </div>
+      )}
+
+      {result && (
+        <div style={{ padding: 16, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, color: '#166534' }}>
+          <h3 style={{ marginTop: 0 }}>✅ Grid import complete</h3>
+          <ul>
+            <li><strong>{result.insertedCount}</strong> new utility rows inserted</li>
+            <li><strong>{result.updatedCount}</strong> existing utility rows updated</li>
+            <li><strong>{result.plannedCount}</strong> total upserts</li>
+          </ul>
+          <p style={{ fontSize: 12 }}>{result.message}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Backfill Unit IDs tab ────────────────────────────────────────
+
+function BackfillUnitIdsTab() {
+  const [tsv, setTsv] = useState('');
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const handleRun = async () => {
+    if (
+      !confirm(
+        'Run the Appfolio Unit ID backfill against the pasted mapping? ' +
+          'This sets units.source_unit_id on every matched row. Safe to re-run.',
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    const res = await backfillUnitIdsApi.run(tsv);
+    setBusy(false);
+    if (!res.ok) return setError(res.error);
+    setResult(res);
+  };
+
+  const handleReset = () => {
+    setTsv('');
+    setResult(null);
+    setError(null);
+  };
+
+  return (
+    <div>
+      <div style={{ marginBottom: 16, padding: 12, background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, fontSize: 13, color: '#0c4a6e' }}>
+        <strong>Backfill Unit IDs — populate the stable external ID on existing unit rows.</strong><br />
+        Expected columns (tab-separated, optional header): <code>Property ID</code>, <code>Unit ID</code>, <code>Unit Name</code>. Parser matches on <code>(source_property_id, source_unit_name)</code> and sets <code>source_unit_id</code>. Rows that don't match an existing unit in the DB are reported as "not found" (expected for Common / blocked rows you deliberately excluded from the import).
+      </div>
+
+      <textarea
+        value={tsv}
+        onChange={(e) => setTsv(e.target.value)}
+        placeholder="Paste the full Appfolio Unit ID mapping here (Property ID / Unit ID / Unit Name)…"
+        rows={12}
+        style={{
+          width: '100%',
+          padding: 10,
+          fontFamily: 'monospace',
+          fontSize: 12,
+          border: '1px solid #d1d5db',
+          borderRadius: 6,
+          boxSizing: 'border-box',
+          marginBottom: 12,
+        }}
+      />
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <button type="button" onClick={handleRun} disabled={!tsv.trim() || busy} style={primaryButtonStyle}>
+          {busy ? 'Running backfill…' : 'Run backfill'}
+        </button>
+        <button type="button" onClick={handleReset} style={smallButtonStyle}>
+          Reset
+        </button>
+      </div>
+
+      {error && <ErrorBox message={error} />}
+
+      {result && (
+        <div style={{ padding: 16, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, color: '#166534' }}>
+          <h3 style={{ marginTop: 0 }}>✅ Backfill complete</h3>
+          <ul>
+            <li><strong>{result.dedupedRowCount}</strong> deduped rows in the input</li>
+            <li><strong>{result.setCount}</strong> units had source_unit_id set</li>
+            <li><strong>{result.alreadySetCount}</strong> units were already set correctly (no-op)</li>
+            <li><strong>{result.notFoundCount}</strong> rows didn't match any unit in the DB</li>
+            <li><strong>{result.parseErrorCount}</strong> parse errors</li>
+          </ul>
+          {result.notFoundCount > 0 && (
+            <details style={{ marginTop: 8 }}>
+              <summary style={{ cursor: 'pointer' }}>Show {result.notFoundCount} unmatched rows</summary>
+              <pre style={{ fontSize: 11, maxHeight: 300, overflow: 'auto', background: 'white', padding: 8, borderRadius: 4 }}>
+                {JSON.stringify(result.notFound, null, 2)}
+              </pre>
+            </details>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -151,8 +386,8 @@ export default function PropertyDirectoryPage() {
 function BulkConfigTab() {
   const [providers, setProviders] = useState([]);
   const [form, setForm] = useState({
-    filterMode: 'rmPropertyIds', // 'rmPropertyIds' | 'city' | 'zipPrefix' | 'namePattern' | 'allProperties'
-    rmPropertyIdsText: '',
+    filterMode: 'sourcePropertyIds', // 'sourcePropertyIds' | 'city' | 'zipPrefix' | 'namePattern' | 'allProperties'
+    sourcePropertyIdsText: '',
     city: '',
     state: 'OH',
     zipPrefix: '',
@@ -177,14 +412,14 @@ function BulkConfigTab() {
   const buildFilter = () => {
     const f = {};
     switch (form.filterMode) {
-      case 'rmPropertyIds': {
-        const ids = form.rmPropertyIdsText
+      case 'sourcePropertyIds': {
+        const ids = form.sourcePropertyIdsText
           .split(/[,\s\n]+/)
           .map((s) => s.trim())
           .filter(Boolean)
           .map((s) => parseInt(s, 10))
           .filter((n) => Number.isFinite(n));
-        f.rmPropertyIds = ids;
+        f.sourcePropertyIds = ids;
         break;
       }
       case 'city':
@@ -266,7 +501,7 @@ function BulkConfigTab() {
           value={form.filterMode}
           onChange={update('filterMode')}
           select={[
-            { value: 'rmPropertyIds', label: 'Rent Manager IDs (paste list)' },
+            { value: 'sourcePropertyIds', label: 'Source Property IDs (paste list)' },
             { value: 'city', label: 'City contains' },
             { value: 'zipPrefix', label: 'ZIP starts with' },
             { value: 'namePattern', label: 'Name contains' },
@@ -274,11 +509,11 @@ function BulkConfigTab() {
           ]}
         />
 
-        {form.filterMode === 'rmPropertyIds' && (
+        {form.filterMode === 'sourcePropertyIds' && (
           <FormRow
             label="Rent Manager Property IDs"
-            value={form.rmPropertyIdsText}
-            onChange={update('rmPropertyIdsText')}
+            value={form.sourcePropertyIdsText}
+            onChange={update('sourcePropertyIdsText')}
             placeholder="688, 689, 690 or one per line"
           />
         )}
@@ -323,10 +558,12 @@ function BulkConfigTab() {
             ...providers.map((p) => ({ value: p.id, label: p.name })),
           ]}
         />
-        <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-          <input type="checkbox" checked={form.billbackTenant} onChange={update('billbackTenant')} />
-          Bill back to tenant (for LLC-held utilities like SFR water)
-        </label>
+        {form.utilityType === 'water' && (
+          <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+            <input type="checkbox" checked={form.billbackTenant} onChange={update('billbackTenant')} />
+            Bill back to tenant (for LLC-held water)
+          </label>
+        )}
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
@@ -368,7 +605,7 @@ function BulkConfigTab() {
                   <tbody>
                     {preview.matchedPreview.map((p) => (
                       <tr key={p.id}>
-                        <td style={tdStyle}>{p.rmPropertyId}</td>
+                        <td style={tdStyle}>{p.sourcePropertyId}</td>
                         <td style={tdStyle}>{p.displayName}</td>
                         <td style={tdStyle}>{p.serviceCity}</td>
                         <td style={tdStyle}>{p.serviceState}</td>
@@ -538,12 +775,12 @@ function BulkImportTab() {
               <tbody>
                 {parsed.rows.slice(0, 10).map((r, i) => (
                   <tr key={i}>
-                    <td style={tdStyle}>{r.rmPropertyId}</td>
+                    <td style={tdStyle}>{r.sourcePropertyId}</td>
                     <td style={tdStyle}>{r.serviceAddressLine1}</td>
                     <td style={tdStyle}>{r.serviceCity}</td>
                     <td style={tdStyle}>{r.serviceState}</td>
                     <td style={tdStyle}>{r.serviceZip}</td>
-                    <td style={tdStyle}>{r.unit.rmUnitName}</td>
+                    <td style={tdStyle}>{r.unit.sourceUnitName}</td>
                     <td style={tdStyle}>{r.unit.sqft}</td>
                     <td style={tdStyle}>{r.unit.bedrooms}</td>
                     <td style={tdStyle}>{r.unit.bathrooms}</td>
@@ -1039,10 +1276,12 @@ function PropertyUtilitiesPanel({ propertyId, utilities, loading, onChanged }) {
             <FormRow style={{ flex: 1, minWidth: 120 }} label="Account holder" value={form.accountHolder} onChange={(e) => setForm({ ...form, accountHolder: e.target.value })} select={ACCOUNT_HOLDER_OPTIONS} />
           </div>
           <FormRow label="Account # (optional)" value={form.currentAccountNumber} onChange={(e) => setForm({ ...form, currentAccountNumber: e.target.value })} />
-          <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <input type="checkbox" checked={form.billbackTenant} onChange={(e) => setForm({ ...form, billbackTenant: e.target.checked })} />
-            Bill back to tenant (even if LLC holds the account)
-          </label>
+          {form.utilityType === 'water' && (
+            <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input type="checkbox" checked={form.billbackTenant} onChange={(e) => setForm({ ...form, billbackTenant: e.target.checked })} />
+              Bill back to tenant (for LLC-held water)
+            </label>
+          )}
           <button type="button" onClick={handleAdd} style={{ ...primaryButtonStyle, marginTop: 8 }}>
             Add utility
           </button>

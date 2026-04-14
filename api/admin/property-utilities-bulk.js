@@ -5,7 +5,8 @@
 //   {
 //     filter: {                          // any combination; AND'd together
 //       propertyIds: [uuid, ...],        // exact matches, takes precedence if present
-//       rmPropertyIds: [int, ...],       // match by Rent Manager ID
+//       sourcePropertyIds: [int, ...],   // match by source PMS property ID (Appfolio)
+//       rmPropertyIds: [int, ...],       // legacy alias, still accepted
 //       city: "Toledo",                  // case-insensitive contains
 //       state: "OH",                     // exact state code
 //       zipPrefix: "445",                // zip startsWith
@@ -61,8 +62,11 @@ function buildWhereClause(orgId, filter) {
     clauses.push(inArray(schema.properties.id, filter.propertyIds));
   }
 
-  if (filter.rmPropertyIds && filter.rmPropertyIds.length > 0) {
-    clauses.push(inArray(schema.properties.rmPropertyId, filter.rmPropertyIds));
+  // Accept both new sourcePropertyIds and legacy rmPropertyIds field names
+  // so pre-rename clients keep working.
+  const externalIds = filter.sourcePropertyIds ?? filter.rmPropertyIds;
+  if (externalIds && externalIds.length > 0) {
+    clauses.push(inArray(schema.properties.sourcePropertyId, externalIds));
   }
 
   if (filter.city) {
@@ -116,13 +120,14 @@ export default withAdminHandler(async (req, res) => {
   const hasAnyFilter =
     filter.allProperties ||
     (Array.isArray(filter.propertyIds) && filter.propertyIds.length > 0) ||
+    (Array.isArray(filter.sourcePropertyIds) && filter.sourcePropertyIds.length > 0) ||
     (Array.isArray(filter.rmPropertyIds) && filter.rmPropertyIds.length > 0) ||
     filter.city || filter.state || filter.zipPrefix || filter.namePattern;
   if (!hasAnyFilter) {
     return res.status(400).json({
       ok: false,
       error:
-        'filter must include at least one of propertyIds, rmPropertyIds, ' +
+        'filter must include at least one of propertyIds, sourcePropertyIds, ' +
         'city, state, zipPrefix, namePattern, or allProperties:true',
     });
   }
@@ -136,7 +141,7 @@ export default withAdminHandler(async (req, res) => {
   const matched = await db
     .select({
       id: schema.properties.id,
-      rmPropertyId: schema.properties.rmPropertyId,
+      sourcePropertyId: schema.properties.sourcePropertyId,
       displayName: schema.properties.displayName,
       serviceCity: schema.properties.serviceCity,
       serviceState: schema.properties.serviceState,

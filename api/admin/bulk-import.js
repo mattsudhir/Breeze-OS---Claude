@@ -7,7 +7,7 @@
 //     defaultOwnerName: "Breeze (unassigned)",  // LLC auto-created if missing
 //     rows: [
 //       {
-//         rmPropertyId: 688,
+//         sourcePropertyId: 688,
 //         displayName: "1919 Ottawa Dr",
 //         propertyType: "multi_family",
 //         serviceAddressLine1: "1919 Ottawa Dr",
@@ -15,7 +15,7 @@
 //         serviceState: "OH",
 //         serviceZip: "43606",
 //         unit: {
-//           rmUnitName: "Unit 1",
+//           sourceUnitName: "Unit 1",
 //           sqft: 750,
 //           bedrooms: 1,
 //           bathrooms: "1"
@@ -25,13 +25,14 @@
 //     ]
 //   }
 //
-// Each row represents a unit. Rows with the same rmPropertyId are
+// Each row represents a unit. Rows with the same sourcePropertyId are
 // grouped into the same property; the first row's property fields
 // define the property, subsequent rows just contribute units.
 //
 // Behavior:
-//   - Upserts properties on (organization_id, rm_property_id) — safe to
-//     re-run, updates property fields from the most recent paste.
+//   - Upserts properties on (organization_id, source_property_id) —
+//     safe to re-run, updates property fields from the most recent
+//     paste.
 //   - For each re-imported property: deletes pre-existing units and
 //     re-inserts from the paste. Destructive but predictable on re-run.
 //   - Wraps the whole thing in a transaction so a mid-import failure
@@ -39,17 +40,13 @@
 //   - Returns counts + a list of per-row issues (bad data that was
 //     skipped rather than failing the whole import).
 
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { getDb, schema } from '../../lib/db/index.js';
 import {
   withAdminHandler,
   getDefaultOrgId,
   parseBody,
 } from '../../lib/adminHelpers.js';
-
-// Validation/coercion helpers. Designed to be forgiving — the client
-// has already done basic parsing, but data coming out of Excel can still
-// have stray whitespace, commas in numbers, or blank cells.
 
 function toInt(v) {
   if (v === null || v === undefined || v === '') return null;
@@ -63,10 +60,6 @@ function toStr(v) {
   return s === '' ? null : s;
 }
 
-// Infer a reasonable property_type from the set of units the import
-// produced. Multi-unit → 'multi_family', single unit whose name equals
-// the street address → 'sfr', single unit with a different name → 'sfr'
-// anyway (duplex halves get 'multi_family' when two units exist).
 function inferPropertyType(unitCount) {
   if (unitCount >= 3) return 'multi_family';
   if (unitCount === 2) return 'multi_family';
@@ -89,7 +82,6 @@ export default withAdminHandler(async (req, res) => {
   const db = getDb();
   const orgId = await getDefaultOrgId();
 
-  // Resolve or create the default owner. Subsequent imports reuse it.
   let ownerId;
   {
     const existing = await db
@@ -116,16 +108,18 @@ export default withAdminHandler(async (req, res) => {
     }
   }
 
-  // Group rows by rmPropertyId. A single property in the input can
-  // appear on many rows (one per unit).
+  // Group rows by sourcePropertyId.
   const propertyGroups = new Map();
   const rowErrors = [];
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
-    const rmPropertyId = toInt(row.rmPropertyId);
-    if (!rmPropertyId) {
-      rowErrors.push({ rowIndex: i, error: 'Missing or invalid rmPropertyId', row });
+    // Accept either the new sourcePropertyId or legacy rmPropertyId
+    // field name so old client code keeps working while the rename
+    // propagates.
+    const sourcePropertyId = toInt(row.sourcePropertyId ?? row.rmPropertyId);
+    if (!sourcePropertyId) {
+      rowErrors.push({ rowIndex: i, error: 'Missing or invalid sourcePropertyId', row });
       continue;
     }
     const displayName = toStr(row.displayName);
@@ -142,31 +136,31 @@ export default withAdminHandler(async (req, res) => {
       continue;
     }
 
-    if (!propertyGroups.has(rmPropertyId)) {
-      propertyGroups.set(rmPropertyId, {
+    if (!propertyGroups.has(sourcePropertyId)) {
+      propertyGroups.set(sourcePropertyId, {
         propertyFields: {
-          rmPropertyId,
+          sourcePropertyId,
           displayName,
           serviceAddressLine1,
           serviceAddressLine2: toStr(row.serviceAddressLine2),
           serviceCity,
           serviceState,
           serviceZip,
-          propertyType: toStr(row.propertyType) || null, // we'll infer later
+          propertyType: toStr(row.propertyType) || null,
         },
         units: [],
       });
     }
-    const group = propertyGroups.get(rmPropertyId);
+    const group = propertyGroups.get(sourcePropertyId);
 
-    // Only add a unit if any unit-level data is present. Rows with
-    // completely empty unit data don't create empty unit rows.
+    // Accept both new sourceUnitName and legacy rmUnitName.
+    const unitName = row.unit?.sourceUnitName ?? row.unit?.rmUnitName;
     if (
       row.unit &&
-      (row.unit.rmUnitName || row.unit.sqft || row.unit.bedrooms || row.unit.bathrooms)
+      (unitName || row.unit.sqft || row.unit.bedrooms || row.unit.bathrooms)
     ) {
       group.units.push({
-        rmUnitName: toStr(row.unit.rmUnitName),
+        sourceUnitName: toStr(unitName),
         sqft: toInt(row.unit.sqft),
         bedrooms: toInt(row.unit.bedrooms),
         bathrooms: toStr(row.unit.bathrooms),
@@ -174,31 +168,24 @@ export default withAdminHandler(async (req, res) => {
     }
   }
 
-  const propertyIdsByRm = new Map(); // rmPropertyId → uuid
+  const propertyIdsBySource = new Map();
   let propertiesInserted = 0;
   let propertiesUpdated = 0;
   let unitsInserted = 0;
 
-  // Everything below runs inside a transaction.
   try {
     await db.transaction(async (tx) => {
-      for (const [rmPropertyId, group] of propertyGroups) {
+      for (const [sourcePropertyId, group] of propertyGroups) {
         const inferred = group.propertyFields.propertyType ||
           inferPropertyType(group.units.length);
 
-        // Lookup-then-insert-or-update. Avoids depending on a partial
-        // unique index for ON CONFLICT inference — postgres requires an
-        // exact match including the WHERE predicate for partial
-        // indexes, which makes onConflictDoUpdate fragile. Three round
-        // trips per property × ~300 properties is still well under a
-        // second against Neon, so the clarity win is free.
         const existing = await tx
           .select({ id: schema.properties.id })
           .from(schema.properties)
           .where(
             and(
               eq(schema.properties.organizationId, orgId),
-              eq(schema.properties.rmPropertyId, rmPropertyId),
+              eq(schema.properties.sourcePropertyId, sourcePropertyId),
             ),
           )
           .limit(1);
@@ -228,7 +215,7 @@ export default withAdminHandler(async (req, res) => {
             .values({
               organizationId: orgId,
               ownerId,
-              rmPropertyId,
+              sourcePropertyId,
               displayName: group.propertyFields.displayName,
               propertyType: inferred,
               serviceAddressLine1: group.propertyFields.serviceAddressLine1,
@@ -242,11 +229,9 @@ export default withAdminHandler(async (req, res) => {
           propertiesInserted += 1;
         }
 
-        propertyIdsByRm.set(rmPropertyId, propertyRowId);
+        propertyIdsBySource.set(sourcePropertyId, propertyRowId);
 
-        // Replace-strategy for units: delete existing, re-insert from
-        // paste. Safe and predictable; destructive on re-runs, which
-        // we call out in the response.
+        // Replace-strategy for units.
         await tx
           .delete(schema.units)
           .where(eq(schema.units.propertyId, propertyRowId));
@@ -255,7 +240,7 @@ export default withAdminHandler(async (req, res) => {
           const unitsToInsert = group.units.map((u) => ({
             organizationId: orgId,
             propertyId: propertyRowId,
-            rmUnitName: u.rmUnitName,
+            sourceUnitName: u.sourceUnitName,
             sqft: u.sqft,
             bedrooms: u.bedrooms,
             bathrooms: u.bathrooms,
@@ -286,9 +271,9 @@ export default withAdminHandler(async (req, res) => {
     propertiesUpdated,
     unitsInserted,
     rowErrorCount: rowErrors.length,
-    rowErrors: rowErrors.slice(0, 50), // cap to keep the response small
+    rowErrors: rowErrors.slice(0, 50),
     warning:
-      'Re-running the import for the same rmPropertyId will replace that ' +
-      "property's units with the pasted set.",
+      'Re-running the import for the same sourcePropertyId will replace ' +
+      "that property's units with the pasted set.",
   });
 });

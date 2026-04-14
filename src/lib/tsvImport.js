@@ -239,13 +239,13 @@ export function parseTSV(text) {
       bathrooms,
     ] = cols;
 
-    const rmPropertyId = cleanNumber(rawPropertyId);
-    if (!rmPropertyId) {
+    const sourcePropertyId = cleanNumber(rawPropertyId);
+    if (!sourcePropertyId) {
       skippedMissing += 1;
       continue;
     }
 
-    if (BLOCKED_PROPERTY_IDS.has(rmPropertyId)) {
+    if (BLOCKED_PROPERTY_IDS.has(sourcePropertyId)) {
       skippedBlocked += 1;
       continue;
     }
@@ -260,7 +260,7 @@ export function parseTSV(text) {
       addressFailures += 1;
       warnings.push({
         lineNumber: i + 1,
-        rmPropertyId,
+        sourcePropertyId,
         error: addr.error,
         propertyColumn: propertyCol,
       });
@@ -268,14 +268,14 @@ export function parseTSV(text) {
     }
 
     parsed.push({
-      rmPropertyId,
+      sourcePropertyId,
       displayName: streetCol || propertyCol,
       serviceAddressLine1: addr.street,
       serviceCity: addr.city,
       serviceState: addr.state,
       serviceZip: addr.zip,
       unit: {
-        rmUnitName: unitName || null,
+        sourceUnitName: unitName || null,
         sqft: cleanNumber(sqft),
         bedrooms: cleanNumber(bedrooms),
         bathrooms: bathrooms || null,
@@ -283,9 +283,9 @@ export function parseTSV(text) {
     });
   }
 
-  // Group rows by rmPropertyId so the preview can show property counts
+  // Group rows by sourcePropertyId so the preview can show property counts
   // rather than raw row counts.
-  const propertyIdSet = new Set(parsed.map((r) => r.rmPropertyId));
+  const propertyIdSet = new Set(parsed.map((r) => r.sourcePropertyId));
 
   return {
     ok: true,

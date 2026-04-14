@@ -133,6 +133,22 @@ export const bulkUtilityConfig = {
     adminFetch('/api/admin/property-utilities-bulk', { method: 'POST', body }),
 };
 
+// ── Grid import ──────────────────────────────────────────────────
+
+export const gridImport = {
+  preview: (tsv) =>
+    adminFetch('/api/admin/grid-import', { method: 'POST', body: { tsv, dryRun: true } }),
+  commit: (tsv) =>
+    adminFetch('/api/admin/grid-import', { method: 'POST', body: { tsv, dryRun: false } }),
+};
+
+// ── Backfill unit IDs ────────────────────────────────────────────
+
+export const backfillUnitIds = {
+  run: (tsv) =>
+    adminFetch('/api/admin/backfill-unit-ids', { method: 'POST', body: { tsv } }),
+};
+
 // ── Move events ──────────────────────────────────────────────────
 
 export const moveEvents = {
