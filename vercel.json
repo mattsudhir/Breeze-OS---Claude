@@ -16,6 +16,7 @@
     { "source": "/api/admin/property-utilities", "destination": "/api/admin/property-utilities" },
     { "source": "/api/admin/utility-providers",  "destination": "/api/admin/utility-providers" },
     { "source": "/api/admin/seed",               "destination": "/api/admin/seed" },
+    { "source": "/api/admin/bulk-import",        "destination": "/api/admin/bulk-import" },
     { "source": "/api/(.*)",                     "destination": "/api/rentmanager" }
   ],
   "functions": {
@@ -32,6 +33,7 @@
     "api/admin/properties.js":           { "maxDuration": 15 },
     "api/admin/property-utilities.js":   { "maxDuration": 15 },
     "api/admin/utility-providers.js":    { "maxDuration": 15 },
-    "api/admin/seed.js":                 { "maxDuration": 15 }
+    "api/admin/seed.js":                 { "maxDuration": 15 },
+    "api/admin/bulk-import.js":          { "maxDuration": 60 }
   }
 }

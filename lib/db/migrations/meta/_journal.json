@@ -8,6 +8,13 @@
       "when": 1744574400000,
       "tag": "0000_breeze_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1744657200000,
+      "tag": "0001_units_and_bulk_import",
+      "breakpoints": true
     }
   ]
 }

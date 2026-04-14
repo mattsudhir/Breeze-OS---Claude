@@ -117,3 +117,9 @@ export const utilityProviders = {
 export const seed = {
   run: () => adminFetch('/api/admin/seed', { method: 'POST' }),
 };
+
+// ── Bulk import ──────────────────────────────────────────────────
+
+export const bulkImport = {
+  run: (body) => adminFetch('/api/admin/bulk-import', { method: 'POST', body }),
+};

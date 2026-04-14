@@ -8,17 +8,19 @@
 // PR, we can upgrade the primitives.
 
 import { useEffect, useState, useCallback } from 'react';
-import { Building2, Users, Zap, Database, RefreshCw, Plus, Trash2 } from 'lucide-react';
+import { Building2, Users, Zap, Database, RefreshCw, Plus, Trash2, Upload } from 'lucide-react';
 import {
   owners as ownersApi,
   properties as propertiesApi,
   propertyUtilities as propertyUtilitiesApi,
   utilityProviders as providersApi,
   seed as seedApi,
+  bulkImport as bulkImportApi,
   getAdminToken,
   setAdminToken,
   hasAdminToken,
 } from '../lib/admin';
+import { parseTSV } from '../lib/tsvImport';
 
 const UTILITY_TYPES = ['electric', 'gas', 'water', 'sewer', 'trash', 'internet', 'cable'];
 const ACCOUNT_HOLDERS = ['owner_llc', 'tenant'];
@@ -98,6 +100,7 @@ export default function PropertyDirectoryPage() {
             { id: 'owners', label: 'Owners (LLCs)', icon: Users },
             { id: 'properties', label: 'Properties', icon: Building2 },
             { id: 'providers', label: 'Utility Providers', icon: Zap },
+            { id: 'import', label: 'Bulk Import', icon: Upload },
           ].map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -126,10 +129,231 @@ export default function PropertyDirectoryPage() {
         {tab === 'owners' && <OwnersTab />}
         {tab === 'properties' && <PropertiesTab />}
         {tab === 'providers' && <ProvidersTab />}
+        {tab === 'import' && <BulkImportTab />}
       </div>
     </TokenGate>
   );
 }
+
+// ── Bulk import tab ──────────────────────────────────────────────
+
+function BulkImportTab() {
+  const [raw, setRaw] = useState('');
+  const [parsed, setParsed] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+
+  const handleParse = () => {
+    setError(null);
+    setResult(null);
+    const p = parseTSV(raw);
+    if (!p.ok) {
+      setError(p.error || 'Parse failed');
+      setParsed(null);
+      return;
+    }
+    setParsed(p);
+  };
+
+  const handleCommit = async () => {
+    if (!parsed || parsed.rows.length === 0) return;
+    if (
+      !confirm(
+        `Import ${parsed.summary.uniqueProperties} properties and ${parsed.rows.length} units into the database? ` +
+          'This will upsert existing properties (matched by Rent Manager ID) and REPLACE their units with the pasted set.',
+      )
+    ) {
+      return;
+    }
+    setImporting(true);
+    setError(null);
+    const res = await bulkImportApi.run({
+      defaultOwnerName: 'Breeze (unassigned)',
+      rows: parsed.rows,
+    });
+    setImporting(false);
+    if (!res.ok) {
+      setError(res.error || 'Import failed');
+      return;
+    }
+    setResult(res);
+  };
+
+  const handleReset = () => {
+    setRaw('');
+    setParsed(null);
+    setResult(null);
+    setError(null);
+  };
+
+  return (
+    <div>
+      <div style={{ marginBottom: 16, padding: 12, background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, fontSize: 13, color: '#0c4a6e' }}>
+        <strong>Paste your property+unit data below.</strong> Tab-separated, with header row.
+        Expected columns: <code>Property ID · Property · Property Street Address 1 · Unit Name · Sqft · Bedrooms · Bathrooms</code>.
+        Common/Confidential portfolio rows and a small skip list are filtered automatically.
+        Every property is imported under a default "Breeze (unassigned)" owner — you can reassign later.
+      </div>
+
+      <textarea
+        value={raw}
+        onChange={(e) => setRaw(e.target.value)}
+        placeholder="Paste rows from Excel (including the header row)…"
+        rows={12}
+        style={{
+          width: '100%',
+          padding: 10,
+          fontFamily: 'monospace',
+          fontSize: 12,
+          border: '1px solid #d1d5db',
+          borderRadius: 6,
+          boxSizing: 'border-box',
+          marginBottom: 12,
+        }}
+      />
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <button type="button" onClick={handleParse} disabled={!raw.trim()} style={primaryButtonStyle}>
+          Parse & preview
+        </button>
+        <button type="button" onClick={handleReset} style={smallButtonStyle}>
+          Reset
+        </button>
+      </div>
+
+      {error && <ErrorBox message={error} />}
+
+      {parsed && !result && (
+        <div style={{ padding: 16, background: '#fafafa', borderRadius: 8, marginBottom: 16 }}>
+          <h3 style={{ marginTop: 0 }}>Preview</h3>
+          <SummaryTable summary={parsed.summary} />
+          {parsed.warnings.length > 0 && (
+            <details style={{ marginTop: 12 }}>
+              <summary style={{ cursor: 'pointer', fontSize: 13, color: '#b91c1c' }}>
+                {parsed.warnings.length} parsing warning{parsed.warnings.length === 1 ? '' : 's'} (click to expand)
+              </summary>
+              <div style={{ maxHeight: 200, overflow: 'auto', marginTop: 8, fontSize: 12 }}>
+                {parsed.warnings.slice(0, 100).map((w, i) => (
+                  <div key={i} style={{ padding: 4, borderBottom: '1px solid #eee' }}>
+                    <span style={{ color: '#888' }}>line {w.lineNumber}:</span> {w.error}
+                    {w.propertyColumn && <span style={{ color: '#666' }}> — "{w.propertyColumn}"</span>}
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+          <h4 style={{ marginTop: 16, marginBottom: 8 }}>First 10 parsed rows</h4>
+          <div style={{ maxHeight: 300, overflow: 'auto', fontSize: 12, border: '1px solid #eee', borderRadius: 6 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead style={{ background: '#f3f4f6', position: 'sticky', top: 0 }}>
+                <tr>
+                  <th style={thStyle}>RM ID</th>
+                  <th style={thStyle}>Street</th>
+                  <th style={thStyle}>City</th>
+                  <th style={thStyle}>State</th>
+                  <th style={thStyle}>ZIP</th>
+                  <th style={thStyle}>Unit</th>
+                  <th style={thStyle}>Sqft</th>
+                  <th style={thStyle}>BR</th>
+                  <th style={thStyle}>BA</th>
+                </tr>
+              </thead>
+              <tbody>
+                {parsed.rows.slice(0, 10).map((r, i) => (
+                  <tr key={i}>
+                    <td style={tdStyle}>{r.rmPropertyId}</td>
+                    <td style={tdStyle}>{r.serviceAddressLine1}</td>
+                    <td style={tdStyle}>{r.serviceCity}</td>
+                    <td style={tdStyle}>{r.serviceState}</td>
+                    <td style={tdStyle}>{r.serviceZip}</td>
+                    <td style={tdStyle}>{r.unit.rmUnitName}</td>
+                    <td style={tdStyle}>{r.unit.sqft}</td>
+                    <td style={tdStyle}>{r.unit.bedrooms}</td>
+                    <td style={tdStyle}>{r.unit.bathrooms}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <button
+            type="button"
+            onClick={handleCommit}
+            disabled={importing || parsed.rows.length === 0}
+            style={{ ...primaryButtonStyle, marginTop: 16, background: '#15803d' }}
+          >
+            {importing ? 'Importing…' : `Commit ${parsed.summary.uniqueProperties} properties · ${parsed.rows.length} units`}
+          </button>
+        </div>
+      )}
+
+      {result && (
+        <div style={{ padding: 16, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, color: '#166534' }}>
+          <h3 style={{ marginTop: 0 }}>✅ Import complete</h3>
+          <ul>
+            <li><strong>{result.propertiesUpserted}</strong> properties upserted</li>
+            <li><strong>{result.unitsInserted}</strong> units inserted</li>
+            <li><strong>{result.rowErrorCount}</strong> rows skipped due to validation errors</li>
+            <li>Owner: <code>{result.defaultOwnerName}</code></li>
+          </ul>
+          {result.warning && <p style={{ fontSize: 12, color: '#555' }}>{result.warning}</p>}
+          {result.rowErrorCount > 0 && (
+            <details>
+              <summary style={{ cursor: 'pointer' }}>Show {result.rowErrorCount} error rows</summary>
+              <pre style={{ fontSize: 11, maxHeight: 200, overflow: 'auto', background: 'white', padding: 8, borderRadius: 4 }}>
+                {JSON.stringify(result.rowErrors, null, 2)}
+              </pre>
+            </details>
+          )}
+          <button type="button" onClick={handleReset} style={{ ...smallButtonStyle, marginTop: 12 }}>
+            Import another batch
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SummaryTable({ summary }) {
+  const rows = [
+    { label: 'Total lines scanned', value: summary.totalLines + summary.blankLines },
+    { label: 'Blank lines skipped', value: summary.blankLines },
+    { label: 'Header row skipped', value: summary.headerRow },
+    { label: 'Common / Confidential rows skipped', value: summary.skippedCommon },
+    { label: 'Block-list rows skipped', value: summary.skippedBlocked },
+    { label: 'Rows missing Property ID', value: summary.skippedMissing },
+    { label: 'Rows with parse errors', value: summary.addressFailures },
+    { label: 'Valid rows to import', value: summary.parsedRows, bold: true },
+    { label: 'Unique properties', value: summary.uniqueProperties, bold: true },
+  ];
+  return (
+    <table style={{ borderCollapse: 'collapse', fontSize: 13 }}>
+      <tbody>
+        {rows.map(({ label, value, bold }) => (
+          <tr key={label}>
+            <td style={{ padding: '4px 12px 4px 0', color: '#666' }}>{label}</td>
+            <td style={{ padding: 4, fontWeight: bold ? 700 : 400, textAlign: 'right' }}>{value}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+const thStyle = {
+  padding: '6px 8px',
+  textAlign: 'left',
+  fontWeight: 600,
+  borderBottom: '1px solid #ddd',
+  fontSize: 11,
+  color: '#666',
+};
+
+const tdStyle = {
+  padding: '4px 8px',
+  borderBottom: '1px solid #f3f3f3',
+  fontSize: 12,
+};
 
 // ── Owners tab ───────────────────────────────────────────────────
 
