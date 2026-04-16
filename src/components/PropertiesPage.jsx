@@ -3,7 +3,7 @@ import {
   Building2, Search, MapPin, Home, CheckCircle2,
   AlertCircle, ChevronRight, Loader2, WifiOff, Filter
 } from 'lucide-react';
-import { getProperties, getUnits } from '../services/rentManager';
+import { getProperties, getUnits } from '../services/zohoData';
 
 export default function PropertiesPage({ onNavigate }) {
   const [properties, setProperties] = useState(null);
@@ -72,7 +72,7 @@ export default function PropertiesPage({ onNavigate }) {
       <div className="properties-page">
         <div className="loading-state">
           <Loader2 size={28} className="spin" />
-          <span>Loading properties from Rent Manager...</span>
+          <span>Loading properties from Zoho...</span>
         </div>
       </div>
     );
@@ -84,7 +84,7 @@ export default function PropertiesPage({ onNavigate }) {
         <div className="empty-state">
           <WifiOff size={40} />
           <h3>No properties found</h3>
-          <p>Couldn't reach Rent Manager, or the account has no properties configured.</p>
+          <p>Couldn't reach Zoho, or the account has no properties configured.</p>
         </div>
       </div>
     );
@@ -208,9 +208,9 @@ export default function PropertiesPage({ onNavigate }) {
         border: `1px solid ${isLive ? '#C8E6C9' : '#FFE0B2'}`,
       }}>
         {isLive ? (
-          <><CheckCircle2 size={14} /> Live data from Rent Manager — {properties.length} properties</>
+          <><CheckCircle2 size={14} /> Live data from Zoho — {properties.length} properties</>
         ) : (
-          <><WifiOff size={14} /> Demo data</>
+          <><WifiOff size={14} /> No data</>
         )}
       </div>
 

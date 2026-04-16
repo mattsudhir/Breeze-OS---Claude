@@ -5,7 +5,8 @@ import {
   Clock, ChevronRight, Search, BarChart3, Calendar,
   Loader2, WifiOff
 } from 'lucide-react';
-import { getProperties, getUnits, getWorkOrders } from '../services/rentManager';
+import { getProperties, getUnits } from '../services/zohoData';
+import { getWorkOrders } from '../services/rentManager';
 
 // ── Fallback demo data (used when API is unreachable) ───────────
 

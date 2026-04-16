@@ -4,7 +4,8 @@ import {
   MapPin, Home, CheckCircle2, AlertCircle, Wrench, DollarSign,
   Loader2, WifiOff,
 } from 'lucide-react';
-import { getProperties, getUnits, getWorkOrders } from '../services/rentManager';
+import { getProperties, getUnits } from '../services/zohoData';
+import { getWorkOrders } from '../services/rentManager';
 
 // Analytics-style "drilldown" landing page for Properties. Reached from
 // the Dashboard → Properties stat card (see ClassicDashboard.jsx). Shows

@@ -5,8 +5,9 @@ import {
   AlertTriangle, Zap, Droplet, Flame, Wind, Lightbulb, Hammer,
   Edit3, Save, X,
 } from 'lucide-react';
+import { getProperties, getUnits } from '../services/zohoData';
 import {
-  getWorkOrders, getProperties, getUnits,
+  getWorkOrders,
   getWorkOrderCategories, getWorkOrderStatuses, getWorkOrderPriorities,
   updateWorkOrder, getWorkOrder,
 } from '../services/rentManager';

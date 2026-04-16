@@ -5,7 +5,8 @@ import {
   FileText, DollarSign, MapPin, Edit3, Save, X, Home,
   Smartphone, Briefcase, Calendar, Hash, StickyNote
 } from 'lucide-react';
-import { getTenants, getTenant, updateTenant } from '../services/rentManager';
+import { getTenants, getTenant } from '../services/zohoData';
+import { updateTenant } from '../services/rentManager';
 
 function getInitials(name) {
   if (!name) return '?';
@@ -172,7 +173,7 @@ function TenantDetail({ tenantId, listTenant, onBack, onUpdated }) {
 
       {saveOk && (
         <div className="save-toast save-toast-ok">
-          <CheckCircle2 size={14} /> Changes saved to Rent Manager
+          <CheckCircle2 size={14} /> Changes saved
         </div>
       )}
       {saveError && (
@@ -504,7 +505,7 @@ export default function TenantsPage() {
       <div className="properties-page">
         <div className="loading-state">
           <Loader2 size={28} className="spin" />
-          <span>Loading tenants from Rent Manager...</span>
+          <span>Loading tenants from Zoho...</span>
         </div>
       </div>
     );
@@ -516,7 +517,7 @@ export default function TenantsPage() {
         <div className="empty-state">
           <WifiOff size={40} />
           <h3>No tenants found</h3>
-          <p>Couldn't reach Rent Manager, or the account has no tenants configured.</p>
+          <p>Couldn't reach Zoho, or the account has no tenants configured.</p>
         </div>
       </div>
     );
@@ -578,9 +579,9 @@ export default function TenantsPage() {
         border: `1px solid ${isLive ? '#C8E6C9' : '#FFE0B2'}`,
       }}>
         {isLive ? (
-          <><CheckCircle2 size={14} /> Live data from Rent Manager — {tenants.length} tenants</>
+          <><CheckCircle2 size={14} /> Live data from Zoho — {tenants.length} tenants</>
         ) : (
-          <><WifiOff size={14} /> Demo data</>
+          <><WifiOff size={14} /> No data</>
         )}
       </div>
 
