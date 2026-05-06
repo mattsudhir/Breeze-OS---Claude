@@ -26,9 +26,16 @@
 import { getChatBackend } from '../lib/backends/index.js';
 import { logAgentAction } from '../lib/agentAudit.js';
 
-// Whitelist of tools callable from this surface. Read-only by
-// design — write tools are reachable from chat (where the agent
-// can confirm intent) but not from a menu-page data fetch.
+// Whitelist of tools callable from this surface. Mostly read-only,
+// plus a small set of write tools where the menu-page form itself
+// is the user's explicit confirmation (no AI interpretation needed).
+//
+// Why update_work_order is here but charge_tenant is not:
+// charge_tenant creates real money owed and needs the chat agent's
+// "confirm tenant / amount / GL account / date" recap before
+// posting. update_work_order is a routine status-change form
+// click — the user explicitly chose the new status / priority in
+// the edit drawer, there's nothing for the agent to interpret.
 const ALLOWED_TOOLS = new Set([
   'list_properties',
   'list_tenants',
@@ -41,6 +48,7 @@ const ALLOWED_TOOLS = new Set([
   'count_units',
   'count_work_orders',
   'list_gl_accounts',
+  'update_work_order',
 ]);
 
 export default async function handler(req, res) {

@@ -64,8 +64,10 @@ function normaliseAppfolioUnit(u) {
   if (!u) return null;
   return {
     id: u.id,
-    propertyId: null, // AppFolio's list_units returns property_name; id mapping wired in Phase 3
+    propertyId: u.property_id || null,
     propertyName: u.property_name || '',
+    occupancyId: u.current_occupancy_id || null,
+    unitGroupId: u.unit_group_id || null,
     name: u.name || `Unit ${u.id}`,
     type: '',
     status: u.status || '',
@@ -135,13 +137,12 @@ export async function getUnits(source, propertyId) {
     const result = await dataFetch(source, 'list_units', { limit: 5000 });
     if (!result) return null;
     let units = (result.units || []).map(normaliseAppfolioUnit);
-    // AppFolio's list_units doesn't currently support propertyId
-    // filtering — once we expose a filter we'll push it down. For
-    // now, filter client-side by propertyName fallback (best effort).
+    // Filter client-side now that property_id is on each row. We
+    // could push this to AppFolio if list_units gains a
+    // filters[PropertyId] pass-through, but the client-side filter
+    // is fine when the full list is already cached in memory.
     if (propertyId) {
-      // No reliable client-side filter without property_id on the
-      // unit row. Returning all and letting the page handle is
-      // honest. Phase 3 will plumb property_id through list_units.
+      units = units.filter((u) => u.propertyId === propertyId);
     }
     return units;
   }
@@ -224,6 +225,52 @@ export async function getWorkOrders(source, opts = {}) {
   }
   const { getWorkOrders: rmGetWorkOrders } = await import('./rentManager.js');
   return rmGetWorkOrders(opts);
+}
+
+// Edit a work order. Both backends support write — RM via its
+// patchWorkOrder, AppFolio via PATCH /work_orders/{id}. The two
+// backends take different shapes for status / priority (RM uses
+// numeric IDs from its lookup tables, AppFolio uses string enums)
+// so the caller passes a normalised patch and we translate per
+// backend.
+//
+// `patch` shape (all optional, only pass what's changing):
+//   status:           string ('Completed', 'Assigned', etc — AppFolio
+//                     enum) OR number (RM statusId)
+//   priority:         string ('Urgent' / 'Normal' / 'Low') OR number
+//   summary / description: strings
+//   scheduledDate:    ISO 8601
+//   completedDate:    YYYY-MM-DD
+//
+// Returns { ok: true, work_order_id } on success or
+// { ok: false, error } on failure.
+export async function updateWorkOrder(source, id, patch = {}) {
+  if (!id) return { ok: false, error: 'work order id required' };
+  if (source === 'appfolio') {
+    const body = { work_order_id: id };
+    if (patch.status) body.status = String(patch.status);
+    if (patch.priority) body.priority = String(patch.priority);
+    if (patch.summary) body.job_description = patch.summary;
+    if (patch.description) body.description = patch.description;
+    if (patch.scheduledDate) body.scheduled_start = patch.scheduledDate;
+    if (patch.completedDate) body.completed_on = patch.completedDate;
+    if (patch.canceledDate) body.canceled_on = patch.canceledDate;
+    if (patch.vendorId !== undefined) body.vendor_id = patch.vendorId;
+
+    const result = await dataFetch(source, 'update_work_order', body);
+    if (!result) return { ok: false, error: 'Update failed (network error)' };
+    if (result.error) return { ok: false, error: result.error };
+    return { ok: true, work_order_id: result.work_order_id };
+  }
+  // Rent Manager path. RM's existing service throws on failure,
+  // so we wrap it here to return the same shape as the AppFolio path.
+  const { updateWorkOrder: rmUpdate } = await import('./rentManager.js');
+  try {
+    await rmUpdate(id, patch);
+    return { ok: true, work_order_id: id };
+  } catch (err) {
+    return { ok: false, error: err.message || 'Update failed' };
+  }
 }
 
 // updateTenant is RM-only for now — AppFolio's PATCH /tenants/{id}

@@ -5,23 +5,41 @@ import {
   AlertTriangle, Zap, Droplet, Flame, Wind, Lightbulb, Hammer,
   Edit3, Save, X,
 } from 'lucide-react';
-// Data fetches (work orders / properties / units) go through the
-// backend-aware services/data.js so they respect the toggle. Filter
-// metadata (categories / statuses / priorities) and the edit form
-// (updateWorkOrder / getWorkOrder) are still RM-only — AppFolio has
-// its own status / priority enums but we haven't surfaced them as
-// tools yet, and we don't have a write path for AppFolio work
-// orders. When AppFolio is active, the filter dropdowns degrade to
-// what's hardcoded inline and the edit drawer surfaces a "not yet
-// supported" message.
-import { getWorkOrders, getProperties, getUnits } from '../services/data';
+// Data fetches (work orders / properties / units) and the edit
+// write (updateWorkOrder) go through the backend-aware
+// services/data.js. Filter metadata (categories / statuses /
+// priorities) and the detail re-fetch (getWorkOrder) are still
+// RM-only — AppFolio has its own enums but we haven't surfaced
+// them as tools, and AppFolio's docs don't expose a per-record
+// /work_orders/{id} GET (filtered list query is the v0 pattern,
+// which we don't need for the form's pre-fill since the row in
+// memory is already current).
+import { getWorkOrders, getProperties, getUnits, updateWorkOrder } from '../services/data';
 import {
   getWorkOrderCategories, getWorkOrderStatuses, getWorkOrderPriorities,
-  updateWorkOrder, getWorkOrder,
+  getWorkOrder,
 } from '../services/rentManager';
 import { useDataSource } from '../contexts/DataSourceContext.jsx';
 
 // ── Helpers ──────────────────────────────────────────────────────
+
+// AppFolio enum values for the edit-form dropdowns (per AppFolio
+// Database API v0 docs). Hardcoded because there's no AppFolio tool
+// equivalent to RM's getWorkOrderStatuses / getWorkOrderPriorities.
+// AppFolio's documented enums are stable; if they grow we update
+// this list.
+const APPFOLIO_WO_STATUSES = [
+  'New',
+  'Assigned',
+  'Scheduled',
+  'Waiting',
+  'Estimate Requested',
+  'Estimated',
+  'Work Completed',
+  'Completed',
+  'Canceled',
+];
+const APPFOLIO_WO_PRIORITIES = ['Urgent', 'Normal', 'Low'];
 
 function normalizeCategory(raw) {
   const c = (raw || '').toLowerCase();
@@ -136,20 +154,24 @@ function WorkOrderDetail({
     setEditing(true);
     setEditLoading(true);
 
-    // Seed from the list-view record first for an instant UI
+    // Seed from the list-view record first for an instant UI. Both
+    // backend shapes are populated; the form's render and save use
+    // whichever pair the active backend cares about (priorityId/
+    // statusId for RM, priority/status string enums for AppFolio).
     setForm({
       summary: workOrder.summary || '',
       description: workOrder.description || '',
       priorityId: workOrder.priorityId || '',
       categoryId: workOrder.categoryId || '',
       statusId: workOrder.statusId || '',
+      priority: workOrder.priority || '',
+      status: workOrder.status || '',
     });
 
-    // Then overwrite with a fresh record so the form reflects the current
-    // server state rather than whatever was cached in the list. RM-only —
-    // when AppFolio is active we keep the cached row in the form (the
-    // user can't actually save edits anyway, the saveEdit guard short-
-    // circuits with a clear message).
+    // RM-only: re-fetch the WO record so the form reflects current
+    // server state rather than whatever was cached in the list. The
+    // AppFolio path skips this — list_work_orders' row is already
+    // the canonical source for everything we render in the form.
     if (dataSource === 'appfolio') {
       setEditLoading(false);
       return;
@@ -181,23 +203,28 @@ function WorkOrderDetail({
     setSaving(true);
     setSaveError(null);
     try {
-      // RM requires numeric IDs for priority/category/status — strings are
-      // rejected with a type conversion error.
+      // services/data.updateWorkOrder accepts a normalised patch and
+      // translates per backend. RM expects numeric IDs (priorityId
+      // etc.); AppFolio expects string enums (priority='Urgent',
+      // status='Completed'). The form populates whichever field
+      // shape the active backend uses.
       const patch = {
         summary: form.summary,
         description: form.description,
       };
-      if (form.priorityId) patch.priorityId = Number(form.priorityId);
-      if (form.categoryId) patch.categoryId = Number(form.categoryId);
-      if (form.statusId) patch.statusId = Number(form.statusId);
-
       if (dataSource === 'appfolio') {
-        throw new Error(
-          `Editing work orders is not yet supported when AppFolio is active. ` +
-          `Switch to Rent Manager to edit, or update the ticket directly in AppFolio.`,
-        );
+        if (form.priority) patch.priority = form.priority;
+        if (form.status) patch.status = form.status;
+      } else {
+        if (form.priorityId) patch.priorityId = Number(form.priorityId);
+        if (form.categoryId) patch.categoryId = Number(form.categoryId);
+        if (form.statusId) patch.statusId = Number(form.statusId);
       }
-      await updateWorkOrder(workOrder.id, patch);
+
+      const result = await updateWorkOrder(dataSource, workOrder.id, patch);
+      if (!result.ok) {
+        throw new Error(result.error || 'Update failed');
+      }
       setEditing(false);
       setSaveOk(true);
       if (onUpdated) onUpdated(workOrder.id);
@@ -289,42 +316,80 @@ function WorkOrderDetail({
             <div className="form-row">
               <label>
                 <span>Priority</span>
-                <select
-                  value={form.priorityId}
-                  onChange={(e) => setForm({ ...form, priorityId: e.target.value })}
-                >
-                  <option value="">—</option>
-                  {priorities.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
+                {dataSource === 'appfolio' ? (
+                  <select
+                    value={form.priority}
+                    onChange={(e) => setForm({ ...form, priority: e.target.value })}
+                  >
+                    <option value="">—</option>
+                    {APPFOLIO_WO_PRIORITIES.map((p) => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <select
+                    value={form.priorityId}
+                    onChange={(e) => setForm({ ...form, priorityId: e.target.value })}
+                  >
+                    <option value="">—</option>
+                    {priorities.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                )}
               </label>
 
               <label>
                 <span>Category</span>
-                <select
-                  value={form.categoryId}
-                  onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
-                >
-                  <option value="">—</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
+                {dataSource === 'appfolio' ? (
+                  // AppFolio doesn't have a categories endpoint that
+                  // matches RM's. The work-order row's VendorTrade
+                  // is the closest concept, but it's free-form on
+                  // AppFolio and not meaningfully editable from this
+                  // form. Render disabled with a hint.
+                  <input
+                    type="text"
+                    value={workOrder.categoryName || ''}
+                    disabled
+                    title="Category isn't editable from Breeze OS when AppFolio is the active source."
+                  />
+                ) : (
+                  <select
+                    value={form.categoryId}
+                    onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
+                  >
+                    <option value="">—</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                )}
               </label>
             </div>
 
             <label>
               <span>Status</span>
-              <select
-                value={form.statusId}
-                onChange={(e) => setForm({ ...form, statusId: e.target.value })}
-              >
-                <option value="">—</option>
-                {statuses.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
+              {dataSource === 'appfolio' ? (
+                <select
+                  value={form.status}
+                  onChange={(e) => setForm({ ...form, status: e.target.value })}
+                >
+                  <option value="">—</option>
+                  {APPFOLIO_WO_STATUSES.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              ) : (
+                <select
+                  value={form.statusId}
+                  onChange={(e) => setForm({ ...form, statusId: e.target.value })}
+                >
+                  <option value="">—</option>
+                  {statuses.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              )}
             </label>
 
             <div className="form-actions">

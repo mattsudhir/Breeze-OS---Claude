@@ -27,9 +27,7 @@ In priority order:
 1. **Data-source toggle migration — mostly complete.** Phase 1 (lift to app-wide context + move UI to TopBar), Phase 2A (`/api/data` dispatcher + `services/data.js`), Phase 2B (PropertiesPage, TenantsPage, ClassicDashboard, PropertiesDrilldown, MaintenancePage list-fetches) all shipped. `list_work_orders` and `count_work_orders` are wrapped on the AppFolio backend.
 
    Remaining gaps (not blocking):
-   - **MaintenancePage edit drawer is RM-only.** Editing a work order with AppFolio active now shows a clear "switch to Rent Manager to edit" message. Wire AppFolio `PATCH /work_orders/{id}` later for parity.
-   - **MaintenancePage filter dropdowns (categories / statuses / priorities) are RM-only.** They degrade to inline labels with AppFolio active. Wire equivalent AppFolio enums later.
-   - **AppFolio's `list_units` doesn't filter by property_id yet** — `PropertiesPage` grouping by property is degraded under AppFolio. Phase 3 fix.
+   - **MaintenancePage filter dropdowns (categories / statuses / priorities) are still RM-only**. The edit drawer's status / priority dropdowns now have AppFolio enums, but the top-level filter bar's dropdowns degrade to inline strings under AppFolio. Wire equivalent AppFolio enums for the filter bar later.
    - **`updateTenant` is RM-only.** AppFolio's PATCH /tenants/{id} only takes CustomFields per docs. Surfaces a clear error in the edit form.
    - `PropertyDirectoryPage.jsx`, `TasksPage.jsx`, `MoveEventsPage.jsx` hit our own DB (`/api/admin/*`) and aren't toggle-able by design — no migration needed.
 
