@@ -3,9 +3,11 @@ import {
   Building2, Search, MapPin, Home, CheckCircle2,
   AlertCircle, ChevronRight, Loader2, WifiOff, Filter
 } from 'lucide-react';
-import { getProperties, getUnits } from '../services/rentManager';
+import { getProperties, getUnits } from '../services/data';
+import { useDataSource } from '../contexts/DataSourceContext.jsx';
 
 export default function PropertiesPage({ onNavigate }) {
+  const { dataSource } = useDataSource();
   const [properties, setProperties] = useState(null);
   const [units, setUnits] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -13,22 +15,29 @@ export default function PropertiesPage({ onNavigate }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPropertyId, setSelectedPropertyId] = useState(null);
 
+  // Refetch when the data source toggle flips.
   useEffect(() => {
+    let cancelled = false;
     async function fetchData() {
       setLoading(true);
       const [propsData, unitsData] = await Promise.all([
-        getProperties(),
-        getUnits(),
+        getProperties(dataSource),
+        getUnits(dataSource),
       ]);
+      if (cancelled) return;
       if (propsData) {
         setProperties(propsData);
         setIsLive(true);
+      } else {
+        setProperties(null);
+        setIsLive(false);
       }
-      if (unitsData) setUnits(unitsData);
+      setUnits(unitsData || null);
       setLoading(false);
     }
     fetchData();
-  }, []);
+    return () => { cancelled = true; };
+  }, [dataSource]);
 
   // Group units by property
   const unitsByProperty = (units || []).reduce((acc, u) => {

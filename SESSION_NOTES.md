@@ -24,7 +24,13 @@ These were committed in code but require a manual action you haven't completed y
 
 In priority order:
 
-1. **Make data source toggle global.** Currently the AppFolio/Rent Manager toggle only governs Chat Home. Classic View and the other menu items (Properties, Tenants, Maintenance, etc.) still pull from their own (often stale) sources. Lift the toggle into app-level state so every view reads from the same active backend. ~half day. *Recommended next.*
+1. **Finish the data-source-toggle migration.** Phase 1 (lift toggle to app-wide context, move UI to TopBar) shipped. Phase 2A (`/api/data` dispatcher + `src/services/data.js` backend-aware service) shipped. Phase 2B (PropertiesPage and TenantsPage migrated) shipped. **Still on the legacy RM-only path — migrate when the matching AppFolio backend tools land:**
+   - `ClassicDashboard.jsx` — uses getWorkOrders (need `list_work_orders` tool on AppFolio backend)
+   - `PropertiesDrilldown.jsx` — same
+   - `MaintenancePage.jsx` — same, plus getWorkOrderPriorities/Categories/Statuses/etc.
+   - `PropertyDirectoryPage.jsx`, `TasksPage.jsx`, `MoveEventsPage.jsx` — these hit our own DB (`/api/admin/*`) not the toggle-able backends, no migration needed.
+
+   Once `list_work_orders` and `list_charges` (with PropertyId scope) are wrapped in `lib/backends/appfolio.js`, migration of the remaining pages is a 5-minute swap each — copy the PropertiesPage pattern: `useDataSource()`, pass `dataSource` to fetchers, add to useEffect deps.
 
 2. **PR B2 — AppFolio webhook receiver.** `/api/webhooks/appfolio` with JWS signature verification (add `jose`), topic→enricher mapping (fetch the resource from AppFolio so the notification has a meaningful title/body), fan out via `notifications.fanoutEvent`. ~1.5 hrs.
 

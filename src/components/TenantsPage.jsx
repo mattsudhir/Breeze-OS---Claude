@@ -5,7 +5,8 @@ import {
   FileText, DollarSign, MapPin, Edit3, Save, X, Home,
   Smartphone, Briefcase, Calendar, Hash, StickyNote
 } from 'lucide-react';
-import { getTenants, getTenant, updateTenant } from '../services/rentManager';
+import { getTenants, getTenant, updateTenant } from '../services/data';
+import { useDataSource } from '../contexts/DataSourceContext.jsx';
 
 function getInitials(name) {
   if (!name) return '?';
@@ -65,6 +66,7 @@ function formatDate(d) {
 
 // ── Detail view with tabs + edit form ──────────────────────────────
 function TenantDetail({ tenantId, listTenant, onBack, onUpdated }) {
+  const { dataSource } = useDataSource();
   const [tenant, setTenant] = useState(listTenant); // seed with list data
   const [loadingDetail, setLoadingDetail] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
@@ -78,7 +80,7 @@ function TenantDetail({ tenantId, listTenant, onBack, onUpdated }) {
     let cancelled = false;
     async function fetchDetail() {
       setLoadingDetail(true);
-      const full = await getTenant(tenantId);
+      const full = await getTenant(dataSource, tenantId);
       if (!cancelled && full) {
         setTenant(full);
       }
@@ -86,7 +88,7 @@ function TenantDetail({ tenantId, listTenant, onBack, onUpdated }) {
     }
     fetchDetail();
     return () => { cancelled = true; };
-  }, [tenantId]);
+  }, [tenantId, dataSource]);
 
   const startEdit = () => {
     setForm({
@@ -113,7 +115,13 @@ function TenantDetail({ tenantId, listTenant, onBack, onUpdated }) {
     setSaving(true);
     setSaveError(null);
     try {
-      await updateTenant(tenant.id, form);
+      const result = await updateTenant(dataSource, tenant.id, form);
+      // services/data.updateTenant returns { ok: false, error } when
+      // the active backend doesn't support edits (AppFolio today).
+      // Surface that to the user instead of swallowing.
+      if (result && result.ok === false) {
+        throw new Error(result.error || 'Update not supported on this data source');
+      }
       // Optimistically merge and refetch
       const merged = { ...tenant, ...form, name: `${form.firstName} ${form.lastName}`.trim() };
       setTenant(merged);
@@ -121,7 +129,7 @@ function TenantDetail({ tenantId, listTenant, onBack, onUpdated }) {
       setSaveOk(true);
       if (onUpdated) onUpdated(merged);
       // Background refetch to pick up server-side changes
-      const fresh = await getTenant(tenant.id);
+      const fresh = await getTenant(dataSource, tenant.id);
       if (fresh) setTenant(fresh);
       setTimeout(() => setSaveOk(false), 3000);
     } catch (err) {
@@ -473,6 +481,7 @@ function TenantEditForm({ form, setForm, saving, onSave, onCancel }) {
 
 // ── Main TenantsPage ───────────────────────────────────────────────
 export default function TenantsPage() {
+  const { dataSource } = useDataSource();
   const [tenants, setTenants] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isLive, setIsLive] = useState(false);
@@ -480,18 +489,25 @@ export default function TenantsPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedTenantId, setSelectedTenantId] = useState(null);
 
+  // Refetch whenever the user flips the data source toggle in TopBar.
   useEffect(() => {
+    let cancelled = false;
     async function fetchData() {
       setLoading(true);
-      const data = await getTenants();
+      const data = await getTenants(dataSource);
+      if (cancelled) return;
       if (data) {
         setTenants(data);
         setIsLive(true);
+      } else {
+        setTenants(null);
+        setIsLive(false);
       }
       setLoading(false);
     }
     fetchData();
-  }, []);
+    return () => { cancelled = true; };
+  }, [dataSource]);
 
   const handleTenantUpdated = (updated) => {
     setTenants((prev) =>
