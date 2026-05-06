@@ -5,11 +5,7 @@ import {
   Clock, ChevronRight, Search, BarChart3, Calendar,
   Loader2, WifiOff
 } from 'lucide-react';
-import { getProperties, getUnits } from '../services/data';
-// Work orders aren't yet wrapped on the AppFolio backend, so we still
-// hit rentManager.js directly for that piece. Once list_work_orders
-// lands on the AppFolio backend, this import goes away.
-import { getWorkOrders } from '../services/rentManager';
+import { getProperties, getUnits, getWorkOrders } from '../services/data';
 import { useDataSource } from '../contexts/DataSourceContext.jsx';
 
 // ── Fallback demo data (used when API is unreachable) ───────────
@@ -75,14 +71,10 @@ export default function ClassicDashboard({ onNavigate }) {
     async function fetchData() {
       setLoading(true);
       // Use allSettled so one slow/failed call doesn't kill the others.
-      // Work orders still goes through rentManager.js until we wrap
-      // list_work_orders on the AppFolio backend — when AppFolio is the
-      // active source, the WO section will simply be empty rather than
-      // rendering stale RM tickets pretending to be AppFolio data.
       const results = await Promise.allSettled([
         getProperties(dataSource),
         getUnits(dataSource),
-        dataSource === 'appfolio' ? Promise.resolve(null) : getWorkOrders(),
+        getWorkOrders(dataSource, { status: 'all' }),
       ]);
       if (cancelled) return;
       const [propsRes, unitsRes, woRes] = results;
@@ -176,14 +168,7 @@ export default function ClassicDashboard({ onNavigate }) {
         {loading ? (
           <><Loader2 size={14} className="spin" /> Connecting to {sourceLabel}...</>
         ) : isLive ? (
-          <>
-            <CheckCircle2 size={14} /> Live data from {sourceLabel}
-            {dataSource === 'appfolio' && (
-              <span style={{ marginLeft: 8, fontWeight: 400, opacity: 0.8 }}>
-                — work orders not yet wired up
-              </span>
-            )}
-          </>
+          <><CheckCircle2 size={14} /> Live data from {sourceLabel}</>
         ) : (
           <><WifiOff size={14} /> Couldn't reach {sourceLabel}</>
         )}

@@ -24,13 +24,14 @@ These were committed in code but require a manual action you haven't completed y
 
 In priority order:
 
-1. **Finish the data-source-toggle migration.** Phase 1 (lift toggle to app-wide context, move UI to TopBar) shipped. Phase 2A (`/api/data` dispatcher + `src/services/data.js` backend-aware service) shipped. Phase 2B (PropertiesPage and TenantsPage migrated) shipped. **Still on the legacy RM-only path — migrate when the matching AppFolio backend tools land:**
-   - `ClassicDashboard.jsx` — uses getWorkOrders (need `list_work_orders` tool on AppFolio backend)
-   - `PropertiesDrilldown.jsx` — same
-   - `MaintenancePage.jsx` — same, plus getWorkOrderPriorities/Categories/Statuses/etc.
-   - `PropertyDirectoryPage.jsx`, `TasksPage.jsx`, `MoveEventsPage.jsx` — these hit our own DB (`/api/admin/*`) not the toggle-able backends, no migration needed.
+1. **Data-source toggle migration — mostly complete.** Phase 1 (lift to app-wide context + move UI to TopBar), Phase 2A (`/api/data` dispatcher + `services/data.js`), Phase 2B (PropertiesPage, TenantsPage, ClassicDashboard, PropertiesDrilldown, MaintenancePage list-fetches) all shipped. `list_work_orders` and `count_work_orders` are wrapped on the AppFolio backend.
 
-   Once `list_work_orders` and `list_charges` (with PropertyId scope) are wrapped in `lib/backends/appfolio.js`, migration of the remaining pages is a 5-minute swap each — copy the PropertiesPage pattern: `useDataSource()`, pass `dataSource` to fetchers, add to useEffect deps.
+   Remaining gaps (not blocking):
+   - **MaintenancePage edit drawer is RM-only.** Editing a work order with AppFolio active now shows a clear "switch to Rent Manager to edit" message. Wire AppFolio `PATCH /work_orders/{id}` later for parity.
+   - **MaintenancePage filter dropdowns (categories / statuses / priorities) are RM-only.** They degrade to inline labels with AppFolio active. Wire equivalent AppFolio enums later.
+   - **AppFolio's `list_units` doesn't filter by property_id yet** — `PropertiesPage` grouping by property is degraded under AppFolio. Phase 3 fix.
+   - **`updateTenant` is RM-only.** AppFolio's PATCH /tenants/{id} only takes CustomFields per docs. Surfaces a clear error in the edit form.
+   - `PropertyDirectoryPage.jsx`, `TasksPage.jsx`, `MoveEventsPage.jsx` hit our own DB (`/api/admin/*`) and aren't toggle-able by design — no migration needed.
 
 2. **PR B2 — AppFolio webhook receiver.** `/api/webhooks/appfolio` with JWS signature verification (add `jose`), topic→enricher mapping (fetch the resource from AppFolio so the notification has a meaningful title/body), fan out via `notifications.fanoutEvent`. ~1.5 hrs.
 

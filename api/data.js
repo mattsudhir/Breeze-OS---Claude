@@ -35,9 +35,11 @@ const ALLOWED_TOOLS = new Set([
   'search_tenants',
   'get_tenant_details',
   'list_units',
+  'list_work_orders',
   'count_properties',
   'count_tenants',
   'count_units',
+  'count_work_orders',
   'list_gl_accounts',
 ]);
 

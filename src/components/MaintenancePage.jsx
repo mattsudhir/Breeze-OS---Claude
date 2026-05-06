@@ -5,11 +5,21 @@ import {
   AlertTriangle, Zap, Droplet, Flame, Wind, Lightbulb, Hammer,
   Edit3, Save, X,
 } from 'lucide-react';
+// Data fetches (work orders / properties / units) go through the
+// backend-aware services/data.js so they respect the toggle. Filter
+// metadata (categories / statuses / priorities) and the edit form
+// (updateWorkOrder / getWorkOrder) are still RM-only — AppFolio has
+// its own status / priority enums but we haven't surfaced them as
+// tools yet, and we don't have a write path for AppFolio work
+// orders. When AppFolio is active, the filter dropdowns degrade to
+// what's hardcoded inline and the edit drawer surfaces a "not yet
+// supported" message.
+import { getWorkOrders, getProperties, getUnits } from '../services/data';
 import {
-  getWorkOrders, getProperties, getUnits,
   getWorkOrderCategories, getWorkOrderStatuses, getWorkOrderPriorities,
   updateWorkOrder, getWorkOrder,
 } from '../services/rentManager';
+import { useDataSource } from '../contexts/DataSourceContext.jsx';
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -104,6 +114,8 @@ function WorkOrderDetail({
   workOrder, categories, statuses, priorities, statusLookup,
   onBack, onUpdated,
 }) {
+  const { dataSource, sources } = useDataSource();
+  const sourceLabel = sources.find((s) => s.value === dataSource)?.label || dataSource;
   const catKey = normalizeCategory(workOrder.category);
   const cat = CATEGORY_META[catKey];
   const CatIcon = cat.icon;
@@ -134,7 +146,14 @@ function WorkOrderDetail({
     });
 
     // Then overwrite with a fresh record so the form reflects the current
-    // server state rather than whatever was cached in the list
+    // server state rather than whatever was cached in the list. RM-only —
+    // when AppFolio is active we keep the cached row in the form (the
+    // user can't actually save edits anyway, the saveEdit guard short-
+    // circuits with a clear message).
+    if (dataSource === 'appfolio') {
+      setEditLoading(false);
+      return;
+    }
     try {
       const fresh = await getWorkOrder(workOrder.id);
       if (fresh) {
@@ -172,6 +191,12 @@ function WorkOrderDetail({
       if (form.categoryId) patch.categoryId = Number(form.categoryId);
       if (form.statusId) patch.statusId = Number(form.statusId);
 
+      if (dataSource === 'appfolio') {
+        throw new Error(
+          `Editing work orders is not yet supported when AppFolio is active. ` +
+          `Switch to Rent Manager to edit, or update the ticket directly in AppFolio.`,
+        );
+      }
       await updateWorkOrder(workOrder.id, patch);
       setEditing(false);
       setSaveOk(true);
@@ -218,7 +243,7 @@ function WorkOrderDetail({
 
       {saveOk && (
         <div className="save-toast save-toast-ok">
-          <CheckCircle2 size={14} /> Changes saved to Rent Manager
+          <CheckCircle2 size={14} /> Changes saved to {sourceLabel}
         </div>
       )}
       {saveError && (
@@ -392,6 +417,8 @@ function normalizeInitialFilters(initial) {
 }
 
 export default function MaintenancePage({ initialFilters }) {
+  const { dataSource, sources } = useDataSource();
+  const sourceLabel = sources.find((s) => s.value === dataSource)?.label || dataSource;
   const applied = normalizeInitialFilters(initialFilters);
 
   const [workOrders, setWorkOrders] = useState(null);
@@ -444,9 +471,15 @@ export default function MaintenancePage({ initialFilters }) {
       setFetchMs(null);
       const startedAt = Date.now();
       try {
+        // Priorities lookup is RM-only metadata. When AppFolio is the
+        // active source, skip the call (it would return unrelated RM
+        // priority IDs that don't match anything in our work orders)
+        // and let the page fall back to the inline priority strings.
         const [woResult, prioritiesResult] = await Promise.allSettled([
-          getWorkOrders({ throwOnError: true }),
-          getWorkOrderPriorities(),
+          getWorkOrders(dataSource, { status: 'all' }),
+          dataSource === 'appfolio'
+            ? Promise.resolve(null)
+            : getWorkOrderPriorities(),
         ]);
         if (cancelled) return;
         setFetchMs(Date.now() - startedAt);
@@ -457,13 +490,15 @@ export default function MaintenancePage({ initialFilters }) {
         } else {
           setFetchFailed(true);
           const err = woResult.status === 'rejected' ? woResult.reason : null;
-          setFetchError(err?.message || 'Empty response from Rent Manager');
+          setFetchError(err?.message || `Empty response from ${sourceLabel}`);
         }
 
         if (prioritiesResult.status === 'fulfilled' && prioritiesResult.value) {
           const map = {};
           prioritiesResult.value.forEach((p) => { map[p.id] = p.name; });
           setPriorityLookup(map);
+        } else {
+          setPriorityLookup({});
         }
       } catch (err) {
         if (cancelled) return;
@@ -476,7 +511,7 @@ export default function MaintenancePage({ initialFilters }) {
     }
     fetchTickets();
     return () => { cancelled = true; };
-  }, [reloadTick]);
+  }, [reloadTick, dataSource]);
 
   // Phase two: the remaining lookups aren't on the critical path.
   useEffect(() => {
@@ -484,23 +519,28 @@ export default function MaintenancePage({ initialFilters }) {
     let cancelled = false;
 
     async function fetchLookups() {
+      // Properties + units come from the backend-aware service.
+      // Categories + statuses are RM-only metadata; on AppFolio they
+      // resolve to empty lookups and the page falls back to inline
+      // labels and the work-order-row's own .status/.categoryName
+      // strings.
       const steps = [
-        { fn: getProperties, apply: (data) => {
+        { fn: () => getProperties(dataSource), apply: (data) => {
           const map = {};
           data.forEach((p) => { map[p.id] = p.name; });
           setPropertyMap(map);
         }},
-        { fn: getUnits, apply: (data) => {
+        { fn: () => getUnits(dataSource), apply: (data) => {
           const map = {};
           data.forEach((u) => { map[u.id] = u.name; });
           setUnitMap(map);
         }},
-        { fn: getWorkOrderCategories, apply: (data) => {
+        { fn: dataSource === 'appfolio' ? null : getWorkOrderCategories, apply: (data) => {
           const map = {};
           data.forEach((c) => { map[c.id] = c.name; });
           setCategoryLookup(map);
         }},
-        { fn: getWorkOrderStatuses, apply: (data) => {
+        { fn: dataSource === 'appfolio' ? null : getWorkOrderStatuses, apply: (data) => {
           const map = {};
           data.forEach((s) => { map[s.id] = s; });
           setStatusLookup(map);
@@ -509,6 +549,7 @@ export default function MaintenancePage({ initialFilters }) {
 
       for (const step of steps) {
         if (cancelled) return;
+        if (!step.fn) continue; // skipped step (e.g. RM-only on AppFolio)
         try {
           const data = await step.fn();
           if (cancelled) return;
@@ -520,7 +561,7 @@ export default function MaintenancePage({ initialFilters }) {
     }
     fetchLookups();
     return () => { cancelled = true; };
-  }, [workOrders]);
+  }, [workOrders, dataSource]);
 
   // Enrich work orders with names resolved client-side from lookup tables.
   // RM's list endpoint returns both ID fields and legacy string fields (e.g.
@@ -554,7 +595,7 @@ export default function MaintenancePage({ initialFilters }) {
       <div className="properties-page">
         <div className="loading-state">
           <Loader2 size={28} className="spin" />
-          <span>Loading maintenance tickets from Rent Manager...</span>
+          <span>Loading maintenance tickets from {sourceLabel}...</span>
         </div>
       </div>
     );
@@ -565,7 +606,7 @@ export default function MaintenancePage({ initialFilters }) {
       <div className="properties-page">
         <div className="empty-state">
           <WifiOff size={40} />
-          <h3>Couldn't reach Rent Manager</h3>
+          <h3>Couldn't reach {sourceLabel}</h3>
           <p>The work order endpoint didn't respond successfully.</p>
           {fetchError && (
             <div style={{
@@ -603,7 +644,7 @@ export default function MaintenancePage({ initialFilters }) {
         <div className="empty-state">
           <WifiOff size={40} />
           <h3>No maintenance tickets found</h3>
-          <p>Rent Manager returned an empty list. There are no service orders on file.</p>
+          <p>{sourceLabel} returned an empty list. There are no service orders on file.</p>
         </div>
       </div>
     );

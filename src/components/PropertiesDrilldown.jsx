@@ -4,7 +4,8 @@ import {
   MapPin, Home, CheckCircle2, AlertCircle, Wrench, DollarSign,
   Loader2, WifiOff,
 } from 'lucide-react';
-import { getProperties, getUnits, getWorkOrders } from '../services/rentManager';
+import { getProperties, getUnits, getWorkOrders } from '../services/data';
+import { useDataSource } from '../contexts/DataSourceContext.jsx';
 
 // Analytics-style "drilldown" landing page for Properties. Reached from
 // the Dashboard → Properties stat card (see ClassicDashboard.jsx). Shows
@@ -93,6 +94,8 @@ function formatCurrency(n) {
 }
 
 export default function PropertiesDrilldown() {
+  const { dataSource, sources } = useDataSource();
+  const sourceLabel = sources.find((s) => s.value === dataSource)?.label || dataSource;
   const [properties, setProperties] = useState(null);
   const [units, setUnits] = useState(null);
   const [workOrders, setWorkOrders] = useState(null);
@@ -107,9 +110,9 @@ export default function PropertiesDrilldown() {
     async function fetchAll() {
       setLoading(true);
       const results = await Promise.allSettled([
-        getProperties(),
-        getUnits(),
-        getWorkOrders(),
+        getProperties(dataSource),
+        getUnits(dataSource),
+        getWorkOrders(dataSource, { status: 'all' }),
       ]);
       if (cancelled) return;
       const [propsRes, unitsRes, woRes] = results;
@@ -133,7 +136,7 @@ export default function PropertiesDrilldown() {
     }
     fetchAll();
     return () => { cancelled = true; };
-  }, []);
+  }, [dataSource]);
 
   // Derived per-property rows with all the metrics.
   const rows = useMemo(() => {
@@ -246,9 +249,9 @@ export default function PropertiesDrilldown() {
         border: `1px solid ${isLive ? '#C8E6C9' : '#FFE0B2'}`,
       }}>
         {isLive ? (
-          <><CheckCircle2 size={14} /> Live portfolio data from Rent Manager</>
+          <><CheckCircle2 size={14} /> Live portfolio data from {sourceLabel}</>
         ) : (
-          <><WifiOff size={14} /> Demo data — connect Rent Manager to see live metrics</>
+          <><WifiOff size={14} /> Demo data — couldn't reach {sourceLabel} for live metrics</>
         )}
       </div>
 

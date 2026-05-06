@@ -182,6 +182,50 @@ export async function getTenant(source, id) {
   return rmGetTenant(id);
 }
 
+function normaliseAppfolioWorkOrder(w) {
+  if (!w) return null;
+  // The AppFolio backend's list_work_orders already maps to camelCase
+  // — we just pass it through plus a couple of derived fields the UI
+  // expects (statusId/priorityId aren't in AppFolio's data, so they
+  // stay null and consumer code falls back to the string).
+  return {
+    id: w.id,
+    displayId: w.displayId || `WO-${w.id}`,
+    summary: w.summary || '',
+    description: w.description || '',
+    isClosed: !!w.isClosed,
+    status: w.status || '',
+    statusId: null,
+    priority: w.priority || '',
+    priorityId: null,
+    categoryId: null,
+    categoryName: w.categoryName || '',
+    propertyId: w.propertyId || null,
+    unitId: w.unitId || null,
+    tenantId: w.tenantId || null,
+    createdDate: w.createdDate || null,
+    updatedDate: null,
+    scheduledDate: w.scheduledDate || null,
+    completedDate: w.completedDate || null,
+    assignedTo: w.assignedTo || '',
+    link: w.link || null,
+    raw: w,
+  };
+}
+
+export async function getWorkOrders(source, opts = {}) {
+  if (source === 'appfolio') {
+    const result = await dataFetch(source, 'list_work_orders', {
+      status: opts.status || 'all', // dashboard / lists want everything by default
+      limit: opts.limit || 1000,
+    });
+    if (!result) return null;
+    return (result.work_orders || []).map(normaliseAppfolioWorkOrder);
+  }
+  const { getWorkOrders: rmGetWorkOrders } = await import('./rentManager.js');
+  return rmGetWorkOrders(opts);
+}
+
 // updateTenant is RM-only for now — AppFolio's PATCH /tenants/{id}
 // only accepts CustomFields per the v0 docs, not the contact-info
 // fields the Tenant edit form changes. Until we surface a write
