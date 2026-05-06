@@ -34,12 +34,16 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { messages: inputMessages = [], dataSource } = req.body || {};
+    const { messages: inputMessages = [], dataSource, conversationId } = req.body || {};
     if (!Array.isArray(inputMessages) || inputMessages.length === 0) {
       return res.status(400).json({ error: 'messages array required' });
     }
 
-    const { reply, iterations } = await runAgent(inputMessages, { dataSource });
+    const { reply, iterations } = await runAgent(inputMessages, {
+      dataSource,
+      auditSurface: 'chat',
+      auditConversationId: conversationId || null,
+    });
 
     return res.status(200).json({
       ok: true,
