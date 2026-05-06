@@ -95,6 +95,7 @@ function App() {
           activeView={activeView}
           onMenuToggle={() => setMobileMenuOpen(!mobileMenuOpen)}
           showToggle={showToggle}
+          onNavigate={handleNavigate}
         />
         <main className="content-area">
           {renderContent()}

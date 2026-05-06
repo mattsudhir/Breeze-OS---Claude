@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { getTenants, getTenant, updateTenant } from '../services/data';
 import { useDataSource } from '../contexts/DataSourceContext.jsx';
+import FollowButton from './FollowButton.jsx';
 
 function getInitials(name) {
   if (!name) return '?';
@@ -658,10 +659,18 @@ export default function TenantsPage() {
           const statusInfo = getStatusInfo(t.status);
           const StatusIcon = statusInfo.icon;
           return (
-            <button
+            <div
               key={t.id}
               className="tenant-row"
+              role="button"
+              tabIndex={0}
               onClick={() => setSelectedTenantId(t.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setSelectedTenantId(t.id);
+                }
+              }}
             >
               <div className="tenant-avatar" style={{ background: avatarColor(t.name) }}>
                 {getInitials(t.name)}
@@ -685,7 +694,12 @@ export default function TenantsPage() {
                 <StatusIcon size={12} />
                 {statusInfo.label}
               </span>
-            </button>
+              <FollowButton
+                entityType="tenant"
+                entityId={t.id}
+                entityLabel={t.name}
+              />
+            </div>
           );
         })}
       </div>

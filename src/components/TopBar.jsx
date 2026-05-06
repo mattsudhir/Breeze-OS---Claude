@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import {
-  Bell, Menu, MessageSquare, LayoutDashboard, Database, ChevronDown,
+  Menu, MessageSquare, LayoutDashboard, Database, ChevronDown,
 } from 'lucide-react';
 import { useDataSource } from '../contexts/DataSourceContext.jsx';
+import NotificationsBell from './NotificationsBell.jsx';
 
 const TITLES = {
   chat: 'Chat Home',
@@ -19,7 +20,14 @@ const TITLES = {
   help: 'Help',
 };
 
-export default function TopBar({ showClassic, onToggleClassic, activeView, onMenuToggle, showToggle }) {
+export default function TopBar({
+  showClassic,
+  onToggleClassic,
+  activeView,
+  onMenuToggle,
+  showToggle,
+  onNavigate,
+}) {
   const { dataSource, setDataSource, sources } = useDataSource();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuWrapperRef = useRef(null);
@@ -152,10 +160,7 @@ export default function TopBar({ showClassic, onToggleClassic, activeView, onMen
           )}
         </div>
 
-        <button className="topbar-icon-btn" title="Notifications">
-          <Bell size={20} />
-          <span className="notification-dot" />
-        </button>
+        <NotificationsBell onNavigate={onNavigate} />
       </div>
     </header>
   );

@@ -20,6 +20,7 @@ import {
   getWorkOrder,
 } from '../services/rentManager';
 import { useDataSource } from '../contexts/DataSourceContext.jsx';
+import FollowButton from './FollowButton.jsx';
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -878,10 +879,18 @@ export default function MaintenancePage({ initialFilters }) {
           const status = statusMetaFromWo(w, statusLookup);
 
           return (
-            <button
+            <div
               key={w.id}
               className="tenant-row"
+              role="button"
+              tabIndex={0}
               onClick={() => setSelectedId(w.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setSelectedId(w.id);
+                }
+              }}
             >
               <div
                 className="tenant-avatar"
@@ -918,7 +927,12 @@ export default function MaintenancePage({ initialFilters }) {
                   {status.label}
                 </span>
               </div>
-            </button>
+              <FollowButton
+                entityType="work_order"
+                entityId={w.id}
+                entityLabel={w.displayId || w.summary || `Work Order ${w.id}`}
+              />
+            </div>
           );
         })}
       </div>

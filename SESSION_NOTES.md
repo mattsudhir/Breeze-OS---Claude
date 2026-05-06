@@ -34,7 +34,7 @@ In priority order:
 
 2. **PR B2 — AppFolio webhook receiver.** Receiver endpoint shipped (`api/webhooks/appfolio.js`), JWS verification via `jose`, fan-out via `notifications.fanoutEvent`. **Phase-2 polish still queued:** enrich notifications by fetching the resource from AppFolio (so the title says "Frank Strehl updated" instead of "Tenant updated"). Not blocking — works fine without enrichment, titles just less polished.
 
-3. **PR B3 — Bell + follow UI.** Bell icon with unread badge in the top bar, dropdown listing latest notifications, follow/unfollow buttons on entity rows in Tenants / Properties / Maintenance. ~2-3 hrs.
+3. **PR B3 — Bell + follow UI.** Shipped. Bell with unread badge in TopBar, polling dropdown that lists recent notifications and supports per-item / mark-all read. Follow buttons on Tenants / Properties / Maintenance rows; the active state derives from a single FollowsContext fetch (one /api/follows roundtrip per session, optimistic updates). Click-through from a notification routes to the matching list view. **Phase-2 polish queued:** auto-select the specific record on the destination page (notifications navigate to the list, not the row).
 
 4. **PR C — Web push.** Service worker + `push_subscriptions` table + browser permission prompt + integration into the notifications writer so bell items also fire a push. ~2 hrs.
 

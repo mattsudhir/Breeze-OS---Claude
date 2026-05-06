@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { getProperties, getUnits } from '../services/data';
 import { useDataSource } from '../contexts/DataSourceContext.jsx';
+import FollowButton from './FollowButton.jsx';
 
 export default function PropertiesPage({ onNavigate }) {
   const { dataSource, sources } = useDataSource();
@@ -287,16 +288,31 @@ export default function PropertiesPage({ onNavigate }) {
         {filteredProperties.map((p) => {
           const stats = getPropertyStats(p.id);
           return (
-            <button
+            <div
               key={p.id}
               className="property-card"
+              role="button"
+              tabIndex={0}
               onClick={() => setSelectedPropertyId(p.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setSelectedPropertyId(p.id);
+                }
+              }}
             >
               <div className="property-card-header">
                 <div className="property-card-icon">
                   <Building2 size={22} />
                 </div>
-                <ChevronRight size={18} className="property-card-chevron" />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <FollowButton
+                    entityType="property"
+                    entityId={p.id}
+                    entityLabel={p.name}
+                  />
+                  <ChevronRight size={18} className="property-card-chevron" />
+                </div>
               </div>
               <div className="property-card-body">
                 <h4>{p.name}</h4>
@@ -328,7 +344,7 @@ export default function PropertiesPage({ onNavigate }) {
                   />
                 </div>
               )}
-            </button>
+            </div>
           );
         })}
       </div>
