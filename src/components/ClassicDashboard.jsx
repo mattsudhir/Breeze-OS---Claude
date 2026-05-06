@@ -5,7 +5,12 @@ import {
   Clock, ChevronRight, Search, BarChart3, Calendar,
   Loader2, WifiOff
 } from 'lucide-react';
-import { getProperties, getUnits, getWorkOrders } from '../services/rentManager';
+import { getProperties, getUnits } from '../services/data';
+// Work orders aren't yet wrapped on the AppFolio backend, so we still
+// hit rentManager.js directly for that piece. Once list_work_orders
+// lands on the AppFolio backend, this import goes away.
+import { getWorkOrders } from '../services/rentManager';
+import { useDataSource } from '../contexts/DataSourceContext.jsx';
 
 // ── Fallback demo data (used when API is unreachable) ───────────
 
@@ -57,6 +62,8 @@ function getStatusClass(s) {
 }
 
 export default function ClassicDashboard({ onNavigate }) {
+  const { dataSource, sources } = useDataSource();
+  const sourceLabel = sources.find((s) => s.value === dataSource)?.label || dataSource;
   const [properties, setProperties] = useState(null);
   const [units, setUnits] = useState(null);
   const [workOrders, setWorkOrders] = useState(null);
@@ -64,30 +71,37 @@ export default function ClassicDashboard({ onNavigate }) {
   const [isLive, setIsLive] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     async function fetchData() {
       setLoading(true);
-      // Use allSettled so one slow/failed call doesn't kill the others
+      // Use allSettled so one slow/failed call doesn't kill the others.
+      // Work orders still goes through rentManager.js until we wrap
+      // list_work_orders on the AppFolio backend — when AppFolio is the
+      // active source, the WO section will simply be empty rather than
+      // rendering stale RM tickets pretending to be AppFolio data.
       const results = await Promise.allSettled([
-        getProperties(),
-        getUnits(),
-        getWorkOrders(),
+        getProperties(dataSource),
+        getUnits(dataSource),
+        dataSource === 'appfolio' ? Promise.resolve(null) : getWorkOrders(),
       ]);
+      if (cancelled) return;
       const [propsRes, unitsRes, woRes] = results;
       const propsData = propsRes.status === 'fulfilled' ? propsRes.value : null;
       const unitsData = unitsRes.status === 'fulfilled' ? unitsRes.value : null;
       const woData    = woRes.status    === 'fulfilled' ? woRes.value    : null;
 
-      if (propsData) setProperties(propsData);
-      if (unitsData) setUnits(unitsData);
-      if (woData) setWorkOrders(woData);
+      setProperties(propsData);
+      setUnits(unitsData);
+      setWorkOrders(woData);
 
       // Banner shows "live" if ANY endpoint responded, not just properties
-      if (propsData || unitsData || woData) setIsLive(true);
+      setIsLive(!!(propsData || unitsData || woData));
 
       setLoading(false);
     }
     fetchData();
-  }, []);
+    return () => { cancelled = true; };
+  }, [dataSource]);
 
   // ── Build display data ─────────────────────────────────────────
 
@@ -160,11 +174,18 @@ export default function ClassicDashboard({ onNavigate }) {
         border: `1px solid ${isLive ? '#C8E6C9' : '#FFE0B2'}`,
       }}>
         {loading ? (
-          <><Loader2 size={14} className="spin" /> Connecting to Rent Manager...</>
+          <><Loader2 size={14} className="spin" /> Connecting to {sourceLabel}...</>
         ) : isLive ? (
-          <><CheckCircle2 size={14} /> Live data from Rent Manager</>
+          <>
+            <CheckCircle2 size={14} /> Live data from {sourceLabel}
+            {dataSource === 'appfolio' && (
+              <span style={{ marginLeft: 8, fontWeight: 400, opacity: 0.8 }}>
+                — work orders not yet wired up
+              </span>
+            )}
+          </>
         ) : (
-          <><WifiOff size={14} /> Demo data — connect Vercel to show live Rent Manager data</>
+          <><WifiOff size={14} /> Couldn't reach {sourceLabel}</>
         )}
       </div>
 

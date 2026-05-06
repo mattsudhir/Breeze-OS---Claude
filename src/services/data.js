@@ -116,7 +116,10 @@ function normaliseAppfolioTenant(t) {
 
 export async function getProperties(source) {
   if (source === 'appfolio') {
-    const result = await dataFetch(source, 'list_properties', { limit: 200 });
+    // Big limit since this powers the full Properties list page; the
+    // tool clamps to 2000 internally, which is more than any portfolio
+    // we expect to see. Underlying paginated fetch handles it fine.
+    const result = await dataFetch(source, 'list_properties', { limit: 2000 });
     if (!result) return null;
     return (result.properties || []).map(normaliseAppfolioProperty);
   }
@@ -129,7 +132,7 @@ export async function getProperties(source) {
 
 export async function getUnits(source, propertyId) {
   if (source === 'appfolio') {
-    const result = await dataFetch(source, 'list_units', { limit: 200 });
+    const result = await dataFetch(source, 'list_units', { limit: 5000 });
     if (!result) return null;
     let units = (result.units || []).map(normaliseAppfolioUnit);
     // AppFolio's list_units doesn't currently support propertyId
@@ -148,7 +151,15 @@ export async function getUnits(source, propertyId) {
 
 export async function getTenants(source) {
   if (source === 'appfolio') {
-    const result = await dataFetch(source, 'list_tenants', { limit: 200 });
+    // Default page-size of 30 was clamping menu views to a tiny
+    // window — bumped to 5000 to cover full Breeze portfolios. The
+    // underlying tool clamps at 5000 anyway. active_only=false so
+    // the All/Current/Past tabs in TenantsPage have past tenants
+    // available for the UI's own filtering.
+    const result = await dataFetch(source, 'list_tenants', {
+      limit: 5000,
+      active_only: false,
+    });
     if (!result) return null;
     return (result.tenants || []).map(normaliseAppfolioTenant);
   }

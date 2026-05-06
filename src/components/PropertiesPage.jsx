@@ -7,7 +7,8 @@ import { getProperties, getUnits } from '../services/data';
 import { useDataSource } from '../contexts/DataSourceContext.jsx';
 
 export default function PropertiesPage({ onNavigate }) {
-  const { dataSource } = useDataSource();
+  const { dataSource, sources } = useDataSource();
+  const sourceLabel = sources.find((s) => s.value === dataSource)?.label || dataSource;
   const [properties, setProperties] = useState(null);
   const [units, setUnits] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -81,7 +82,7 @@ export default function PropertiesPage({ onNavigate }) {
       <div className="properties-page">
         <div className="loading-state">
           <Loader2 size={28} className="spin" />
-          <span>Loading properties from Rent Manager...</span>
+          <span>Loading properties from {sourceLabel}...</span>
         </div>
       </div>
     );
@@ -93,7 +94,7 @@ export default function PropertiesPage({ onNavigate }) {
         <div className="empty-state">
           <WifiOff size={40} />
           <h3>No properties found</h3>
-          <p>Couldn't reach Rent Manager, or the account has no properties configured.</p>
+          <p>Couldn't reach {sourceLabel}, or the account has no properties configured.</p>
         </div>
       </div>
     );
@@ -217,7 +218,7 @@ export default function PropertiesPage({ onNavigate }) {
         border: `1px solid ${isLive ? '#C8E6C9' : '#FFE0B2'}`,
       }}>
         {isLive ? (
-          <><CheckCircle2 size={14} /> Live data from Rent Manager — {properties.length} properties</>
+          <><CheckCircle2 size={14} /> Live data from {sourceLabel} — {properties.length} properties</>
         ) : (
           <><WifiOff size={14} /> Demo data</>
         )}

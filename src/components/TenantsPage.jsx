@@ -66,7 +66,8 @@ function formatDate(d) {
 
 // ── Detail view with tabs + edit form ──────────────────────────────
 function TenantDetail({ tenantId, listTenant, onBack, onUpdated }) {
-  const { dataSource } = useDataSource();
+  const { dataSource, sources } = useDataSource();
+  const sourceLabel = sources.find((s) => s.value === dataSource)?.label || dataSource;
   const [tenant, setTenant] = useState(listTenant); // seed with list data
   const [loadingDetail, setLoadingDetail] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
@@ -180,7 +181,7 @@ function TenantDetail({ tenantId, listTenant, onBack, onUpdated }) {
 
       {saveOk && (
         <div className="save-toast save-toast-ok">
-          <CheckCircle2 size={14} /> Changes saved to Rent Manager
+          <CheckCircle2 size={14} /> Changes saved to {sourceLabel}
         </div>
       )}
       {saveError && (
@@ -481,7 +482,8 @@ function TenantEditForm({ form, setForm, saving, onSave, onCancel }) {
 
 // ── Main TenantsPage ───────────────────────────────────────────────
 export default function TenantsPage() {
-  const { dataSource } = useDataSource();
+  const { dataSource, sources } = useDataSource();
+  const sourceLabel = sources.find((s) => s.value === dataSource)?.label || dataSource;
   const [tenants, setTenants] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isLive, setIsLive] = useState(false);
@@ -520,7 +522,7 @@ export default function TenantsPage() {
       <div className="properties-page">
         <div className="loading-state">
           <Loader2 size={28} className="spin" />
-          <span>Loading tenants from Rent Manager...</span>
+          <span>Loading tenants from {sourceLabel}...</span>
         </div>
       </div>
     );
@@ -532,7 +534,7 @@ export default function TenantsPage() {
         <div className="empty-state">
           <WifiOff size={40} />
           <h3>No tenants found</h3>
-          <p>Couldn't reach Rent Manager, or the account has no tenants configured.</p>
+          <p>Couldn't reach {sourceLabel}, or the account has no tenants configured.</p>
         </div>
       </div>
     );
@@ -594,7 +596,7 @@ export default function TenantsPage() {
         border: `1px solid ${isLive ? '#C8E6C9' : '#FFE0B2'}`,
       }}>
         {isLive ? (
-          <><CheckCircle2 size={14} /> Live data from Rent Manager — {tenants.length} tenants</>
+          <><CheckCircle2 size={14} /> Live data from {sourceLabel} — {tenants.length} tenants</>
         ) : (
           <><WifiOff size={14} /> Demo data</>
         )}
