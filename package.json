@@ -17,6 +17,7 @@
     "@anthropic-ai/sdk": "^0.88.0",
     "@vercel/blob": "^1.0.0",
     "drizzle-orm": "^0.36.4",
+    "jose": "^5.9.6",
     "lucide-react": "^1.8.0",
     "postgres": "^3.4.5",
     "react": "^19.2.4",

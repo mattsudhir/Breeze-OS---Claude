@@ -14,11 +14,12 @@ These were committed in code but require a manual action you haven't completed y
   - `0006_agent_actions` — every chat tool call gets logged. Without this, chat still works, but audit is silently dropped (the logger swallows errors).
   - `0007_notifications_and_follows` — required by `/api/notifications` and `/api/follows`. Calls to those endpoints will 500 until applied.
 
-### AppFolio Developer Portal (when ready for PR B2 — webhook receiver)
+### AppFolio Developer Portal — webhook receiver (PR B2 shipped, config still needed)
 
 - [ ] **Confirm webhooks are enabled** for your developer ID. AppFolio's docs say this is a one-time enablement by an AppFolio rep; if it's already done, skip.
-- [ ] **Add the webhook URL** in Admin → Webhooks card: `https://<your-domain>/api/webhooks/appfolio` (we'll create that endpoint in PR B2 — don't add it until that PR ships).
-- [ ] **Subscribe to topics**: `tenants`, `properties`, `units`, `charges`, `work_orders`.
+- [ ] **Add the webhook URL** in Admin → Webhooks card: `https://<your-domain>/api/webhooks/appfolio` (the endpoint exists now — `api/webhooks/appfolio.js`).
+- [ ] **Subscribe to topics**: `tenants`, `properties`, `units`, `charges`, `work_orders`, `leases`, `leads`. Other topics will be acknowledged but not fanned out until we add them to `TOPIC_TO_ENTITY_TYPE` in `lib/appfolioWebhook.js`.
+- [ ] **Send a test event** from the Webhooks card. Watch Vercel function logs for `[appfolio-webhook] verified ...` — if signature verification fails (401), the JWKS lookup or AppFolio config is off.
 
 ## Deferred work — queued for upcoming sessions
 
@@ -31,7 +32,7 @@ In priority order:
    - **`updateTenant` is RM-only.** AppFolio's PATCH /tenants/{id} only takes CustomFields per docs. Surfaces a clear error in the edit form.
    - `PropertyDirectoryPage.jsx`, `TasksPage.jsx`, `MoveEventsPage.jsx` hit our own DB (`/api/admin/*`) and aren't toggle-able by design — no migration needed.
 
-2. **PR B2 — AppFolio webhook receiver.** `/api/webhooks/appfolio` with JWS signature verification (add `jose`), topic→enricher mapping (fetch the resource from AppFolio so the notification has a meaningful title/body), fan out via `notifications.fanoutEvent`. ~1.5 hrs.
+2. **PR B2 — AppFolio webhook receiver.** Receiver endpoint shipped (`api/webhooks/appfolio.js`), JWS verification via `jose`, fan-out via `notifications.fanoutEvent`. **Phase-2 polish still queued:** enrich notifications by fetching the resource from AppFolio (so the title says "Frank Strehl updated" instead of "Tenant updated"). Not blocking — works fine without enrichment, titles just less polished.
 
 3. **PR B3 — Bell + follow UI.** Bell icon with unread badge in the top bar, dropdown listing latest notifications, follow/unfollow buttons on entity rows in Tenants / Properties / Maintenance. ~2-3 hrs.
 
