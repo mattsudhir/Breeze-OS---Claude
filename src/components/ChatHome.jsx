@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import {
   Mic, MicOff, Send, Paperclip, FileText, Home, DollarSign,
   Wrench, User, Bot, ChevronDown, Building2, Loader2,
-  Volume2, VolumeX, ArrowRight, Database, X,
+  Volume2, VolumeX, ArrowRight, Database, X, Square,
 } from 'lucide-react';
 import { upload as blobUpload } from '@vercel/blob/client';
 
@@ -117,6 +117,10 @@ export default function ChatHome({ onNavigate }) {
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
+  // AbortController for the in-flight /api/chat request, so the user
+  // can stop a slow response (often after a voice-transcription error)
+  // without waiting for it to come back.
+  const abortControllerRef = useRef(null);
 
   // Conversation history sent to the LLM (role/content only, no UI fields)
   const llmHistoryRef = useRef([]);
@@ -126,11 +130,14 @@ export default function ChatHome({ onNavigate }) {
   const voiceListenSupported = isListeningSupported();
   const voiceSpeakSupported = isSpeakingSupported();
 
-  // Cancel any in-progress speech when the component unmounts
+  // Cancel any in-progress speech, voice input, or chat fetch when
+  // the component unmounts (user navigated away).
   useEffect(() => {
     return () => {
       cancelSpeech();
       stopListening();
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
     };
   }, []);
 
@@ -194,6 +201,16 @@ export default function ChatHome({ onNavigate }) {
       { role: 'user', content: userText },
     ];
 
+    // New AbortController for this request. The user can hit Stop
+    // while the agent is thinking — typically after a voice transcript
+    // came through wrong — and we abort the fetch on the client side.
+    // Note: the server function keeps running to completion (Vercel
+    // serverless has no upstream cancellation), so the LLM tokens are
+    // still spent — but the user gets their input back instantly and
+    // we never render the abandoned response.
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setIsThinking(true);
     try {
       const res = await fetch('/api/chat', {
@@ -203,9 +220,14 @@ export default function ChatHome({ onNavigate }) {
           messages: llmHistoryRef.current,
           dataSource,
         }),
+        signal: controller.signal,
       });
 
+      if (controller.signal.aborted) return;
+
       const data = await res.json();
+      if (controller.signal.aborted) return;
+
       if (!res.ok || !data.ok) {
         addMessage({
           type: 'system',
@@ -240,6 +262,9 @@ export default function ChatHome({ onNavigate }) {
         speak(displayText);
       }
     } catch (err) {
+      // User-initiated cancel — silently drop, the stop handler
+      // already added a "Stopped." note.
+      if (err.name === 'AbortError') return;
       addMessage({
         type: 'system',
         sender: 'Breeze AI',
@@ -247,8 +272,31 @@ export default function ChatHome({ onNavigate }) {
         text: `Network error: ${err.message}`,
       });
     } finally {
-      setIsThinking(false);
+      // Only clear refs/state if we're still the current request — a
+      // newer one may have replaced us by the time we get here.
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+        setIsThinking(false);
+      }
     }
+  };
+
+  // User clicks Stop while the agent is thinking. Aborts the fetch,
+  // resets the spinner, kills any in-progress speech, and drops a
+  // small "Stopped." note in chat so the user knows what happened.
+  const handleStopThinking = () => {
+    const controller = abortControllerRef.current;
+    if (!controller) return;
+    abortControllerRef.current = null;
+    controller.abort();
+    setIsThinking(false);
+    cancelSpeech();
+    addMessage({
+      type: 'system',
+      sender: 'Breeze AI',
+      avatar: 'bot',
+      text: '_Stopped._',
+    });
   };
 
   // ── Attachment upload ───────────────────────────────────────────
@@ -721,15 +769,15 @@ export default function ChatHome({ onNavigate }) {
           />
           <button
             className="chat-send-btn"
-            onClick={handleSend}
+            onClick={isThinking ? handleStopThinking : handleSend}
             disabled={
-              isThinking ||
-              attachment?.isUploading ||
-              (!input.trim() && !attachment?.url)
+              isThinking
+                ? false
+                : attachment?.isUploading || (!input.trim() && !attachment?.url)
             }
-            title="Send message"
+            title={isThinking ? 'Stop' : 'Send message'}
           >
-            <Send size={20} />
+            {isThinking ? <Square size={18} /> : <Send size={20} />}
           </button>
         </div>
 
