@@ -10,24 +10,19 @@ import {
 // backend name.
 const DATA_SOURCES = [
   {
-    value: 'breeze',
-    label: 'Breeze Production',
-    hint: 'Real Breeze portfolio (Postgres)',
+    value: 'appfolio',
+    label: 'AppFolio',
+    hint: 'Breeze Property Group production data',
   },
   {
     value: 'rm-demo',
-    label: 'RM Demo',
+    label: 'Rent Manager',
     hint: 'Rent Manager sample15 sandbox',
-  },
-  {
-    value: 'zoho-mcp',
-    label: 'Zoho MCP',
-    hint: 'Zoho CRM + Cliq via MCP server',
   },
 ];
 
 const DATA_SOURCE_STORAGE_KEY = 'breezeChatBackend';
-const DEFAULT_DATA_SOURCE = 'breeze';
+const DEFAULT_DATA_SOURCE = 'appfolio';
 import {
   startListening, stopListening, speak, cancelSpeech,
   isListeningSupported, isSpeakingSupported,
