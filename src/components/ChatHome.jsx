@@ -2,8 +2,9 @@ import { useState, useRef, useEffect } from 'react';
 import {
   Mic, MicOff, Send, Paperclip, FileText, Home, DollarSign,
   Wrench, User, Bot, ChevronDown, Building2, Loader2,
-  Volume2, VolumeX, ArrowRight, Database,
+  Volume2, VolumeX, ArrowRight, Database, X,
 } from 'lucide-react';
+import { upload as blobUpload } from '@vercel/blob/client';
 
 // Backend toggle options shown under "Data source". Keep in sync with
 // lib/backends/index.js — the value field must match a registered
@@ -110,8 +111,12 @@ export default function ChatHome({ onNavigate }) {
     return DEFAULT_DATA_SOURCE;
   });
   const [showDataSourceMenu, setShowDataSourceMenu] = useState(false);
+  // Pending attachment for the next message. Shape:
+  // { url, filename, contentType, isUploading: boolean } | null
+  const [attachment, setAttachment] = useState(null);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   // Conversation history sent to the LLM (role/content only, no UI fields)
   const llmHistoryRef = useRef([]);
@@ -246,17 +251,91 @@ export default function ChatHome({ onNavigate }) {
     }
   };
 
+  // ── Attachment upload ───────────────────────────────────────────
+  // Paperclip → file picker → @vercel/blob/client direct upload.
+  // Bytes go browser-direct to Blob storage with a one-shot signed
+  // token from /api/upload, so we're not bound by the 4.5MB function
+  // request body cap. The resulting public URL is stashed in
+  // `attachment` and inlined into the next user message as
+  // "[Attachment: <url>]" so the agent (and charge_tenant in
+  // particular) can pick it up.
+
+  const handleAttachClick = () => {
+    if (attachment?.isUploading || isThinking) return;
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelected = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // reset so picking the same file twice still fires onChange
+    if (!file) return;
+
+    setAttachment({
+      url: null,
+      filename: file.name,
+      contentType: file.type,
+      isUploading: true,
+    });
+
+    try {
+      const blob = await blobUpload(file.name, file, {
+        access: 'public',
+        handleUploadUrl: '/api/upload',
+        contentType: file.type,
+      });
+      setAttachment({
+        url: blob.url,
+        filename: file.name,
+        contentType: file.type,
+        isUploading: false,
+      });
+    } catch (err) {
+      console.warn('Attachment upload failed:', err);
+      setAttachment(null);
+      addMessage({
+        type: 'system',
+        sender: 'Breeze AI',
+        avatar: 'bot',
+        text: `Attachment upload failed: ${err.message || 'unknown error'}`,
+      });
+    }
+  };
+
+  const removeAttachment = () => {
+    if (attachment?.isUploading) return;
+    setAttachment(null);
+  };
+
   const handleSend = () => {
-    if (!input.trim() || isThinking) return;
+    if (isThinking) return;
+    if (!input.trim() && !attachment?.url) return;
+    if (attachment?.isUploading) return;
+
     const userText = input.trim();
+    // Inline the attachment URL into the prompt the LLM sees so
+    // charge_tenant (and any future tools that take an URL) can pick
+    // it up. The chat bubble itself renders the file separately, so
+    // the user doesn't see the raw URL in their own message.
+    const llmText = attachment?.url
+      ? `${userText}${userText ? '\n\n' : ''}[Attachment: ${attachment.url}]`
+      : userText;
+
     addMessage({
       type: 'user',
       sender: 'You',
       avatar: 'user',
       text: userText,
+      attachment: attachment?.url
+        ? {
+            name: attachment.filename,
+            url: attachment.url,
+            contentType: attachment.contentType,
+          }
+        : null,
     });
     setInput('');
-    sendToLLM(userText);
+    setAttachment(null);
+    sendToLLM(llmText);
   };
 
   const handleQuickAction = (action) => {
@@ -329,14 +408,27 @@ export default function ChatHome({ onNavigate }) {
   };
 
   const sendFromVoice = (text) => {
+    if (attachment?.isUploading) return;
+    const llmText = attachment?.url
+      ? `${text}${text ? '\n\n' : ''}[Attachment: ${attachment.url}]`
+      : text;
+
     addMessage({
       type: 'user',
       sender: 'You',
       avatar: 'user',
       text,
+      attachment: attachment?.url
+        ? {
+            name: attachment.filename,
+            url: attachment.url,
+            contentType: attachment.contentType,
+          }
+        : null,
     });
     setInput('');
-    sendToLLM(text);
+    setAttachment(null);
+    sendToLLM(llmText);
   };
 
   const toggleTts = () => {
@@ -486,12 +578,36 @@ export default function ChatHome({ onNavigate }) {
                 <p style={{ whiteSpace: 'pre-wrap' }}>{msg.text}</p>
                 {msg.attachment && (
                   <div className="chat-attachment">
-                    <FileText size={20} />
+                    {msg.attachment.contentType?.startsWith('image/') ? (
+                      <img
+                        src={msg.attachment.url}
+                        alt={msg.attachment.name}
+                        style={{
+                          maxWidth: 240,
+                          maxHeight: 240,
+                          borderRadius: 6,
+                          objectFit: 'cover',
+                        }}
+                      />
+                    ) : (
+                      <FileText size={20} />
+                    )}
                     <div className="attachment-info">
                       <span className="attachment-name">{msg.attachment.name}</span>
-                      <span className="attachment-size">{msg.attachment.size}</span>
+                      {msg.attachment.size && (
+                        <span className="attachment-size">{msg.attachment.size}</span>
+                      )}
                     </div>
-                    <button className="attachment-download">View</button>
+                    {msg.attachment.url && (
+                      <a
+                        className="attachment-download"
+                        href={msg.attachment.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        View
+                      </a>
+                    )}
                   </div>
                 )}
                 {msg.showMe && onNavigate && (
@@ -526,8 +642,71 @@ export default function ChatHome({ onNavigate }) {
       </div>
 
       <div className="chat-input-area">
+        {attachment && (
+          <div
+            className="chat-pending-attachment"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '6px 8px 6px 6px',
+              margin: '0 0 8px',
+              background: '#F2F6FA',
+              border: '1px solid #D0D7DE',
+              borderRadius: 8,
+              fontSize: 12,
+              color: '#1A1A1A',
+              maxWidth: 320,
+            }}
+          >
+            {attachment.isUploading ? (
+              <Loader2 size={14} className="spin" />
+            ) : attachment.contentType?.startsWith('image/') && attachment.url ? (
+              <img
+                src={attachment.url}
+                alt={attachment.filename}
+                style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: 4 }}
+              />
+            ) : (
+              <FileText size={14} />
+            )}
+            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {attachment.filename}
+              {attachment.isUploading ? ' — uploading…' : ''}
+            </span>
+            <button
+              type="button"
+              onClick={removeAttachment}
+              disabled={attachment.isUploading}
+              title="Remove attachment"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                cursor: attachment.isUploading ? 'default' : 'pointer',
+                color: '#6A737D',
+                padding: 2,
+                display: 'inline-flex',
+                alignItems: 'center',
+              }}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,application/pdf"
+          style={{ display: 'none' }}
+          onChange={handleFileSelected}
+        />
         <div className="chat-input-container">
-          <button className="chat-attach-btn" title="Attach file">
+          <button
+            className="chat-attach-btn"
+            title="Attach photo or PDF"
+            onClick={handleAttachClick}
+            disabled={attachment?.isUploading || isThinking}
+          >
             <Paperclip size={20} />
           </button>
           <textarea
@@ -543,7 +722,11 @@ export default function ChatHome({ onNavigate }) {
           <button
             className="chat-send-btn"
             onClick={handleSend}
-            disabled={!input.trim() || isThinking}
+            disabled={
+              isThinking ||
+              attachment?.isUploading ||
+              (!input.trim() && !attachment?.url)
+            }
             title="Send message"
           >
             <Send size={20} />
