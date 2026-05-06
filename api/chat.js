@@ -3,13 +3,16 @@
 // Takes a list of chat messages from the frontend and delegates to the
 // shared Breeze agent in lib/breezeAgent.js. Returns the final natural-
 // language answer. Accepts an optional `dataSource` field in the request
-// body selecting which backend ('breeze' | 'rm-demo' | 'zoho-mcp') the
-// agent should read from — defaults to 'breeze' (production Postgres).
+// body selecting which backend ('appfolio' | 'rm-demo' | 'breeze' |
+// 'zoho-mcp') the agent should read from — defaults to 'appfolio'
+// (Breeze Property Group production data via AppFolio Database API).
 //
 // Environment variables:
 //   ANTHROPIC_API_KEY     – from console.anthropic.com
-//   DATABASE_URL          – used by the 'breeze' backend
+//   APPFOLIO_CLIENT_ID / APPFOLIO_CLIENT_SECRET / APPFOLIO_DEVELOPER_ID
+//                         – used by the 'appfolio' backend (default)
 //   RM_BASE_URL / RM_USERNAME / RM_PASSWORD – used by 'rm-demo'
+//   DATABASE_URL          – used by the 'breeze' backend
 //   ZOHO_MCP_SERVER_URL   – used by 'zoho-mcp'
 //   ZOHO_CLIQ_WEBHOOK_URL – optional, used by the notify_team tool
 
@@ -42,7 +45,7 @@ export default async function handler(req, res) {
       ok: true,
       reply,
       iterations,
-      dataSource: dataSource || 'breeze',
+      dataSource: dataSource || 'appfolio',
     });
   } catch (err) {
     console.error('Chat handler error:', err);

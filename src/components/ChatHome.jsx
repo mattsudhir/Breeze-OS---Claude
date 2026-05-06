@@ -36,8 +36,8 @@ const WELCOME_MESSAGE = {
   avatar: 'bot',
   text:
     "Hi! I'm Breeze AI. Ask me anything about your portfolio — tenants, leases, " +
-    "properties, maintenance, balances. I'll pull live data from Rent Manager. " +
-    'Try: "What is Marcia Clark\'s email?" or "Show me vacant units at Oakwood."',
+    "properties, maintenance, balances. I'll pull live data from AppFolio. " +
+    'Try: "How many active tenants do we have?" or "List all properties."',
   time: '9:00 AM',
 };
 
