@@ -53,7 +53,7 @@
   "crons": [
     {
       "path": "/api/cron/process-tasks",
-      "schedule": "0 9 * * *"
+      "schedule": "*/5 * * * *"
     }
   ]
 }
