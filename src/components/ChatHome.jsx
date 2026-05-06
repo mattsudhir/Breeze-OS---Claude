@@ -98,7 +98,7 @@ export default function ChatHome({ onNavigate }) {
   const [isRecording, setIsRecording] = useState(false);
   const [showQuickActions, setShowQuickActions] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
-  const [ttsEnabled, setTtsEnabled] = useState(false);
+  const [ttsEnabled, setTtsEnabled] = useState(true);
   const [dataSource, setDataSource] = useState(() => {
     if (typeof window === 'undefined') return DEFAULT_DATA_SOURCE;
     try {

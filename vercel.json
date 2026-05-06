@@ -28,7 +28,7 @@
   ],
   "functions": {
     "api/rentmanager.js":                     { "maxDuration": 30 },
-    "api/chat.js":                            { "maxDuration": 45 },
+    "api/chat.js":                            { "maxDuration": 120 },
     "api/cliq.js":                            { "maxDuration": 45 },
     "api/notify.js":                          { "maxDuration": 15 },
     "api/tts.js":                             { "maxDuration": 30 },
