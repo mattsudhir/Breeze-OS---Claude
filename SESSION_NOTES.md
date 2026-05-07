@@ -14,12 +14,15 @@ These were committed in code but require a manual action you haven't completed y
   - `0006_agent_actions` — every chat tool call gets logged. Without this, chat still works, but audit is silently dropped (the logger swallows errors).
   - `0007_notifications_and_follows` — required by `/api/notifications` and `/api/follows`. Calls to those endpoints will 500 until applied.
   - `0008_appfolio_cache` — required by the AppFolio mirror. Without this, menu pages keep going through AppFolio's slow API on every request.
-- [ ] **Bootstrap the AppFolio mirror.** After 0008 is applied, POST to `https://<your-domain>/api/admin/appfolio-sync` with the `BREEZE_ADMIN_TOKEN` header (or no auth if the env var isn't set). This pulls every tenant, property, unit, and work order into Postgres. ~30-60s for typical portfolios. Webhooks keep it fresh after that. Sample call:
+- [ ] **Bootstrap the AppFolio mirror** (one-time, ~30-60s). After 0008 is applied, open this URL in a browser:
 
-      curl -X POST https://<your-domain>/api/admin/appfolio-sync \
-        -H "Authorization: Bearer <BREEZE_ADMIN_TOKEN>"
+      https://<your-domain>/api/admin/appfolio-sync?action=sync
 
-  GET the same URL to see per-resource-type row counts and last-sync timestamps without triggering a fresh sync.
+  If `BREEZE_ADMIN_TOKEN` is set in Vercel env vars, append `&secret=<token>`:
+
+      https://<your-domain>/api/admin/appfolio-sync?action=sync&secret=<token>
+
+  The page returns JSON with per-type row counts when it finishes. Webhooks keep things fresh after this initial sync; the hourly reconciliation cron (`/api/cron/appfolio-reconcile`) catches any webhook drops automatically. Visit the same URL without `?action=sync` (just `&secret=<token>` if you have one) to see current cache stats without re-syncing.
 
 ### AppFolio Developer Portal — webhook receiver (PR B2 shipped, config still needed)
 

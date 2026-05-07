@@ -44,12 +44,16 @@ export default async function handler(req, res) {
   try {
     const organizationId = await getDefaultOrgIdForMirror();
 
-    if (req.method === 'GET') {
-      const stats = await mirrorStats(organizationId);
-      return res.status(200).json({ ok: true, organizationId, stats });
-    }
+    // Browser-friendly: GET ?action=sync triggers a sync so the
+    // bootstrap can be kicked off by pasting a URL into Safari on a
+    // phone. Side-effecting GET is technically a semantics
+    // violation, but for a one-off admin bootstrap (gated by the
+    // admin token) it's the right ergonomics call. Bare GET still
+    // returns stats with no side effects.
+    const isSyncTrigger =
+      req.method === 'POST' || req.query?.action === 'sync';
 
-    if (req.method === 'POST') {
+    if (isSyncTrigger) {
       const startedAt = Date.now();
       const results = await bulkSyncAll(organizationId);
       return res.status(200).json({
@@ -57,6 +61,18 @@ export default async function handler(req, res) {
         organizationId,
         elapsed_ms: Date.now() - startedAt,
         results,
+      });
+    }
+
+    if (req.method === 'GET') {
+      const stats = await mirrorStats(organizationId);
+      return res.status(200).json({
+        ok: true,
+        organizationId,
+        stats,
+        hint:
+          'Add ?action=sync (and your admin token) to this URL to ' +
+          'trigger a bulk re-sync from AppFolio.',
       });
     }
 

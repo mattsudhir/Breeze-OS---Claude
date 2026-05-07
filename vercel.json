@@ -30,6 +30,7 @@
     { "source": "/api/admin/zoho-mcp-ping",           "destination": "/api/admin/zoho-mcp-ping" },
     { "source": "/api/admin/appfolio-sync",           "destination": "/api/admin/appfolio-sync" },
     { "source": "/api/cron/process-tasks",            "destination": "/api/cron/process-tasks" },
+    { "source": "/api/cron/appfolio-reconcile",       "destination": "/api/cron/appfolio-reconcile" },
     { "source": "/api/(.*)",                          "destination": "/api/rentmanager" }
   ],
   "functions": {
@@ -60,12 +61,17 @@
     "api/admin/backfill-unit-ids.js":         { "maxDuration": 60 },
     "api/admin/zoho-mcp-ping.js":             { "maxDuration": 15 },
     "api/admin/appfolio-sync.js":             { "maxDuration": 300 },
-    "api/cron/process-tasks.js":              { "maxDuration": 60 }
+    "api/cron/process-tasks.js":              { "maxDuration": 60 },
+    "api/cron/appfolio-reconcile.js":         { "maxDuration": 300 }
   },
   "crons": [
     {
       "path": "/api/cron/process-tasks",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/appfolio-reconcile",
+      "schedule": "0 * * * *"
     }
   ]
 }
