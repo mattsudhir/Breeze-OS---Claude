@@ -112,11 +112,19 @@ export default async function handler(req, res) {
         if (input?.property_id) filters.propertyId = input.property_id;
         if (input?.unit_id) filters.unitId = input.unit_id;
         if (input?.occupancy_id) filters.occupancyId = input.occupancy_id;
+        // Hidden / inactive records stay in the mirror but menu
+        // pages don't want them. Default to active-only and let
+        // explicit `include_hidden: true` (properties / units) or
+        // `active_only: false` (tenants) opt in.
+        const activeOnly =
+          mirrorType === 'tenant'
+            ? input?.active_only !== false
+            : input?.include_hidden !== true;
         result = await readListFromMirror(orgId, mirrorType, {
           limit: input?.limit,
           offset: input?.offset,
           filters,
-          activeOnly: input?.active_only !== false && mirrorType === 'tenant',
+          activeOnly,
         });
         servedFrom = 'mirror';
       }
