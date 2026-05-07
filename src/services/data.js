@@ -18,9 +18,58 @@
 
 const API_BASE = '/api';
 
+// In-memory cache of /api/data responses, keyed by (source, tool, input).
+// Plain TTL — a hit younger than CACHE_TTL_MS skips the network entirely;
+// older or missing entries fall through to a real fetch. The win is for
+// cross-page navigation: TenantsPage → PropertiesPage → TenantsPage no
+// longer refetches every list from scratch on every mount.
+//
+// Tradeoff: data can be up to 60s stale after a backend write made
+// outside this tab. Writes inside the tab call invalidateCache() to
+// flush their entity's entries so the next read sees fresh data.
+const CACHE_TTL_MS = 60_000;
+const cache = new Map();
+
+function cacheKey(source, tool, input) {
+  return JSON.stringify({ source, tool, input: input || {} });
+}
+
+function cacheGet(key) {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.t > CACHE_TTL_MS) {
+    cache.delete(key);
+    return null;
+  }
+  return entry.data;
+}
+
+function cachePut(key, data) {
+  cache.set(key, { data, t: Date.now() });
+}
+
+// Drop every cache entry whose tool name appears in the supplied list.
+// Called by write helpers below so a successful update_work_order
+// invalidates list_work_orders + count_work_orders, etc.
+function invalidateTools(toolNames) {
+  const set = new Set(toolNames);
+  for (const key of cache.keys()) {
+    try {
+      const parsed = JSON.parse(key);
+      if (set.has(parsed.tool)) cache.delete(key);
+    } catch {
+      cache.delete(key);
+    }
+  }
+}
+
 async function dataFetch(source, tool, input = {}) {
   if (!source) throw new Error('dataFetch: source is required');
   if (!tool) throw new Error('dataFetch: tool is required');
+
+  const key = cacheKey(source, tool, input);
+  const cached = cacheGet(key);
+  if (cached !== null) return cached;
 
   try {
     const res = await fetch(`${API_BASE}/data`, {
@@ -33,6 +82,7 @@ async function dataFetch(source, tool, input = {}) {
       console.warn(`[data] ${source}/${tool} failed:`, json.error || `HTTP ${res.status}`);
       return null;
     }
+    cachePut(key, json.data);
     return json.data;
   } catch (err) {
     console.warn(`[data] ${source}/${tool} threw:`, err.message);
@@ -260,6 +310,9 @@ export async function updateWorkOrder(source, id, patch = {}) {
     const result = await dataFetch(source, 'update_work_order', body);
     if (!result) return { ok: false, error: 'Update failed (network error)' };
     if (result.error) return { ok: false, error: result.error };
+    // Flush cached work-order reads so the next list/count reflects
+    // the change instead of serving the pre-update copy.
+    invalidateTools(['list_work_orders', 'count_work_orders']);
     return { ok: true, work_order_id: result.work_order_id };
   }
   // Rent Manager path. RM's existing service throws on failure,
@@ -267,6 +320,7 @@ export async function updateWorkOrder(source, id, patch = {}) {
   const { updateWorkOrder: rmUpdate } = await import('./rentManager.js');
   try {
     await rmUpdate(id, patch);
+    invalidateTools(['list_work_orders', 'count_work_orders']);
     return { ok: true, work_order_id: id };
   } catch (err) {
     return { ok: false, error: err.message || 'Update failed' };
@@ -288,7 +342,9 @@ export async function updateTenant(source, id, patch) {
     };
   }
   const { updateTenant: rmUpdateTenant } = await import('./rentManager.js');
-  return rmUpdateTenant(id, patch);
+  const result = await rmUpdateTenant(id, patch);
+  invalidateTools(['list_tenants', 'search_tenants', 'get_tenant_details']);
+  return result;
 }
 
 // Pages that need work orders / charges / etc. still go through
