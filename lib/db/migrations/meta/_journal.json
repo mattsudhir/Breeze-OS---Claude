@@ -64,6 +64,13 @@
       "when": 1762560000000,
       "tag": "0008_appfolio_cache",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1762646400000,
+      "tag": "0009_push_subscriptions",
+      "breakpoints": true
     }
   ]
 }

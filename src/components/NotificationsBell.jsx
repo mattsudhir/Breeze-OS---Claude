@@ -9,7 +9,8 @@
 // lands on the list and finds the row.
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Bell, Loader2 } from 'lucide-react';
+import { Bell, Loader2, BellOff } from 'lucide-react';
+import { usePushNotifications } from '../hooks/usePushNotifications.js';
 
 const POLL_MS = 30_000;
 
@@ -42,6 +43,7 @@ export default function NotificationsBell({ onNavigate }) {
   const [loadingFirst, setLoadingFirst] = useState(true);
   const [marking, setMarking] = useState(false);
   const wrapperRef = useRef(null);
+  const push = usePushNotifications();
 
   const fetchNotifications = useCallback(async () => {
     try {
@@ -219,6 +221,99 @@ export default function NotificationsBell({ onNavigate }) {
               </button>
             )}
           </div>
+
+          {/* Push-notifications opt-in banner. Shows only when the
+              browser supports push, the server has VAPID configured,
+              the user hasn't already subscribed, and they haven't
+              previously denied permission. */}
+          {push.available && push.permission !== 'denied' && push.subscribed === false && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '10px 14px',
+                background: '#F0F7FF',
+                borderBottom: '1px solid #DCE6F1',
+                fontSize: 12,
+              }}
+            >
+              <Bell size={16} style={{ color: '#1565C0', flexShrink: 0 }} />
+              <div style={{ flex: 1, lineHeight: 1.35 }}>
+                <div style={{ fontWeight: 600, color: '#1A1A1A' }}>
+                  Get push notifications
+                </div>
+                <div style={{ color: '#6A737D' }}>
+                  Native pop-ups when followed records change in AppFolio.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => push.enable()}
+                disabled={push.loading}
+                style={{
+                  background: '#1565C0',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: 4,
+                  padding: '5px 10px',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: push.loading ? 'default' : 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {push.loading ? 'Working…' : 'Enable'}
+              </button>
+            </div>
+          )}
+          {push.subscribed === true && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                padding: '6px 14px',
+                background: '#FAFBFC',
+                borderBottom: '1px solid #EEF0F2',
+                fontSize: 11,
+                color: '#6A737D',
+              }}
+            >
+              <span>Push notifications enabled on this device</span>
+              <button
+                type="button"
+                onClick={() => push.disable()}
+                disabled={push.loading}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#6A737D',
+                  cursor: 'pointer',
+                  padding: 0,
+                  fontSize: 11,
+                  textDecoration: 'underline',
+                }}
+              >
+                Turn off
+              </button>
+            </div>
+          )}
+          {push.error && (
+            <div
+              style={{
+                padding: '8px 14px',
+                background: '#FFF3F3',
+                borderBottom: '1px solid #F5C6CB',
+                fontSize: 11,
+                color: '#C62828',
+              }}
+            >
+              <BellOff size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />
+              {push.error}
+            </div>
+          )}
 
           <div style={{ overflowY: 'auto', flex: 1 }}>
             {loadingFirst ? (

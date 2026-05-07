@@ -14,6 +14,19 @@ These were committed in code but require a manual action you haven't completed y
   - `0006_agent_actions` — every chat tool call gets logged. Without this, chat still works, but audit is silently dropped (the logger swallows errors).
   - `0007_notifications_and_follows` — required by `/api/notifications` and `/api/follows`. Calls to those endpoints will 500 until applied.
   - `0008_appfolio_cache` — required by the AppFolio mirror. Without this, menu pages keep going through AppFolio's slow API on every request.
+  - `0009_push_subscriptions` — required by web push. Without this, the bell's "Enable browser notifications" button will 500.
+- [ ] **Configure web push (VAPID keys, one-time).** Tap this URL — it generates a fresh keypair and shows it on screen with copy-paste-ready instructions:
+
+      https://breeze-os-claude.vercel.app/api/admin/generate-vapid-keys?secret=<TOKEN>
+
+  Paste the three values into Vercel → Settings → Environment Variables → Production:
+
+      VAPID_PUBLIC_KEY  = (from response)
+      VAPID_PRIVATE_KEY = (from response)
+      VAPID_SUBJECT     = mailto:partners@breezepropertygroup.com
+
+  Redeploy (any commit triggers it). Open the chat home, tap the bell — a "Get push notifications" banner appears at the top of the dropdown. Tap **Enable**, grant browser permission, and you're done. Note: hitting the URL again refuses unless you append `&force=1`; rotating invalidates every existing subscription.
+
 - [ ] **Bootstrap the AppFolio mirror** (one-time, ~30-60s). After 0008 is applied, open this URL in a browser:
 
       https://<your-domain>/api/admin/appfolio-sync?action=sync
@@ -46,7 +59,7 @@ In priority order:
 
 3. **PR B3 — Bell + follow UI.** Shipped. Bell with unread badge in TopBar, polling dropdown that lists recent notifications and supports per-item / mark-all read. Follow buttons on Tenants / Properties / Maintenance rows; the active state derives from a single FollowsContext fetch (one /api/follows roundtrip per session, optimistic updates). Click-through from a notification routes to the matching list view. **Phase-2 polish queued:** auto-select the specific record on the destination page (notifications navigate to the list, not the row).
 
-4. **PR C — Web push.** Service worker + `push_subscriptions` table + browser permission prompt + integration into the notifications writer so bell items also fire a push. ~2 hrs.
+4. **PR C — Web push.** Shipped. Service worker (public/sw.js), push_subscriptions table (migration 0009), VAPID-aware lib/webpush.js sender that fires from fanoutEvent right after a notification is created, /api/push-subscriptions endpoint for opt-in/out, /api/admin/generate-vapid-keys helper for the one-time keypair, and an opt-in banner in the bell dropdown. **Setup tasks (above):** generate VAPID keys + apply 0009.
 
 5. **Roadmap items from the "Solution 1 · Breeze OS" slide.** Sub-PRs:
    - **PR D — read-only**: count_work_orders, list_leads, list_leases_expiring, list_late_fee_policies, list_vendors_by_trade. ~half day.
