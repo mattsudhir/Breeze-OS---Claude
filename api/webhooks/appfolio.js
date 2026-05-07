@@ -31,6 +31,11 @@ import {
   defaultTitle,
 } from '../../lib/appfolioWebhook.js';
 import { fanoutEvent } from '../../lib/notifications.js';
+import {
+  syncOneFromAppfolio,
+  topicToResourceType,
+  getDefaultOrgIdForMirror,
+} from '../../lib/appfolioMirror.js';
 
 // Vercel Node functions parse JSON by default; we need the raw
 // bytes for JWS verification. Disabling the body parser lets us
@@ -97,15 +102,38 @@ export default async function handler(req, res) {
     `(event ${eventId || '?'} resource ${resourceId || '?'})`,
   );
 
-  // ── Step 3: fan out, if this is a topic we follow ──
+  if (!resourceId) {
+    return res.status(200).json({ ok: true, fanned_out: false, reason: 'missing_resource_id' });
+  }
+
+  // ── Step 3: refresh the mirror for this resource ──
+  // If the topic maps to a mirrored resource type, fetch the new
+  // state from AppFolio (filters[Id]=<resource_id>) and upsert it
+  // into appfolio_cache. This keeps menu-page reads sub-100ms.
+  // Failures here are logged but don't fail the webhook ack — the
+  // reconciliation cron will catch any drops.
+  const mirrorType = topicToResourceType(topic);
+  let mirrorResult = null;
+  if (mirrorType) {
+    try {
+      const orgId = await getDefaultOrgIdForMirror();
+      mirrorResult = await syncOneFromAppfolio(orgId, mirrorType, resourceId);
+    } catch (err) {
+      console.warn('[appfolio-webhook] mirror sync failed:', err?.message || err);
+    }
+  }
+
+  // ── Step 4: fan out notifications, if this is a topic we follow ──
   const entityType = TOPIC_TO_ENTITY_TYPE[topic];
   if (!entityType) {
     // Recognised payload, just not a topic we expose for following
     // yet. Ack so AppFolio stops retrying.
-    return res.status(200).json({ ok: true, fanned_out: false, reason: 'unmapped_topic' });
-  }
-  if (!resourceId) {
-    return res.status(200).json({ ok: true, fanned_out: false, reason: 'missing_resource_id' });
+    return res.status(200).json({
+      ok: true,
+      fanned_out: false,
+      reason: 'unmapped_topic',
+      mirror: mirrorResult,
+    });
   }
 
   try {
@@ -127,11 +155,21 @@ export default async function handler(req, res) {
       payload: event,
       sourceEventId: eventId || null,
     });
-    return res.status(200).json({ ok: true, fanned_out: true, ...result });
+    return res.status(200).json({
+      ok: true,
+      fanned_out: true,
+      mirror: mirrorResult,
+      ...result,
+    });
   } catch (err) {
     // App-side processing error — surface to logs but ack so
     // AppFolio doesn't retry the same event in a loop.
     console.error('[appfolio-webhook] fanout failed:', err);
-    return res.status(200).json({ ok: false, fanned_out: false, error: err.message });
+    return res.status(200).json({
+      ok: false,
+      fanned_out: false,
+      mirror: mirrorResult,
+      error: err.message,
+    });
   }
 }

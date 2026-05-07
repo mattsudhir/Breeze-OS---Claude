@@ -25,6 +25,23 @@
 
 import { getChatBackend } from '../lib/backends/index.js';
 import { logAgentAction } from '../lib/agentAudit.js';
+import {
+  readListFromMirror,
+  mirrorHasData,
+  isMirrored,
+  getDefaultOrgIdForMirror,
+} from '../lib/appfolioMirror.js';
+
+// Tools whose reads can come from the AppFolio mirror in
+// appfolio_cache instead of round-tripping through AppFolio's slow
+// list API. Webhook + reconciliation cron keep the mirror current.
+// Maps the chat tool name → resourceType used by the mirror.
+const MIRROR_BACKED_TOOLS = {
+  list_tenants: 'tenant',
+  list_properties: 'property',
+  list_units: 'unit',
+  list_work_orders: 'work_order',
+};
 
 // Whitelist of tools callable from this surface. Mostly read-only,
 // plus a small set of write tools where the menu-page form itself
@@ -78,11 +95,43 @@ export default async function handler(req, res) {
   const startedAt = Date.now();
   let result;
   let threwError = null;
-  try {
-    result = await backend.executeTool(tool, input || {});
-  } catch (err) {
-    threwError = err;
-    result = { error: err?.message || String(err) };
+  let servedFrom = 'live';
+
+  // Mirror fast path: if this is a list tool we cache locally AND
+  // we're on the AppFolio backend AND the mirror has data for the
+  // type, read from Postgres instead of round-tripping AppFolio.
+  // Falls through to the live path on mirror miss / error so the
+  // first request after a deploy still works (just slow until the
+  // bulk sync runs).
+  const mirrorType = MIRROR_BACKED_TOOLS[tool];
+  if (mirrorType && source === 'appfolio' && isMirrored(mirrorType)) {
+    try {
+      const orgId = await getDefaultOrgIdForMirror();
+      if (await mirrorHasData(orgId, mirrorType)) {
+        const filters = {};
+        if (input?.property_id) filters.propertyId = input.property_id;
+        if (input?.unit_id) filters.unitId = input.unit_id;
+        if (input?.occupancy_id) filters.occupancyId = input.occupancy_id;
+        result = await readListFromMirror(orgId, mirrorType, {
+          limit: input?.limit,
+          offset: input?.offset,
+          filters,
+          activeOnly: input?.active_only !== false && mirrorType === 'tenant',
+        });
+        servedFrom = 'mirror';
+      }
+    } catch (err) {
+      console.warn('[/api/data] mirror read failed, falling back to live:', err?.message || err);
+    }
+  }
+
+  if (!result) {
+    try {
+      result = await backend.executeTool(tool, input || {});
+    } catch (err) {
+      threwError = err;
+      result = { error: err?.message || String(err) };
+    }
   }
   const durationMs = Date.now() - startedAt;
 
@@ -90,9 +139,11 @@ export default async function handler(req, res) {
     !threwError && !(result && typeof result === 'object' && 'error' in result);
 
   // Audit the call. Same pattern as runAgent — fire-and-forget so
-  // a slow/down DB doesn't block the response.
+  // a slow/down DB doesn't block the response. servedFrom records
+  // whether the response came from the mirror or a live fetch, so
+  // the audit log lets us see how often the mirror is being used.
   logAgentAction({
-    surface: 'data',
+    surface: servedFrom === 'mirror' ? 'data-mirror' : 'data',
     userId: req.headers['x-breeze-user-id'] || null,
     backendName: backend.name || source,
     toolName: tool,

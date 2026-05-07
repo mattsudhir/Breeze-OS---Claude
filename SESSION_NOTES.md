@@ -13,6 +13,13 @@ These were committed in code but require a manual action you haven't completed y
 - [ ] **Apply DB migrations.** After the next deploy lands, hit `https://<your-domain>/api/db-migrate` once. This applies:
   - `0006_agent_actions` — every chat tool call gets logged. Without this, chat still works, but audit is silently dropped (the logger swallows errors).
   - `0007_notifications_and_follows` — required by `/api/notifications` and `/api/follows`. Calls to those endpoints will 500 until applied.
+  - `0008_appfolio_cache` — required by the AppFolio mirror. Without this, menu pages keep going through AppFolio's slow API on every request.
+- [ ] **Bootstrap the AppFolio mirror.** After 0008 is applied, POST to `https://<your-domain>/api/admin/appfolio-sync` with the `BREEZE_ADMIN_TOKEN` header (or no auth if the env var isn't set). This pulls every tenant, property, unit, and work order into Postgres. ~30-60s for typical portfolios. Webhooks keep it fresh after that. Sample call:
+
+      curl -X POST https://<your-domain>/api/admin/appfolio-sync \
+        -H "Authorization: Bearer <BREEZE_ADMIN_TOKEN>"
+
+  GET the same URL to see per-resource-type row counts and last-sync timestamps without triggering a fresh sync.
 
 ### AppFolio Developer Portal — webhook receiver (PR B2 shipped, config still needed)
 

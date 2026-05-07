@@ -28,6 +28,7 @@
     { "source": "/api/admin/grid-import",             "destination": "/api/admin/grid-import" },
     { "source": "/api/admin/backfill-unit-ids",       "destination": "/api/admin/backfill-unit-ids" },
     { "source": "/api/admin/zoho-mcp-ping",           "destination": "/api/admin/zoho-mcp-ping" },
+    { "source": "/api/admin/appfolio-sync",           "destination": "/api/admin/appfolio-sync" },
     { "source": "/api/cron/process-tasks",            "destination": "/api/cron/process-tasks" },
     { "source": "/api/(.*)",                          "destination": "/api/rentmanager" }
   ],
@@ -58,6 +59,7 @@
     "api/admin/grid-import.js":               { "maxDuration": 60 },
     "api/admin/backfill-unit-ids.js":         { "maxDuration": 60 },
     "api/admin/zoho-mcp-ping.js":             { "maxDuration": 15 },
+    "api/admin/appfolio-sync.js":             { "maxDuration": 300 },
     "api/cron/process-tasks.js":              { "maxDuration": 60 }
   },
   "crons": [
