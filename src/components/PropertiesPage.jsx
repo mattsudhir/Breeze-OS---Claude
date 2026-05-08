@@ -308,16 +308,14 @@ export default function PropertiesPage({ onNavigate }) {
         )}
       </div>
 
-      {/* Summary stats. The Properties card is a clickable entry point
-          into the portfolio drilldown — the other three remain static
-          since they already summarise the data right below. */}
+      {/* Summary stats. The Properties card used to navigate to the
+          portfolio drilldown but the user is *already* on the
+          properties view, so the click felt like a page reload —
+          made it non-interactive. The Units card is the proper
+          drill-in entry point, opening the portfolio drilldown with
+          all rows pre-expanded so units are visible immediately. */}
       <div className="stats-row">
-        <button
-          type="button"
-          className="stat-card stat-card-clickable"
-          onClick={() => onNavigate && onNavigate('properties-drilldown')}
-          title="Open portfolio drilldown"
-        >
+        <div className="stat-card">
           <div className="stat-icon" style={{ backgroundColor: '#0077B615', color: '#0077B6' }}>
             <Building2 size={22} />
           </div>
@@ -325,8 +323,13 @@ export default function PropertiesPage({ onNavigate }) {
             <span className="stat-value">{properties.length}</span>
             <span className="stat-label">Properties</span>
           </div>
-        </button>
-        <div className="stat-card">
+        </div>
+        <button
+          type="button"
+          className="stat-card stat-card-clickable"
+          onClick={() => onNavigate && onNavigate('properties-drilldown', { expandAll: true })}
+          title="Open portfolio drilldown with units expanded"
+        >
           <div className="stat-icon" style={{ backgroundColor: '#1565C015', color: '#1565C0' }}>
             <Home size={22} />
           </div>
@@ -334,7 +337,7 @@ export default function PropertiesPage({ onNavigate }) {
             <span className="stat-value">{totalUnits}</span>
             <span className="stat-label">Total Units</span>
           </div>
-        </div>
+        </button>
         <div className="stat-card">
           <div className="stat-icon" style={{ backgroundColor: '#2E7D3215', color: '#2E7D32' }}>
             <CheckCircle2 size={22} />

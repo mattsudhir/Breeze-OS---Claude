@@ -93,7 +93,7 @@ function formatCurrency(n) {
   return `$${Math.round(n).toLocaleString('en-US')}`;
 }
 
-export default function PropertiesDrilldown() {
+export default function PropertiesDrilldown({ initialFilters } = {}) {
   const { dataSource, sources } = useDataSource();
   const sourceLabel = sources.find((s) => s.value === dataSource)?.label || dataSource;
   const [properties, setProperties] = useState(null);
@@ -104,6 +104,10 @@ export default function PropertiesDrilldown() {
   const [sortKey, setSortKey] = useState('totalUnits');
   const [sortDir, setSortDir] = useState('desc');
   const [expandedId, setExpandedId] = useState(null);
+  // When opened from the Properties → Units stat card, expand every
+  // row by default so units are visible immediately. The user can
+  // still collapse individual rows.
+  const [expandAll, setExpandAll] = useState(!!initialFilters?.expandAll);
 
   useEffect(() => {
     let cancelled = false;
@@ -245,6 +249,14 @@ export default function PropertiesDrilldown() {
   };
 
   const handleRowClick = (id) => {
+    // Once the user interacts with any row, drop expand-all mode and
+    // fall back to single-row toggling so collapse-one-row works as
+    // expected.
+    if (expandAll) {
+      setExpandAll(false);
+      setExpandedId(id);
+      return;
+    }
     setExpandedId((prev) => (prev === id ? null : id));
   };
 
@@ -371,7 +383,7 @@ export default function PropertiesDrilldown() {
             </thead>
             <tbody>
               {sortedRows.map((r) => {
-                const expanded = expandedId === r.id;
+                const expanded = expandAll || expandedId === r.id;
                 return (
                   <RowGroup
                     key={r.id}

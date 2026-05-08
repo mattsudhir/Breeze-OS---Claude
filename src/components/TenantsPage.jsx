@@ -16,6 +16,20 @@ function getInitials(name) {
   return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
 }
 
+// Compact tenure pill: ">10y", "3y", "8mo", "2w". Falls back to a
+// month string for anything <30 days so a brand-new resident shows
+// a useful value instead of "0y".
+function tenureLabel(moveInDate) {
+  if (!moveInDate) return '';
+  const start = new Date(moveInDate).getTime();
+  if (Number.isNaN(start)) return '';
+  const days = Math.max(0, (Date.now() - start) / 86_400_000);
+  if (days < 30) return `${Math.max(1, Math.round(days / 7))}w`;
+  const years = days / 365.25;
+  if (years >= 1) return `${Math.floor(years)}y`;
+  return `${Math.max(1, Math.round(days / 30))}mo`;
+}
+
 function getStatusInfo(status) {
   const s = (status || '').toLowerCase();
   if (s.includes('current') || s.includes('active')) {
@@ -729,6 +743,42 @@ export default function TenantsPage() {
                     </span>
                   )}
                 </div>
+                {(t.unitName || t.propertyName || t.rent || t.moveInDate) && (
+                  <div
+                    className="tenant-meta"
+                    style={{
+                      display: 'flex', gap: 10, flexWrap: 'wrap',
+                      marginTop: 4, fontSize: 11, color: '#6A737D',
+                    }}
+                  >
+                    {(t.unitName || t.propertyName) && (
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 3,
+                      }}>
+                        <Home size={11} />
+                        {t.unitName
+                          ? `${t.unitName}${t.propertyName ? ` · ${t.propertyName}` : ''}`
+                          : t.propertyName}
+                      </span>
+                    )}
+                    {t.rent && (
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 3,
+                      }}>
+                        <DollarSign size={11} />
+                        ${Number(t.rent).toLocaleString()}/mo
+                      </span>
+                    )}
+                    {t.moveInDate && (
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 3,
+                      }} title={`Moved in ${new Date(t.moveInDate).toLocaleDateString()}`}>
+                        <Calendar size={11} />
+                        {tenureLabel(t.moveInDate)}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
               <span className={`unit-status ${statusInfo.className}`}>
                 <StatusIcon size={12} />
