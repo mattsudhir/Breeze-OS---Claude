@@ -518,8 +518,15 @@ export default function TenantsPage() {
   const [loading, setLoading] = useState(true);
   const [isLive, setIsLive] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  // Default to 'current' so the first paint isn't 2k+ rows of past
+  // tenants — that was locking up the tab on phones, which made the
+  // sidebar look unresponsive (the next tap was queued behind a
+  // never-finishing render). 'all' is still one chip-click away.
+  const [statusFilter, setStatusFilter] = useState('current');
   const [selectedTenantId, setSelectedTenantId] = useState(null);
+  // Render cap so a 2200-row "All" view doesn't tank scroll perf.
+  // Bumped 250 at a time when the user hits Show more.
+  const [renderLimit, setRenderLimit] = useState(250);
 
   // Refetch whenever the user flips the data source toggle in TopBar.
   useEffect(() => {
@@ -609,6 +616,7 @@ export default function TenantsPage() {
     acc[label] = (acc[label] || 0) + 1;
     return acc;
   }, {});
+  const activeCount = (statusCounts.current || 0) + (statusCounts.notice || 0);
 
   return (
     <div className="properties-page">
@@ -626,7 +634,10 @@ export default function TenantsPage() {
         border: `1px solid ${isLive ? '#C8E6C9' : '#FFE0B2'}`,
       }}>
         {isLive ? (
-          <><CheckCircle2 size={14} /> Live data from {sourceLabel} — {tenants.length} tenants</>
+          <>
+            <CheckCircle2 size={14} /> Live data from {sourceLabel} —{' '}
+            {activeCount} active ({tenants.length} total incl. past / future)
+          </>
         ) : (
           <><WifiOff size={14} /> Demo data</>
         )}
@@ -684,7 +695,7 @@ export default function TenantsPage() {
       </div>
 
       <div className="tenants-list">
-        {filtered.map((t) => {
+        {filtered.slice(0, renderLimit).map((t) => {
           const statusInfo = getStatusInfo(t.status);
           const StatusIcon = statusInfo.icon;
           return (
@@ -732,6 +743,28 @@ export default function TenantsPage() {
           );
         })}
       </div>
+
+      {filtered.length > renderLimit && (
+        <div style={{
+          display: 'flex', justifyContent: 'center', alignItems: 'center',
+          gap: 8, padding: '16px 0', flexDirection: 'column',
+        }}>
+          <span style={{ fontSize: 12, color: '#6A737D' }}>
+            Showing {renderLimit} of {filtered.length}
+          </span>
+          <button
+            type="button"
+            onClick={() => setRenderLimit((n) => n + 250)}
+            style={{
+              padding: '8px 14px', border: '1px solid #D0D7DE',
+              background: '#FFF', borderRadius: 6, cursor: 'pointer',
+              fontSize: 13, fontWeight: 500,
+            }}
+          >
+            Show {Math.min(250, filtered.length - renderLimit)} more
+          </button>
+        </div>
+      )}
 
       {filtered.length === 0 && (
         <div className="empty-state">
