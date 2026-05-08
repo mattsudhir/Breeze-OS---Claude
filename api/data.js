@@ -40,6 +40,7 @@ const MIRROR_BACKED_TOOLS = {
   list_tenants: 'tenant',
   list_properties: 'property',
   list_units: 'unit',
+  list_occupancies: 'occupancy',
   list_work_orders: 'work_order',
 };
 
@@ -58,6 +59,7 @@ const ALLOWED_TOOLS = new Set([
   'search_tenants',
   'get_tenant_details',
   'list_units',
+  'list_occupancies',
   'list_work_orders',
   'count_properties',
   'count_tenants',
