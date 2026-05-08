@@ -125,8 +125,30 @@ function normaliseAppfolioUnit(u) {
     bathrooms: u.bathrooms,
     sqft: u.sqft,
     marketRent: u.market_rent,
+    nonRevenue: !!u.non_revenue,
     raw: u,
   };
+}
+
+// AppFolio flags model / office / common-area units with
+// NonRevenue=true so they don't show up as rentable inventory.
+// We surface that flag (nonRevenue) and drop matching rows from
+// menu views.
+//
+// Fallback heuristic: rows already in the mirror from before the
+// non_revenue field was added won't have it set. Match on name —
+// "Common Area" / "Common 1" / "Common - West Wing" — but ONLY
+// when the row also has no rentable attributes (no bedrooms /
+// bathrooms / market rent), so we don't accidentally drop a real
+// unit on a property literally named with the word "Common".
+function isRentableUnit(u) {
+  if (u.nonRevenue) return false;
+  const name = (u.name || '').toLowerCase();
+  const looksCommon = /\bcommon\b/.test(name);
+  const noRentableAttrs =
+    !u.bedrooms && !u.bathrooms && (u.marketRent == null || Number(u.marketRent) === 0);
+  if (looksCommon && noRentableAttrs) return false;
+  return true;
 }
 
 function normaliseAppfolioTenant(t) {
@@ -186,7 +208,9 @@ export async function getUnits(source, propertyId) {
   if (source === 'appfolio') {
     const result = await dataFetch(source, 'list_units', { limit: 5000 });
     if (!result) return null;
-    let units = (result.units || []).map(normaliseAppfolioUnit);
+    let units = (result.units || [])
+      .map(normaliseAppfolioUnit)
+      .filter(isRentableUnit);
     // Filter client-side now that property_id is on each row. We
     // could push this to AppFolio if list_units gains a
     // filters[PropertyId] pass-through, but the client-side filter

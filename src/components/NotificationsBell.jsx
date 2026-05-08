@@ -168,11 +168,15 @@ export default function NotificationsBell({ onNavigate }) {
       {open && (
         <div
           style={{
-            position: 'absolute',
-            top: 'calc(100% + 4px)',
-            right: 0,
-            width: 380,
-            maxHeight: 480,
+            // Anchor the dropdown to the viewport rather than the
+            // bell button's container — prevents overflow off the
+            // right edge on narrow phones (the bell + AppFolio
+            // toggle can crowd each other in a small TopBar).
+            position: 'fixed',
+            top: 56,
+            right: 8,
+            width: 'min(380px, calc(100vw - 16px))',
+            maxHeight: 'calc(100vh - 80px)',
             background: '#FFF',
             border: '1px solid #D0D7DE',
             borderRadius: 8,
