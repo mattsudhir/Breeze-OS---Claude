@@ -283,6 +283,7 @@ function ChargeCategoriesSection() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(null);
   const [error, setError] = useState(null);
+  const [migrationPending, setMigrationPending] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -294,6 +295,7 @@ function ChargeCategoriesSection() {
         const settingsRes = await fetch('/api/issue-gl-mappings');
         const settingsData = await settingsRes.json();
         if (!settingsData?.ok) throw new Error(settingsData?.error || 'Could not load mappings');
+        if (settingsData.migrationPending) setMigrationPending(true);
 
         // GL accounts (only available when AppFolio is the active source).
         let accts = [];
@@ -365,6 +367,16 @@ function ChargeCategoriesSection() {
           borderRadius: 6, color: '#E65100', fontSize: 12, marginBottom: 12,
         }}>
           Switch to AppFolio (Settings → Data source) to load the GL account list.
+        </div>
+      )}
+      {migrationPending && (
+        <div style={{
+          padding: '8px 12px', background: '#FFF3E0', border: '1px solid #FFE0B2',
+          borderRadius: 6, color: '#E65100', fontSize: 12, marginBottom: 12,
+        }}>
+          Migration pending — apply once at <code>/api/db-migrate</code> and saved
+          mappings will start persisting. The categories below already work as a
+          live preview.
         </div>
       )}
       {loading ? (

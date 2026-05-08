@@ -56,21 +56,35 @@ export default async function handler(req, res) {
     const orgId = await getDefaultOrgId();
 
     if (req.method === 'GET') {
-      const rows = await db
-        .select()
-        .from(schema.issueGlMappings)
-        .where(eq(schema.issueGlMappings.organizationId, orgId));
-      const mappings = {};
-      for (const row of rows) {
-        mappings[row.category] = {
-          glAccountId: row.glAccountId,
-          glAccountName: row.glAccountName,
-        };
+      // Tolerate a not-yet-applied migration so the Settings page
+      // still renders the catalog (with empty mappings) before the
+      // user hits /api/db-migrate. Postgres surfaces a missing
+      // table as code 42P01 — any other error gets re-thrown.
+      let mappings = {};
+      let migrationPending = false;
+      try {
+        const rows = await db
+          .select()
+          .from(schema.issueGlMappings)
+          .where(eq(schema.issueGlMappings.organizationId, orgId));
+        for (const row of rows) {
+          mappings[row.category] = {
+            glAccountId: row.glAccountId,
+            glAccountName: row.glAccountName,
+          };
+        }
+      } catch (err) {
+        if (err?.code === '42P01' || /relation .* does not exist/i.test(err?.message || '')) {
+          migrationPending = true;
+        } else {
+          throw err;
+        }
       }
       return res.status(200).json({
         ok: true,
         categories: ISSUE_CATEGORIES,
         mappings,
+        migrationPending,
       });
     }
 
