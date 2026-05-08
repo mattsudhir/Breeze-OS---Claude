@@ -15,6 +15,7 @@ These were committed in code but require a manual action you haven't completed y
   - `0007_notifications_and_follows` — required by `/api/notifications` and `/api/follows`. Calls to those endpoints will 500 until applied.
   - `0008_appfolio_cache` — required by the AppFolio mirror. Without this, menu pages keep going through AppFolio's slow API on every request.
   - `0009_push_subscriptions` — required by web push. Without this, the bell's "Enable browser notifications" button will 500.
+  - `0010_category_subscriptions` — required by Settings → Notifications. Without this the toggles in that tab will 500.
 - [ ] **Configure web push (VAPID keys, one-time).** Tap this URL — it generates a fresh keypair and shows it on screen with copy-paste-ready instructions:
 
       https://breeze-os-claude.vercel.app/api/admin/generate-vapid-keys?secret=<TOKEN>
@@ -60,6 +61,8 @@ In priority order:
 3. **PR B3 — Bell + follow UI.** Shipped. Bell with unread badge in TopBar, polling dropdown that lists recent notifications and supports per-item / mark-all read. Follow buttons on Tenants / Properties / Maintenance rows; the active state derives from a single FollowsContext fetch (one /api/follows roundtrip per session, optimistic updates). Click-through from a notification routes to the matching list view. **Phase-2 polish queued:** auto-select the specific record on the destination page (notifications navigate to the list, not the row).
 
 4. **PR C — Web push.** Shipped. Service worker (public/sw.js), push_subscriptions table (migration 0009), VAPID-aware lib/webpush.js sender that fires from fanoutEvent right after a notification is created, /api/push-subscriptions endpoint for opt-in/out, /api/admin/generate-vapid-keys helper for the one-time keypair, and an opt-in banner in the bell dropdown. **Setup tasks (above):** generate VAPID keys + apply 0009.
+
+5. **PR B4 — Category subscriptions.** Shipped. Settings → Notifications tab is now backed by `category_subscriptions` (migration 0010). Toggleable categories: rent payments received, new maintenance requests, urgent work orders, new tenants, new leases signed. The webhook receiver detects matches (including before/after comparison for payment detection — when a charges/update event lowers AmountDue, that fires the rent_payments category). Both per-entity follows and category subs fan into the same notifications table; bell + push deliver from there. **Setup task:** apply migration 0010, then open Settings → Notifications and toggle on the categories you want.
 
 5. **Roadmap items from the "Solution 1 · Breeze OS" slide.** Sub-PRs:
    - **PR D — read-only**: count_work_orders, list_leads, list_leases_expiring, list_late_fee_policies, list_vendors_by_trade. ~half day.

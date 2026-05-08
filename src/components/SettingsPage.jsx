@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Settings, User, Bell, Lock, CreditCard, Building2, Database,
   Mail, Phone, Shield, Palette, Users, Save, ChevronRight,
@@ -211,21 +211,142 @@ function Stat({ label, value }) {
 }
 
 function NotificationsSection() {
+  const [categories, setCategories] = useState([]);
+  const [subscribed, setSubscribed] = useState(new Set());
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(null); // category id currently saving
+  const [error, setError] = useState(null);
+
+  // Load the category catalog + the user's current opt-ins.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/category-subscriptions')
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data?.ok) {
+          setCategories(data.categories || []);
+          setSubscribed(new Set(data.subscribed || []));
+        } else {
+          setError(data?.error || 'Could not load subscriptions');
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message || 'Network error');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const toggleCategory = async (categoryId, currentlyOn) => {
+    setSaving(categoryId);
+    setError(null);
+    // Optimistic
+    setSubscribed((prev) => {
+      const next = new Set(prev);
+      if (currentlyOn) next.delete(categoryId);
+      else next.add(categoryId);
+      return next;
+    });
+    try {
+      const res = await fetch('/api/category-subscriptions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: categoryId, enabled: !currentlyOn }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || `HTTP ${res.status}`);
+      }
+    } catch (err) {
+      setError(err.message || 'Save failed');
+      // Roll back optimistic
+      setSubscribed((prev) => {
+        const next = new Set(prev);
+        if (currentlyOn) next.add(categoryId);
+        else next.delete(categoryId);
+        return next;
+      });
+    } finally {
+      setSaving(null);
+    }
+  };
+
   return (
     <>
-      <Card title="Email Notifications" icon={Mail}>
-        <Toggle label="New work orders" desc="Get notified when a tenant submits a maintenance request" defaultOn />
-        <Toggle label="Rent payments" desc="Alert when rent is paid or becomes overdue" defaultOn />
-        <Toggle label="Lease renewals" desc="Reminder 60 days before a lease expires" defaultOn />
-        <Toggle label="Weekly digest" desc="Summary of portfolio activity every Monday morning" defaultOn />
-        <Toggle label="Product updates" desc="New Breeze features and release notes" />
+      <Card title="Notification categories" icon={Bell}>
+        <div style={{ fontSize: 12, color: '#6A737D', marginBottom: 12 }}>
+          Toggle on the events you want to be alerted about across the whole
+          portfolio. Each category fires both the in-app bell and (if enabled)
+          a native push notification.
+        </div>
+        {loading ? (
+          <div style={{ padding: '12px 0', color: '#6A737D', fontSize: 13 }}>
+            Loading…
+          </div>
+        ) : error ? (
+          <div style={{
+            padding: '8px 12px',
+            background: '#FFF3F3',
+            border: '1px solid #F5C6CB',
+            borderRadius: 6,
+            color: '#C62828',
+            fontSize: 12,
+          }}>
+            {error}
+          </div>
+        ) : categories.length === 0 ? (
+          <div style={{ padding: '12px 0', color: '#6A737D', fontSize: 13 }}>
+            No categories configured.
+          </div>
+        ) : (
+          categories.map((cat) => (
+            <BackedToggle
+              key={cat.id}
+              label={cat.label}
+              desc={cat.description}
+              on={subscribed.has(cat.id)}
+              loading={saving === cat.id}
+              onToggle={() => toggleCategory(cat.id, subscribed.has(cat.id))}
+            />
+          ))
+        )}
       </Card>
-      <Card title="SMS & Push" icon={Phone}>
-        <Toggle label="Urgent work orders only" desc="Text me when an urgent or emergency ticket is filed" defaultOn />
-        <Toggle label="Chat responses" desc="Push notification when the AI finishes a long-running query" />
-        <Toggle label="Call summaries" desc="SMS a transcript summary after each outbound AI call" defaultOn />
+      <Card title="Other channels (coming soon)" icon={Phone}>
+        <div style={{ fontSize: 12, color: '#6A737D', lineHeight: 1.5 }}>
+          SMS and email delivery for these categories is in design. For now
+          alerts are delivered as in-app notifications and (with permission) as
+          native browser push pop-ups via the bell icon at the top.
+        </div>
       </Card>
     </>
+  );
+}
+
+// Backend-driven toggle. Same look as <Toggle /> but the on-state is
+// owned by the parent (so optimistic updates roll back cleanly on
+// save failure) and a small spinner replaces the knob while the
+// network call is in flight.
+function BackedToggle({ label, desc, on, loading, onToggle }) {
+  return (
+    <div className="settings-toggle">
+      <div className="settings-toggle-text">
+        <div className="settings-toggle-label">{label}</div>
+        {desc && <div className="settings-toggle-desc">{desc}</div>}
+      </div>
+      <button
+        type="button"
+        onClick={onToggle}
+        disabled={loading}
+        className={`settings-toggle-switch ${on ? 'on' : ''}`}
+        aria-pressed={on}
+        style={{ opacity: loading ? 0.6 : 1 }}
+      >
+        <span className="settings-toggle-knob" />
+      </button>
+    </div>
   );
 }
 

@@ -33,9 +33,14 @@ import {
 import { fanoutEvent } from '../../lib/notifications.js';
 import {
   syncOneFromAppfolio,
+  readOneFromMirror,
   topicToResourceType,
   getDefaultOrgIdForMirror,
 } from '../../lib/appfolioMirror.js';
+import {
+  categoriesForEvent,
+  fanoutCategoryEvent,
+} from '../../lib/categorySubscriptions.js';
 
 // Vercel Node functions parse JSON by default; we need the raw
 // bytes for JWS verification. Disabling the body parser lets us
@@ -106,20 +111,62 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, fanned_out: false, reason: 'missing_resource_id' });
   }
 
-  // ── Step 3: refresh the mirror for this resource ──
-  // If the topic maps to a mirrored resource type, fetch the new
-  // state from AppFolio (filters[Id]=<resource_id>) and upsert it
-  // into appfolio_cache. This keeps menu-page reads sub-100ms.
-  // Failures here are logged but don't fail the webhook ack — the
-  // reconciliation cron will catch any drops.
+  // ── Step 3: refresh the mirror + capture prior state ──
+  //
+  // We need BOTH the prior cached state and the new state to drive
+  // payment-detection style category matchers (compared
+  // amount_due before/after). So:
+  //   1. Read prior from mirror.
+  //   2. Run the AppFolio fetch + upsert (overwrites prior).
+  //   3. Read current from mirror (== what was just written).
+  //
+  // If the mirror has no record of this resource yet, prior is null;
+  // matchers handle that gracefully (a fresh create is a valid
+  // signal on its own).
   const mirrorType = topicToResourceType(topic);
   let mirrorResult = null;
+  let priorState = null;
+  let currentState = null;
+  let orgId = null;
   if (mirrorType) {
     try {
-      const orgId = await getDefaultOrgIdForMirror();
+      orgId = await getDefaultOrgIdForMirror();
+      priorState = await readOneFromMirror(orgId, mirrorType, resourceId);
       mirrorResult = await syncOneFromAppfolio(orgId, mirrorType, resourceId);
+      currentState = await readOneFromMirror(orgId, mirrorType, resourceId);
     } catch (err) {
       console.warn('[appfolio-webhook] mirror sync failed:', err?.message || err);
+    }
+  }
+
+  // ── Step 3b: category subscriptions ("alert me on every X") ──
+  //
+  // For each category that matches this event, fan out to every
+  // user subscribed to that category. Independent of the per-entity
+  // follow fan-out below — both can fire on the same event.
+  const categoryMatches = categoriesForEvent({
+    topic,
+    eventType,
+    prior: priorState,
+    current: currentState,
+  });
+  const categoryResults = [];
+  for (const m of categoryMatches) {
+    try {
+      const r = await fanoutCategoryEvent({
+        category: m.category,
+        title: m.title,
+        body: m.body,
+        payload: event,
+        sourceEventId: eventId,
+      });
+      categoryResults.push({ category: m.category, ...r });
+    } catch (err) {
+      console.warn(
+        `[appfolio-webhook] category fanout (${m.category}) failed:`,
+        err?.message || err,
+      );
+      categoryResults.push({ category: m.category, error: err?.message || String(err) });
     }
   }
 
@@ -133,6 +180,7 @@ export default async function handler(req, res) {
       fanned_out: false,
       reason: 'unmapped_topic',
       mirror: mirrorResult,
+      categories: categoryResults,
     });
   }
 
@@ -159,6 +207,7 @@ export default async function handler(req, res) {
       ok: true,
       fanned_out: true,
       mirror: mirrorResult,
+      categories: categoryResults,
       ...result,
     });
   } catch (err) {
@@ -169,6 +218,7 @@ export default async function handler(req, res) {
       ok: false,
       fanned_out: false,
       mirror: mirrorResult,
+      categories: categoryResults,
       error: err.message,
     });
   }
