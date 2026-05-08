@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   CheckSquare, Clock, CheckCircle2, ExternalLink,
-  Loader2, Inbox, X,
+  Loader2, Inbox, X, Plus,
 } from 'lucide-react';
 
 const STATUS_TABS = [
@@ -83,6 +83,7 @@ export default function TasksPage() {
   const [error, setError] = useState(null);
   const [statusFilter, setStatusFilter] = useState('active');
   const [actingId, setActingId] = useState(null);
+  const [showAdd, setShowAdd] = useState(false);
 
   const fetchTasks = useCallback(async (status) => {
     setLoading(true);
@@ -145,7 +146,7 @@ export default function TasksPage() {
             Items waiting on a human action — payment allocations, charge reviews, vendor follow-ups.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <span style={{
             padding: '6px 10px', borderRadius: 6, background: '#F0F7FF',
             color: '#1565C0', fontSize: 12, fontWeight: 600,
@@ -160,8 +161,31 @@ export default function TasksPage() {
               {totalOverdue} overdue
             </span>
           )}
+          <button
+            type="button"
+            onClick={() => setShowAdd(true)}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '6px 12px', border: 'none', background: '#1565C0',
+              color: '#FFF', borderRadius: 6, fontSize: 12, fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            <Plus size={14} /> Add Task
+          </button>
         </div>
       </div>
+
+      {showAdd && (
+        <AddTaskModal
+          taskTypes={taskTypes}
+          onClose={() => setShowAdd(false)}
+          onCreated={() => {
+            setShowAdd(false);
+            fetchTasks(statusFilter);
+          }}
+        />
+      )}
 
       <div style={{
         display: 'flex', gap: 4, borderBottom: '1px solid #DCE6F1',
@@ -320,6 +344,163 @@ export default function TasksPage() {
           );
         })
       )}
+    </div>
+  );
+}
+
+// Manual task creation. Mirrors the catalog from the API so the
+// dropdown stays in sync with TASK_TYPES (lib/humanTasks.js) without
+// duplicating it here. Voice-driven creation is the longer-term play
+// (the chat agent already has a tool surface) — this button is the
+// keyboard fallback.
+function AddTaskModal({ taskTypes, onClose, onCreated }) {
+  const typeIds = Object.keys(taskTypes || {});
+  const [taskType, setTaskType] = useState(typeIds[0] || '');
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [priority, setPriority] = useState('normal');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (submitting) return;
+    if (!taskType) return setError('Pick a task type');
+    if (!title.trim()) return setError('Title required');
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/human-tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task_type: taskType,
+          title: title.trim(),
+          description: description.trim() || null,
+          priority,
+          source: 'manual',
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || `HTTP ${res.status}`);
+      }
+      onCreated?.();
+    } catch (err) {
+      setError(err.message || 'Save failed');
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+        zIndex: 300, display: 'flex', alignItems: 'flex-start',
+        justifyContent: 'center', padding: '40px 12px',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 'min(440px, 100%)', background: '#FFF', borderRadius: 8,
+          padding: 20, boxShadow: '0 12px 28px rgba(0,0,0,0.18)',
+        }}
+      >
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          marginBottom: 12,
+        }}>
+          <h3 style={{ margin: 0 }}>Add Task</h3>
+          <button
+            type="button" onClick={onClose}
+            style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              padding: 4, color: '#6A737D',
+            }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>Type</span>
+              <select
+                value={taskType} onChange={(e) => setTaskType(e.target.value)} required
+                style={{ padding: 8, border: '1px solid #D0D7DE', borderRadius: 4 }}
+              >
+                {typeIds.length === 0 && <option value="">— No task types loaded —</option>}
+                {typeIds.map((t) => (
+                  <option key={t} value={t}>
+                    {taskTypes[t]?.label || t}
+                    {taskTypes[t]?.slaHours ? ` (${Math.round(taskTypes[t].slaHours / 24)}d SLA)` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>Title</span>
+              <input
+                type="text" value={title} onChange={(e) => setTitle(e.target.value)}
+                placeholder="Call vendor about backflow inspection" required
+                style={{ padding: 8, border: '1px solid #D0D7DE', borderRadius: 4 }}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>Notes (optional)</span>
+              <textarea
+                value={description} onChange={(e) => setDescription(e.target.value)}
+                rows={3}
+                style={{ padding: 8, border: '1px solid #D0D7DE', borderRadius: 4, resize: 'vertical' }}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>Priority</span>
+              <select
+                value={priority} onChange={(e) => setPriority(e.target.value)}
+                style={{ padding: 8, border: '1px solid #D0D7DE', borderRadius: 4 }}
+              >
+                <option value="low">Low</option>
+                <option value="normal">Normal</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
+            </label>
+            {error && (
+              <div style={{
+                padding: '8px 12px', background: '#FFF3F3', border: '1px solid #F5C6CB',
+                borderRadius: 6, color: '#C62828', fontSize: 12,
+              }}>
+                {error}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+              <button
+                type="button" onClick={onClose} disabled={submitting}
+                style={{
+                  flex: 1, padding: '10px 14px', border: '1px solid #D0D7DE',
+                  background: '#FFF', borderRadius: 6, cursor: 'pointer',
+                  fontWeight: 500,
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit" disabled={submitting}
+                style={{
+                  flex: 1, padding: '10px 14px', border: 'none',
+                  background: '#1565C0', color: 'white', borderRadius: 6,
+                  cursor: submitting ? 'default' : 'pointer', fontWeight: 600,
+                }}
+              >
+                {submitting ? 'Creating…' : 'Create task'}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

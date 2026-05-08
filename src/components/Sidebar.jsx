@@ -13,13 +13,13 @@ const NAV_ITEMS = [
   { id: 'properties', icon: Building2, label: 'Properties', section: 'manage' },
   { id: 'tenants', icon: Users, label: 'Tenants', section: 'manage' },
   { id: 'leasing', icon: FileText, label: 'Leasing', section: 'manage' },
+  { id: 'move-events', icon: Calendar, label: 'Move Events', section: 'manage', child: true },
   { id: 'accounting', icon: DollarSign, label: 'Accounting', section: 'manage' },
   { id: 'maintenance', icon: Wrench, label: 'Maintenance', section: 'manage' },
   { id: 'tasks', icon: CheckSquare, label: 'Tasks', section: 'manage' },
   { id: 'workflows', icon: Workflow, label: 'Workflows', section: 'manage' },
   { id: 'reports', icon: BarChart3, label: 'Reports', section: 'manage' },
   { id: 'property-directory', icon: Database, label: 'Property Directory', section: 'manage' },
-  { id: 'move-events', icon: Calendar, label: 'Move Events', section: 'manage' },
   { id: 'divider2', type: 'divider' },
   { id: 'settings', icon: Settings, label: 'Settings', section: 'bottom' },
   { id: 'help', icon: HelpCircle, label: 'Help', section: 'bottom' },
@@ -67,11 +67,12 @@ export default function Sidebar({ activeView, onNavigate, collapsed, onToggleCol
           return (
             <button
               key={item.id}
-              className={`sidebar-item ${isActive ? 'active' : ''} ${item.id === 'chat' ? 'chat-nav-item' : ''}`}
+              className={`sidebar-item ${isActive ? 'active' : ''} ${item.id === 'chat' ? 'chat-nav-item' : ''} ${item.child ? 'sidebar-child-item' : ''}`}
               onClick={() => onNavigate(item.id)}
               title={collapsed ? item.label : undefined}
+              style={item.child && !collapsed ? { paddingLeft: 36 } : undefined}
             >
-              <Icon size={20} />
+              <Icon size={item.child ? 16 : 20} />
               {!collapsed && <span>{item.label}</span>}
               {item.id === 'chat' && !collapsed && (
                 <span className="nav-badge">AI</span>

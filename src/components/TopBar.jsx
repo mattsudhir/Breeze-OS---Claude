@@ -1,8 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
-import {
-  Menu, MessageSquare, LayoutDashboard, Database, ChevronDown,
-} from 'lucide-react';
-import { useDataSource } from '../contexts/DataSourceContext.jsx';
+import { Menu, MessageSquare, LayoutDashboard } from 'lucide-react';
 import NotificationsBell from './NotificationsBell.jsx';
 
 const TITLES = {
@@ -28,23 +24,6 @@ export default function TopBar({
   showToggle,
   onNavigate,
 }) {
-  const { dataSource, setDataSource, sources } = useDataSource();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuWrapperRef = useRef(null);
-
-  // Close the dropdown when clicking outside it.
-  useEffect(() => {
-    if (!menuOpen) return undefined;
-    const onDocClick = (e) => {
-      if (!menuWrapperRef.current?.contains(e.target)) setMenuOpen(false);
-    };
-    window.addEventListener('mousedown', onDocClick);
-    return () => window.removeEventListener('mousedown', onDocClick);
-  }, [menuOpen]);
-
-  const activeLabel =
-    sources.find((s) => s.value === dataSource)?.label || dataSource;
-
   return (
     <header className="topbar">
       <div className="topbar-left">
@@ -78,88 +57,6 @@ export default function TopBar({
       </div>
 
       <div className="topbar-right">
-        <div
-          ref={menuWrapperRef}
-          className="data-source-toggle-wrapper"
-          style={{ position: 'relative' }}
-        >
-          <button
-            className="data-source-toggle"
-            onClick={() => setMenuOpen((v) => !v)}
-            title="Data source — applies to chat and every menu page"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '6px 10px',
-              border: '1px solid #D0D7DE',
-              background: '#FFF',
-              borderRadius: 6,
-              cursor: 'pointer',
-              fontSize: 13,
-            }}
-          >
-            <Database size={14} />
-            <span>{activeLabel}</span>
-            <ChevronDown
-              size={12}
-              style={{
-                transform: menuOpen ? 'rotate(180deg)' : 'rotate(0)',
-                transition: 'transform 0.2s',
-              }}
-            />
-          </button>
-          {menuOpen && (
-            <div
-              className="data-source-menu"
-              style={{
-                position: 'absolute',
-                top: 'calc(100% + 4px)',
-                right: 0,
-                minWidth: 240,
-                background: '#FFF',
-                border: '1px solid #D0D7DE',
-                borderRadius: 6,
-                boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                zIndex: 100,
-                overflow: 'hidden',
-              }}
-            >
-              {sources.map((option) => (
-                <button
-                  key={option.value}
-                  onClick={() => {
-                    setDataSource(option.value);
-                    setMenuOpen(false);
-                  }}
-                  style={{
-                    display: 'block',
-                    width: '100%',
-                    textAlign: 'left',
-                    padding: '10px 12px',
-                    border: 'none',
-                    background: option.value === dataSource ? '#F2F6FA' : 'transparent',
-                    cursor: 'pointer',
-                    borderBottom: '1px solid #EEF0F2',
-                  }}
-                >
-                  <div style={{ fontWeight: 600, fontSize: 13, color: '#1A1A1A' }}>
-                    {option.label}
-                    {option.value === dataSource && (
-                      <span style={{ marginLeft: 6, color: '#1565C0', fontSize: 11 }}>
-                        • active
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ fontSize: 11, color: '#6A737D', marginTop: 2 }}>
-                    {option.hint}
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
         <NotificationsBell onNavigate={onNavigate} />
       </div>
     </header>

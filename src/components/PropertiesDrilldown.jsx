@@ -138,11 +138,32 @@ export default function PropertiesDrilldown() {
     return () => { cancelled = true; };
   }, [dataSource]);
 
+  // Group units by both propertyId and propertyName. AppFolio
+  // sometimes surfaces only the name on a unit row (multi-unit
+  // configs), so a strict id match silently shows 0 units in the
+  // expand panel — that's what the "click row, page just refreshes"
+  // regression looked like. Mirrors the fallback in PropertiesPage.
+  const unitsByPropertyId = useMemo(() => {
+    return (units || []).reduce((acc, u) => {
+      if (!u.propertyId) return acc;
+      (acc[u.propertyId] ||= []).push(u);
+      return acc;
+    }, {});
+  }, [units]);
+  const unitsByPropertyName = useMemo(() => {
+    return (units || []).reduce((acc, u) => {
+      if (!u.propertyName) return acc;
+      (acc[u.propertyName] ||= []).push(u);
+      return acc;
+    }, {});
+  }, [units]);
+
   // Derived per-property rows with all the metrics.
   const rows = useMemo(() => {
     if (!properties) return [];
     return properties.map((p) => {
-      const propUnits = (units || []).filter((u) => u.propertyId === p.id);
+      const propUnits =
+        unitsByPropertyId[p.id] || unitsByPropertyName[p.name] || [];
       const totalUnits = propUnits.length;
       const occupied = propUnits.filter((u) => {
         const s = (u.status || '').toLowerCase();
@@ -174,7 +195,7 @@ export default function PropertiesDrilldown() {
         units: propUnits,
       };
     });
-  }, [properties, units, workOrders]);
+  }, [properties, units, workOrders, unitsByPropertyId, unitsByPropertyName]);
 
   // Apply sort.
   const sortedRows = useMemo(() => {

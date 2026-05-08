@@ -17,6 +17,10 @@ These were committed in code but require a manual action you haven't completed y
   - `0009_push_subscriptions` — required by web push. Without this, the bell's "Enable browser notifications" button will 500.
   - `0010_category_subscriptions` — required by Settings → Notifications. Without this the toggles in that tab will 500.
   - `0011_human_tasks` — required by the Tasks page + Charge Fee form's review-task spawn. Without this the Tasks page will 500 and Charge Fee will fail at the task-create step (the charge itself still posts to AppFolio).
+  - `0012_issue_gl_mappings` — required by Settings → Charge categories. Without this the tab will 500 when saving a mapping.
+- [ ] **Re-bootstrap the AppFolio mirror** (after the next deploy, one-time). The original bootstrap predates the work-order cap raise (1k → 10k), so `appfolio_cache` only has the first 1000 work orders — that's why Maintenance shows "1000 tickets, 6 open" while AppFolio actually shows ~335 open. Hit the same URL again to refetch the full set:
+
+      https://breeze-os-claude.vercel.app/api/admin/appfolio-sync?action=sync&secret=<TOKEN>
 - [ ] **Configure web push (VAPID keys, one-time).** Tap this URL — it generates a fresh keypair and shows it on screen with copy-paste-ready instructions:
 
       https://breeze-os-claude.vercel.app/api/admin/generate-vapid-keys?secret=<TOKEN>

@@ -755,6 +755,14 @@ function ChargeFeeModal({ tenant, dataSource, onClose, onSuccess }) {
   const [glLoading, setGlLoading] = useState(true);
   const [glError, setGlError] = useState(null);
 
+  // Issue category catalog + saved category→GL mappings from
+  // Settings → Charge categories. The category picker auto-fills
+  // the GL when chosen so the user doesn't scroll the full GL list
+  // on every charge.
+  const [issueCategories, setIssueCategories] = useState([]);
+  const [categoryMappings, setCategoryMappings] = useState({});
+  const [categoryId, setCategoryId] = useState('');
+
   const [amount, setAmount] = useState('');
   const [glAccount, setGlAccount] = useState('');
   const [description, setDescription] = useState('');
@@ -775,25 +783,29 @@ function ChargeFeeModal({ tenant, dataSource, onClose, onSuccess }) {
       return;
     }
     let cancelled = false;
-    fetch('/api/data', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        source: 'appfolio',
-        tool: 'list_gl_accounts',
-        input: { query: 'repairs', limit: 50 },
-      }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
+    Promise.all([
+      fetch('/api/data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source: 'appfolio',
+          tool: 'list_gl_accounts',
+          input: { limit: 200 },
+        }),
+      }).then((r) => r.json()),
+      fetch('/api/issue-gl-mappings').then((r) => r.json()),
+    ])
+      .then(([glData, mapData]) => {
         if (cancelled) return;
-        if (!data?.ok) {
-          setGlError(data?.error || 'Could not load GL accounts');
-          return;
+        if (!glData?.ok) {
+          setGlError(glData?.error || 'Could not load GL accounts');
+        } else {
+          setGlAccounts(glData.data?.accounts || []);
         }
-        const accts = data.data?.accounts || [];
-        setGlAccounts(accts);
-        if (accts.length > 0) setGlAccount(accts[0].name);
+        if (mapData?.ok) {
+          setIssueCategories(mapData.categories || []);
+          setCategoryMappings(mapData.mappings || {});
+        }
       })
       .catch((err) => {
         if (!cancelled) setGlError(err.message || 'Network error');
@@ -803,6 +815,25 @@ function ChargeFeeModal({ tenant, dataSource, onClose, onSuccess }) {
       });
     return () => { cancelled = true; };
   }, [dataSource]);
+
+  // Picking a category auto-fills the GL from the saved mapping.
+  // Falls back to a name-includes-hint search if no mapping exists
+  // yet, so the form is still useful before Settings is configured.
+  const handleCategoryChange = (id) => {
+    setCategoryId(id);
+    if (!id) return;
+    const saved = categoryMappings[id];
+    if (saved?.glAccountName) {
+      setGlAccount(saved.glAccountName);
+      return;
+    }
+    const cat = issueCategories.find((c) => c.id === id);
+    const hint = (cat?.glHint || '').toLowerCase();
+    if (hint) {
+      const match = glAccounts.find((g) => g.name.toLowerCase().includes(hint));
+      if (match) setGlAccount(match.name);
+    }
+  };
 
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
@@ -945,6 +976,37 @@ function ChargeFeeModal({ tenant, dataSource, onClose, onSuccess }) {
         </p>
         <form onSubmit={handleSubmit}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {issueCategories.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>Category</span>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {issueCategories.map((cat) => {
+                    const active = categoryId === cat.id;
+                    const mapped = !!categoryMappings[cat.id]?.glAccountName;
+                    return (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onClick={() => handleCategoryChange(active ? '' : cat.id)}
+                        title={mapped
+                          ? `GL: ${categoryMappings[cat.id].glAccountName}`
+                          : 'No saved GL — set one in Settings → Charge categories'}
+                        style={{
+                          padding: '6px 10px',
+                          border: `1px solid ${active ? '#1565C0' : '#D0D7DE'}`,
+                          background: active ? '#F0F7FF' : '#FFF',
+                          color: active ? '#1565C0' : '#1A1A1A',
+                          borderRadius: 4, cursor: 'pointer', fontSize: 12,
+                          fontWeight: active ? 600 : 500,
+                        }}
+                      >
+                        {cat.label.replace(' Issues', '')}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <span style={{ fontSize: 12, fontWeight: 600 }}>Amount</span>
               <input
