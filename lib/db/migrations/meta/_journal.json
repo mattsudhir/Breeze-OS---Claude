@@ -78,6 +78,13 @@
       "when": 1762732800000,
       "tag": "0010_category_subscriptions",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1762819200000,
+      "tag": "0011_human_tasks",
+      "breakpoints": true
     }
   ]
 }

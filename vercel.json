@@ -33,6 +33,7 @@
     { "source": "/api/admin/test-notification",       "destination": "/api/admin/test-notification" },
     { "source": "/api/push-subscriptions",            "destination": "/api/push-subscriptions" },
     { "source": "/api/category-subscriptions",        "destination": "/api/category-subscriptions" },
+    { "source": "/api/human-tasks",                   "destination": "/api/human-tasks" },
     { "source": "/api/cron/process-tasks",            "destination": "/api/cron/process-tasks" },
     { "source": "/api/cron/appfolio-reconcile",       "destination": "/api/cron/appfolio-reconcile" },
     { "source": "/api/(.*)",                          "destination": "/api/rentmanager" }
@@ -69,6 +70,7 @@
     "api/admin/test-notification.js":         { "maxDuration": 15 },
     "api/push-subscriptions.js":              { "maxDuration": 15 },
     "api/category-subscriptions.js":          { "maxDuration": 15 },
+    "api/human-tasks.js":                     { "maxDuration": 15 },
     "api/cron/process-tasks.js":              { "maxDuration": 60 },
     "api/cron/appfolio-reconcile.js":         { "maxDuration": 300 }
   },

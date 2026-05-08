@@ -69,6 +69,7 @@ function formatDate(d) {
 function TenantDetail({ tenantId, listTenant, onBack, onUpdated }) {
   const { dataSource, sources } = useDataSource();
   const sourceLabel = sources.find((s) => s.value === dataSource)?.label || dataSource;
+  const [showChargeFee, setShowChargeFee] = useState(false);
   const [tenant, setTenant] = useState(listTenant); // seed with list data
   const [loadingDetail, setLoadingDetail] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
@@ -168,11 +169,39 @@ function TenantDetail({ tenantId, listTenant, onBack, onUpdated }) {
           </div>
         </div>
         {!editing && (
-          <button className="btn-primary tenant-edit-btn" onClick={startEdit}>
-            <Edit3 size={14} /> Edit
-          </button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              className="btn-secondary"
+              onClick={() => setShowChargeFee(true)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '8px 14px', borderRadius: 6,
+                background: '#FFF3E0', color: '#E65100', border: '1px solid #FFE0B2',
+                fontWeight: 600, fontSize: 13, cursor: 'pointer',
+              }}
+            >
+              <DollarSign size={14} /> Charge Fee
+            </button>
+            <button className="btn-primary tenant-edit-btn" onClick={startEdit}>
+              <Edit3 size={14} /> Edit
+            </button>
+          </div>
         )}
       </div>
+      {showChargeFee && (
+        <ChargeFeeModal
+          tenant={tenant}
+          dataSource={dataSource}
+          onClose={() => setShowChargeFee(false)}
+          onSuccess={() => {
+            setShowChargeFee(false);
+            // Refetch tenant detail so new balance shows
+            getTenant(dataSource, tenant.id).then((fresh) => {
+              if (fresh) setTenant(fresh);
+            });
+          }}
+        />
+      )}
 
       {loadingDetail && (
         <div className="tenant-detail-loading">
@@ -710,6 +739,311 @@ export default function TenantsPage() {
           <p>No tenants match your search</p>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Charge Fee modal ───────────────────────────────────────────────
+//
+// Posts a charge to the tenant's occupancy in AppFolio (existing
+// charge_tenant tool). Spawns a Tasks-page review item with a
+// 7-day SLA so a second pair of eyes verifies amount + GL account.
+// Optional photo attachment uploads via Vercel Blob and rides
+// along with the charge as the AppFolio attachment.
+function ChargeFeeModal({ tenant, dataSource, onClose, onSuccess }) {
+  const [glAccounts, setGlAccounts] = useState([]);
+  const [glLoading, setGlLoading] = useState(true);
+  const [glError, setGlError] = useState(null);
+
+  const [amount, setAmount] = useState('');
+  const [glAccount, setGlAccount] = useState('');
+  const [description, setDescription] = useState('');
+  const [chargedOn, setChargedOn] = useState(
+    new Date().toISOString().slice(0, 10),
+  );
+  const [attachmentUrl, setAttachmentUrl] = useState(null);
+  const [attachmentName, setAttachmentName] = useState(null);
+  const [uploading, setUploading] = useState(false);
+
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (dataSource !== 'appfolio') {
+      setGlError('Charge Fee currently requires AppFolio as the active data source.');
+      setGlLoading(false);
+      return;
+    }
+    let cancelled = false;
+    fetch('/api/data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source: 'appfolio',
+        tool: 'list_gl_accounts',
+        input: { query: 'repairs', limit: 50 },
+      }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (!data?.ok) {
+          setGlError(data?.error || 'Could not load GL accounts');
+          return;
+        }
+        const accts = data.data?.accounts || [];
+        setGlAccounts(accts);
+        if (accts.length > 0) setGlAccount(accts[0].name);
+      })
+      .catch((err) => {
+        if (!cancelled) setGlError(err.message || 'Network error');
+      })
+      .finally(() => {
+        if (!cancelled) setGlLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [dataSource]);
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const { upload: blobUpload } = await import('@vercel/blob/client');
+      const blob = await blobUpload(file.name, file, {
+        access: 'public',
+        handleUploadUrl: '/api/upload',
+        contentType: file.type,
+      });
+      setAttachmentUrl(blob.url);
+      setAttachmentName(file.name);
+    } catch (err) {
+      setError(err.message || 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (submitting) return;
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      const numericAmount = Number(amount);
+      if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+        throw new Error('Amount must be a positive number');
+      }
+      if (!glAccount) throw new Error('Pick a GL account');
+      if (!description.trim()) throw new Error('Description is required');
+
+      // 1. Post the charge.
+      const chargeRes = await fetch('/api/data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source: dataSource,
+          tool: 'charge_tenant',
+          input: {
+            tenant_id: tenant.id,
+            amount_due: numericAmount.toFixed(2),
+            description: description.trim(),
+            gl_account: glAccount,
+            charged_on: chargedOn,
+            attachment_url: attachmentUrl || undefined,
+            attachment_filename: attachmentName || undefined,
+          },
+        }),
+      });
+      const chargeData = await chargeRes.json().catch(() => ({}));
+      if (!chargeRes.ok || !chargeData?.ok) {
+        throw new Error(chargeData?.error || `HTTP ${chargeRes.status}`);
+      }
+      const chargeResult = chargeData.data;
+      if (chargeResult?.error) {
+        throw new Error(chargeResult.error);
+      }
+
+      // 2. Spawn a review task — 7-day SLA per TASK_TYPES.
+      try {
+        await fetch('/api/human-tasks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            task_type: 'charge_fee_review',
+            title: `Verify $${numericAmount.toFixed(2)} fee charged to ${tenant.name}`,
+            description:
+              `${description.trim()} · GL: ${chargeResult?.gl_account_name || glAccount}` +
+              (attachmentName ? ` · attachment: ${attachmentName}` : ''),
+            related_entity_type: 'charge',
+            related_entity_id: chargeResult?.charge_id || null,
+            priority: 'normal',
+            source: 'manual',
+            payload: {
+              charge_id: chargeResult?.charge_id,
+              tenant_id: tenant.id,
+              tenant_name: tenant.name,
+              amount: numericAmount,
+              gl_account: chargeResult?.gl_account_name || glAccount,
+              gl_account_id: chargeResult?.gl_account_id,
+              charged_on: chargedOn,
+              attachment_url: attachmentUrl,
+            },
+          }),
+        });
+      } catch (taskErr) {
+        console.warn('[charge-fee] task creation failed:', taskErr);
+      }
+
+      onSuccess?.();
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+        zIndex: 300, display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+        padding: '40px 12px',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 'min(480px, 100%)', background: '#FFF', borderRadius: 8,
+          padding: 20, boxShadow: '0 12px 28px rgba(0,0,0,0.18)',
+          maxHeight: 'calc(100vh - 80px)', overflowY: 'auto',
+        }}
+      >
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          marginBottom: 12,
+        }}>
+          <h3 style={{ margin: 0 }}>Charge Fee</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              padding: 4, color: '#6A737D',
+            }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <p style={{ fontSize: 12, color: '#6A737D', margin: '0 0 16px' }}>
+          Posts a charge to <strong>{tenant.name}</strong>'s occupancy in AppFolio.
+          A review task is created automatically with a 7-day SLA.
+        </p>
+        <form onSubmit={handleSubmit}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>Amount</span>
+              <input
+                type="number" step="0.01" min="0.01" placeholder="250.00"
+                value={amount} onChange={(e) => setAmount(e.target.value)} required
+                style={{ padding: 8, border: '1px solid #D0D7DE', borderRadius: 4 }}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>GL account</span>
+              {glLoading ? (
+                <div style={{ fontSize: 12, color: '#6A737D' }}>Loading…</div>
+              ) : glError ? (
+                <input
+                  type="text" value={glAccount}
+                  onChange={(e) => setGlAccount(e.target.value)}
+                  placeholder="Repairs - Plumbing" required
+                  style={{ padding: 8, border: '1px solid #D0D7DE', borderRadius: 4 }}
+                />
+              ) : (
+                <select
+                  value={glAccount} onChange={(e) => setGlAccount(e.target.value)} required
+                  style={{ padding: 8, border: '1px solid #D0D7DE', borderRadius: 4 }}
+                >
+                  {glAccounts.length === 0 && <option value="">— No repair GL accounts found —</option>}
+                  {glAccounts.map((g) => (
+                    <option key={g.id} value={g.name}>{g.name}</option>
+                  ))}
+                </select>
+              )}
+              {glError && <span style={{ fontSize: 11, color: '#C62828' }}>{glError}</span>}
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>Description</span>
+              <input
+                type="text" placeholder="Damage to bathroom door — repaired April 15"
+                value={description} onChange={(e) => setDescription(e.target.value)} required
+                style={{ padding: 8, border: '1px solid #D0D7DE', borderRadius: 4 }}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>Charge date</span>
+              <input
+                type="date" value={chargedOn}
+                onChange={(e) => setChargedOn(e.target.value)} required
+                style={{ padding: 8, border: '1px solid #D0D7DE', borderRadius: 4 }}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>
+                Photo or PDF (optional)
+              </span>
+              <input
+                type="file" accept="image/*,application/pdf"
+                onChange={handleFile} disabled={uploading} style={{ fontSize: 12 }}
+              />
+              {uploading && (
+                <span style={{ fontSize: 11, color: '#6A737D', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <Loader2 size={11} className="spin" /> Uploading…
+                </span>
+              )}
+              {attachmentName && !uploading && (
+                <span style={{ fontSize: 11, color: '#2E7D32' }}>
+                  Attached: {attachmentName}
+                </span>
+              )}
+            </label>
+            {error && (
+              <div style={{
+                padding: '8px 12px', background: '#FFF3F3', border: '1px solid #F5C6CB',
+                borderRadius: 6, color: '#C62828', fontSize: 12,
+              }}>
+                {error}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+              <button
+                type="button" onClick={onClose} disabled={submitting}
+                style={{
+                  flex: 1, padding: '10px 14px', border: '1px solid #D0D7DE',
+                  background: '#FFF', borderRadius: 6, cursor: 'pointer', fontWeight: 500,
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit" disabled={submitting || uploading}
+                style={{
+                  flex: 1, padding: '10px 14px', border: 'none',
+                  background: '#1565C0', color: 'white', borderRadius: 6,
+                  cursor: submitting || uploading ? 'default' : 'pointer', fontWeight: 600,
+                }}
+              >
+                {submitting ? 'Posting…' : 'Post charge'}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

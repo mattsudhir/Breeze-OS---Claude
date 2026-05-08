@@ -16,6 +16,7 @@ These were committed in code but require a manual action you haven't completed y
   - `0008_appfolio_cache` — required by the AppFolio mirror. Without this, menu pages keep going through AppFolio's slow API on every request.
   - `0009_push_subscriptions` — required by web push. Without this, the bell's "Enable browser notifications" button will 500.
   - `0010_category_subscriptions` — required by Settings → Notifications. Without this the toggles in that tab will 500.
+  - `0011_human_tasks` — required by the Tasks page + Charge Fee form's review-task spawn. Without this the Tasks page will 500 and Charge Fee will fail at the task-create step (the charge itself still posts to AppFolio).
 - [ ] **Configure web push (VAPID keys, one-time).** Tap this URL — it generates a fresh keypair and shows it on screen with copy-paste-ready instructions:
 
       https://breeze-os-claude.vercel.app/api/admin/generate-vapid-keys?secret=<TOKEN>

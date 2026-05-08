@@ -47,12 +47,11 @@ const MIRROR_BACKED_TOOLS = {
 // plus a small set of write tools where the menu-page form itself
 // is the user's explicit confirmation (no AI interpretation needed).
 //
-// Why update_work_order is here but charge_tenant is not:
-// charge_tenant creates real money owed and needs the chat agent's
-// "confirm tenant / amount / GL account / date" recap before
-// posting. update_work_order is a routine status-change form
-// click — the user explicitly chose the new status / priority in
-// the edit drawer, there's nothing for the agent to interpret.
+// charge_tenant + update_work_order are write tools but reachable
+// here because the menu form is the user's explicit confirmation
+// (dropdown choices + Submit click). When the AI initiates a
+// charge from chat, it still goes through runAgent's tool path
+// where the system prompt mandates a recap-before-action.
 const ALLOWED_TOOLS = new Set([
   'list_properties',
   'list_tenants',
@@ -66,6 +65,7 @@ const ALLOWED_TOOLS = new Set([
   'count_work_orders',
   'list_gl_accounts',
   'update_work_order',
+  'charge_tenant',
 ]);
 
 export default async function handler(req, res) {
