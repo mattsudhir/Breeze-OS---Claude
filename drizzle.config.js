@@ -6,7 +6,7 @@
 import 'dotenv/config';
 
 export default {
-  schema: './lib/db/schema.js',
+  schema: './lib/db/schema/index.js',
   out: './lib/db/migrations',
   dialect: 'postgresql',
   dbCredentials: {
