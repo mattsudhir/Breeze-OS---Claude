@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Sidebar from './components/Sidebar';
 import TopBar from './components/TopBar';
 import ChatHome from './components/ChatHome';
@@ -16,6 +16,7 @@ import HelpPage from './components/HelpPage';
 import PropertiesDrilldown from './components/PropertiesDrilldown';
 import PropertyDirectoryPage from './components/PropertyDirectoryPage';
 import MoveEventsPage from './components/MoveEventsPage';
+import { initPush } from './lib/push';
 import './App.css';
 
 function App() {
@@ -43,6 +44,27 @@ function App() {
       setShowClassic(false);
     }
   };
+
+  // On native shells, register for push notifications once at app
+  // start. initPush() is a no-op on the web, so the same hook is safe
+  // everywhere. The `data.view` field on an inbound notification is
+  // an opt-in deep link: server-side code that wants the tap to land
+  // a user on, say, the Move Events page can send `{ view: 'move-events' }`
+  // in the FCM data payload.
+  useEffect(() => {
+    initPush({
+      onReceive: (notification) => {
+        // Foreground push arrived while the app is open. For now we
+        // just log; once we have an in-app toast component, surface
+        // it here.
+        console.log('[push] received', notification);
+      },
+      onAction: (action) => {
+        const view = action?.notification?.data?.view;
+        if (view) handleNavigate(view);
+      },
+    });
+  }, []);
 
   const handleToggleClassic = (classic) => {
     setShowClassic(classic);
