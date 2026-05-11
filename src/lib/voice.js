@@ -1,9 +1,19 @@
-// Voice utilities — thin wrapper around the Web Speech API.
+// Voice utilities — thin wrapper around the platform speech APIs.
 //
-// This module is the abstraction layer for speech recognition (listen) and
-// speech synthesis (speak). Swapping to a server-side provider (Whisper,
-// ElevenLabs) later should only require changing this file, not the UI code
-// that imports it.
+// This module is the abstraction layer for speech recognition (listen)
+// and speech synthesis (speak). UI code never picks a backend; this
+// file routes to the best available implementation for the current
+// runtime.
+//
+// Routing priority for listen():
+//   1. Capacitor native plugin (on-device STT, free, fast)         iOS / Android
+//   2. Web SpeechRecognition (Chrome / Android Chrome)             browser
+//   3. MediaRecorder → /api/stt (ElevenLabs Scribe)                Edge / Firefox / Safari fallback
+//
+// Routing priority for speak():
+//   1. ElevenLabs via /api/tts (highest quality)
+//   2. Capacitor native TTS (on-device, offline)                   iOS / Android
+//   3. Web Speech API (robotic but free)                           browser
 
 let currentRecognition = null;
 let currentUtterance = null;
@@ -11,7 +21,22 @@ let currentAudio = null;
 let currentAudioUrl = null;
 let currentMediaRecorder = null;
 let currentMediaStream = null;
+let currentNativeListenStop = null; // teardown for the Capacitor speech-recognition plugin
 let elevenLabsDisabled = false; // set to true after a quota/auth failure so we stop retrying
+
+// Detect whether we're running inside a Capacitor native shell so we
+// can prefer on-device STT / TTS. The check is intentionally cheap —
+// no static import of @capacitor/core so the web build doesn't fail
+// when the package isn't installed yet.
+function isCapacitorNative() {
+  if (typeof window === 'undefined') return false;
+  const cap = window.Capacitor;
+  return !!(
+    cap &&
+    typeof cap.isNativePlatform === 'function' &&
+    cap.isNativePlatform()
+  );
+}
 
 // ── Feature detection ────────────────────────────────────────────
 
@@ -368,10 +393,15 @@ export function startListeningServerSide({ onInterim, onFinal, onError } = {}) {
 // Returns a stop function that halts listening immediately.
 //
 // Routing:
-//   - Edge (Chromium-Edge) → server-side (native SpeechRecognition is broken)
+//   - Capacitor native shell → on-device STT via plugin
+//   - Edge (Chromium-Edge)   → server-side (native SpeechRecognition is broken)
 //   - No SpeechRecognition   → server-side (Firefox/Safari)
-//   - Otherwise             → browser-native (Chrome/Android Chrome)
+//   - Otherwise              → browser-native (Chrome/Android Chrome)
 export function startListening(handlers = {}) {
+  if (isCapacitorNative()) {
+    vlog('routing to Capacitor native listener');
+    return startListeningCapacitor(handlers);
+  }
   const forceServerSide = isEdgeBrowser() || !SpeechRecognition;
   if (forceServerSide) {
     vlog('routing to server-side listener', {
@@ -380,10 +410,115 @@ export function startListening(handlers = {}) {
     });
     return startListeningServerSide(handlers);
   }
-  return startListeningNative(handlers);
+  return startListeningWebNative(handlers);
 }
 
-function startListeningNative({ onInterim, onFinal, onError } = {}) {
+// Capacitor speech-recognition plugin — on-device STT on iOS / Android.
+// Returns a synchronous stop handle; the actual plugin work happens
+// asynchronously, so we let the UI cancel even while we're still
+// requesting mic permission.
+function startListeningCapacitor({ onInterim, onFinal, onError } = {}) {
+  let stopped = false;
+  let cleanupListeners = null;
+
+  (async () => {
+    let SpeechRecognitionPlugin;
+    try {
+      ({ SpeechRecognition: SpeechRecognitionPlugin } = await import(
+        '@capacitor-community/speech-recognition'
+      ));
+    } catch (err) {
+      // Plugin not installed yet — fall back to web flow so we never
+      // leave the user with a dead button on a half-built native shell.
+      vlog('native plugin missing, falling back to web listener:', err?.message);
+      const fallbackStop = SpeechRecognition
+        ? startListeningWebNative({ onInterim, onFinal, onError })
+        : startListeningServerSide({ onInterim, onFinal, onError });
+      currentNativeListenStop = () => fallbackStop?.();
+      if (stopped) currentNativeListenStop();
+      return;
+    }
+
+    try {
+      const avail = await SpeechRecognitionPlugin.available();
+      if (!avail?.available) {
+        onError?.(new Error('On-device speech recognition is not available on this device.'));
+        return;
+      }
+      const perm = await SpeechRecognitionPlugin.checkPermissions();
+      if (perm?.speechRecognition !== 'granted') {
+        const req = await SpeechRecognitionPlugin.requestPermissions();
+        if (req?.speechRecognition !== 'granted') {
+          onError?.(new Error('Microphone or speech-recognition permission was denied.'));
+          return;
+        }
+      }
+
+      onInterim?.('(listening...)');
+
+      const partialHandle = await SpeechRecognitionPlugin.addListener(
+        'partialResults',
+        (data) => {
+          const text = Array.isArray(data?.matches) ? data.matches[0] : '';
+          if (text) onInterim?.(text);
+        },
+      );
+      cleanupListeners = () => {
+        try {
+          partialHandle?.remove?.();
+        } catch {
+          // ignore
+        }
+      };
+
+      // start() resolves with the final transcript once the engine
+      // decides the user is done speaking, or when we manually call stop().
+      const result = await SpeechRecognitionPlugin.start({
+        language: 'en-US',
+        maxResults: 1,
+        prompt: '',
+        partialResults: true,
+        popup: false,
+      });
+
+      cleanupListeners?.();
+      cleanupListeners = null;
+
+      const text = (Array.isArray(result?.matches) ? result.matches[0] : '')?.trim() || '';
+      if (!text) {
+        onError?.(new Error('No speech was captured. Try again.'));
+        return;
+      }
+      onFinal?.(text);
+    } catch (err) {
+      cleanupListeners?.();
+      cleanupListeners = null;
+      onError?.(new Error(err?.message || 'Native speech recognition failed'));
+    } finally {
+      currentNativeListenStop = null;
+    }
+  })();
+
+  currentNativeListenStop = async () => {
+    stopped = true;
+    try {
+      const { SpeechRecognition: plugin } = await import(
+        '@capacitor-community/speech-recognition'
+      );
+      await plugin.stop();
+    } catch {
+      // plugin not installed or already stopped — ignore
+    }
+    cleanupListeners?.();
+    cleanupListeners = null;
+  };
+
+  return () => {
+    currentNativeListenStop?.();
+  };
+}
+
+function startListeningWebNative({ onInterim, onFinal, onError } = {}) {
   if (!SpeechRecognition) {
     onError?.(new Error('Speech recognition not supported in this browser'));
     return () => {};
@@ -521,6 +656,14 @@ function startListeningNative({ onInterim, onFinal, onError } = {}) {
 }
 
 export function stopListening() {
+  if (currentNativeListenStop) {
+    try {
+      currentNativeListenStop();
+    } catch {
+      // ignore
+    }
+    currentNativeListenStop = null;
+  }
   if (currentRecognition) {
     try {
       currentRecognition.stop();
@@ -655,6 +798,23 @@ async function speakWithElevenLabs(text, onEnd) {
   }
 }
 
+async function speakWithCapacitor(text, onEnd) {
+  const { TextToSpeech } = await import('@capacitor-community/text-to-speech');
+  // Synchronous-ish: returns when playback finishes on iOS, returns
+  // immediately on Android after queueing. We treat both as "done" once
+  // the promise resolves — close enough for UI purposes and avoids a
+  // platform branch.
+  await TextToSpeech.speak({
+    text,
+    lang: 'en-US',
+    rate: 1.0,
+    pitch: 1.0,
+    volume: 1.0,
+    category: 'ambient',
+  });
+  onEnd?.();
+}
+
 export async function speak(text, { onEnd } = {}) {
   if (!text) {
     onEnd?.();
@@ -664,21 +824,45 @@ export async function speak(text, { onEnd } = {}) {
   // Cancel anything currently speaking
   cancelSpeech();
 
-  // Try ElevenLabs first unless we've already learned it's unavailable
+  // 1. ElevenLabs (cloud, highest quality) — skip if we've already
+  //    confirmed it's unavailable this session.
   if (!elevenLabsDisabled) {
     try {
       await speakWithElevenLabs(text, onEnd);
       return;
     } catch (err) {
-      console.warn('ElevenLabs TTS failed, falling back to Web Speech:', err.message);
-      // fall through to Web Speech
+      console.warn('ElevenLabs TTS failed, falling back:', err.message);
+      // fall through
     }
   }
 
+  // 2. Native TTS (iOS AVSpeechSynthesizer / Android TextToSpeech).
+  //    Only attempted inside a Capacitor shell. Web users skip straight
+  //    to the Web Speech fallback.
+  if (isCapacitorNative()) {
+    try {
+      await speakWithCapacitor(text, onEnd);
+      return;
+    } catch (err) {
+      console.warn('Native TTS failed, falling back to Web Speech:', err?.message);
+      // fall through
+    }
+  }
+
+  // 3. Web Speech API — works everywhere browsers run, robotic-sounding
+  //    but no quota or network dependency.
   speakWithWebSpeech(text, onEnd);
 }
 
 export function cancelSpeech() {
+  // Stop any in-flight Capacitor native TTS playback. Dynamic import
+  // so we don't blow up on the web build before the plugin is
+  // installed.
+  if (isCapacitorNative()) {
+    import('@capacitor-community/text-to-speech')
+      .then(({ TextToSpeech }) => TextToSpeech.stop())
+      .catch(() => {});
+  }
   // Cancel ElevenLabs audio playback
   if (currentAudio) {
     try {

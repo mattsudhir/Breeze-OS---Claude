@@ -27,10 +27,16 @@ export default defineConfig([
     },
   },
   {
-    // Server-side code (Vercel serverless functions and shared libs) runs
-    // in Node, not the browser. Declare node globals for these paths so
-    // `process`, `Buffer`, etc. are recognised.
-    files: ['api/**/*.js', 'lib/**/*.js'],
+    // Server-side code (Vercel serverless functions, shared libs, the
+    // Docker entrypoint, and the drizzle config) runs in Node, not the
+    // browser. Declare node globals for these paths so `process`,
+    // `Buffer`, etc. are recognised.
+    files: [
+      'api/**/*.js',
+      'lib/**/*.js',
+      'server.js',
+      'drizzle.config.js',
+    ],
     languageOptions: {
       globals: { ...globals.node },
     },

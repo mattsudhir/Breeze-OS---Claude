@@ -1,0 +1,42 @@
+# Anything we don't want shipped into the build context — keeps the
+# image small and avoids leaking host-only state into prod.
+
+# VCS + IDE
+.git
+.gitignore
+.github
+.vscode
+.idea
+.DS_Store
+
+# Local node_modules (rebuilt inside the image)
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build artefacts (rebuilt inside the image)
+dist
+dist-ssr
+
+# Mobile shells — built separately via Capacitor, not needed in the
+# server image
+ios
+android
+
+# Env files: NEVER copy real secrets into the image. Configure secrets
+# via fly secrets / docker compose env / orchestrator instead.
+.env
+.env.*
+!.env.example
+
+# Local test / scratch dirs
+coverage
+.cache
+.tmp
+*.local
+
+# Editor swap files
+*.swp
+*.swo

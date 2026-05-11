@@ -1,0 +1,67 @@
+# Fly.io app configuration. Drives `fly deploy` and `fly launch`.
+#
+# Quickstart (one-time):
+#   1. brew install flyctl   (or curl -L https://fly.io/install.sh | sh)
+#   2. fly auth login
+#   3. fly launch --no-deploy --copy-config   (creates the app, accepts
+#      this file as-is; pick a region near your users — `iad`, `sjc`,
+#      `ord` are common US options)
+#   4. fly postgres create   (then `fly postgres attach` to wire
+#      DATABASE_URL into this app automatically)
+#   5. fly secrets set ANTHROPIC_API_KEY=... ELEVENLABS_API_KEY=... \
+#                       FIREBASE_SERVICE_ACCOUNT_JSON='...'  (etc.)
+#   6. fly deploy
+#
+# Subsequent deploys: just `fly deploy`. Fly builds the Dockerfile in
+# this repo, pushes the image, rolls a new machine, and runs a /api/health
+# probe before swapping traffic.
+#
+# When you have real users, scale with:
+#   fly scale count 2        (two machines for redundancy)
+#   fly scale memory 1024    (1 GB RAM — bump if you hit OOM)
+
+app = "breeze-os"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  # The runtime stage of the Dockerfile already sets NODE_ENV / PORT /
+  # TRUST_PROXY. We restate them here so they're visible in `fly config
+  # show` without spelunking inside the image.
+  NODE_ENV = "production"
+  PORT = "3000"
+  TRUST_PROXY = "true"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  # Suspend (free, ~1s wake) instead of stop (slower) so dogfood
+  # traffic feels instant. Bump min_machines_running to 1 once you have
+  # paying users and can't accept a cold-start sniffle.
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+  # Fly hits this every few seconds and won't route traffic to a
+  # machine whose health probe is failing. The endpoint is in
+  # server.js and returns 200 without touching Postgres so it stays
+  # green during DB hiccups.
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "15s"
+    method = "GET"
+    path = "/api/health"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512

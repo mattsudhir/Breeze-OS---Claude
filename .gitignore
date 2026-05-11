@@ -22,3 +22,21 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Env / secrets — NEVER commit
+.env
+.env.local
+.env.*.local
+
+# Capacitor native shells. Generated locally with `npx cap add`. The
+# tracked Capacitor surface is capacitor.config.json + the JS plugin
+# bindings in src/. Native projects are too large and tooling-coupled
+# to commit until there's a concrete reason.
+ios/
+android/
+
+# Firebase service account files. Use FIREBASE_SERVICE_ACCOUNT_JSON
+# secret instead of checking these in.
+*firebase-adminsdk*.json
+google-services.json
+GoogleService-Info.plist

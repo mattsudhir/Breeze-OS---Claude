@@ -1,0 +1,77 @@
+# Local development stack. Brings up the Breeze OS app container and a
+# Postgres instance it talks to. Designed for `docker compose up` to be
+# all you need to dogfood the full app on a laptop.
+#
+# Usage:
+#   1. cp .env.example .env  (and fill in real keys)
+#   2. docker compose up --build
+#   3. Open http://localhost:3000
+#
+# Production deploys (Fly.io / Render / ECS) DO NOT use this file —
+# they pull the same image from registry and inject env vars through
+# their own secret store. See fly.toml.
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: breeze-os:local
+    container_name: breeze-os-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # Inside compose, the app reaches Postgres at the `db` service
+      # name. Override with a real connection string in production.
+      DATABASE_URL: postgres://breeze:breeze_dev@db:5432/breeze
+      # Pull all the other API keys from .env (loaded by compose
+      # automatically). Anything left blank will surface as a clear
+      # error from the handler that needs it.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      ELEVENLABS_VOICE_ID: ${ELEVENLABS_VOICE_ID:-}
+      APPFOLIO_CLIENT_ID: ${APPFOLIO_CLIENT_ID:-}
+      APPFOLIO_CLIENT_SECRET: ${APPFOLIO_CLIENT_SECRET:-}
+      APPFOLIO_DEVELOPER_ID: ${APPFOLIO_DEVELOPER_ID:-}
+      RM_BASE_URL: ${RM_BASE_URL:-}
+      RM_USERNAME: ${RM_USERNAME:-}
+      RM_PASSWORD: ${RM_PASSWORD:-}
+      ZOHO_MCP_SERVER_URL: ${ZOHO_MCP_SERVER_URL:-}
+      ZOHO_CLIQ_WEBHOOK_URL: ${ZOHO_CLIQ_WEBHOOK_URL:-}
+      VAPI_API_KEY: ${VAPI_API_KEY:-}
+      VAPI_PHONE_NUMBER_ID: ${VAPI_PHONE_NUMBER_ID:-}
+      BREEZE_ADMIN_TOKEN: ${BREEZE_ADMIN_TOKEN:-}
+      # Firebase Cloud Messaging — used by /api/push/send.
+      # Either point at a credentials JSON mounted into the container,
+      # or paste the JSON contents into FIREBASE_SERVICE_ACCOUNT_JSON.
+      FIREBASE_SERVICE_ACCOUNT_JSON: ${FIREBASE_SERVICE_ACCOUNT_JSON:-}
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    container_name: breeze-os-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: breeze
+      POSTGRES_PASSWORD: breeze_dev
+      POSTGRES_DB: breeze
+    ports:
+      # Exposed on the host so you can connect with psql / Drizzle
+      # Studio while the app is running.
+      - "5432:5432"
+    volumes:
+      - breeze-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U breeze -d breeze"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  breeze-db-data:

@@ -8,6 +8,12 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "start": "node server.js",
+    "docker:build": "docker build -t breeze-os:local .",
+    "docker:run": "docker compose up --build",
+    "cap:sync": "npm run build && cap sync",
+    "cap:open:ios": "cap open ios",
+    "cap:open:android": "cap open android",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
@@ -15,7 +21,15 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.88.0",
+    "@capacitor-community/speech-recognition": "^6.0.0",
+    "@capacitor-community/text-to-speech": "^5.0.1",
+    "@capacitor/app": "^6.0.2",
+    "@capacitor/core": "^6.2.0",
+    "@capacitor/device": "^6.0.2",
+    "@capacitor/push-notifications": "^6.0.4",
     "drizzle-orm": "^0.36.4",
+    "express": "^4.21.2",
+    "firebase-admin": "^13.0.2",
     "lucide-react": "^1.8.0",
     "postgres": "^3.4.5",
     "react": "^19.2.4",
@@ -23,6 +37,9 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/cli": "^6.2.0",
+    "@capacitor/ios": "^6.2.0",
     "@eslint/js": "^9.39.4",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -36,4 +53,3 @@
     "vite": "^8.0.4"
   }
 }
-
