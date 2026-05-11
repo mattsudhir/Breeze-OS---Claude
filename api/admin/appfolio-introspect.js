@@ -81,6 +81,30 @@ export default withAdminHandler(async (req, res) => {
     date_range: range,
     appfolio_subdomain:
       process.env.APPFOLIO_DATABASE_SUBDOMAIN || '(default: breezepg)',
+    deployment_diagnostics: {
+      vercel_env: process.env.VERCEL_ENV || null,
+      vercel_git_commit_sha: process.env.VERCEL_GIT_COMMIT_SHA
+        ? process.env.VERCEL_GIT_COMMIT_SHA.slice(0, 12)
+        : null,
+      vercel_url: process.env.VERCEL_URL || null,
+      // Boolean presence only — values intentionally omitted. Confirms
+      // whether the runtime sees each env var without exposing secrets.
+      appfolio_env_vars_present: {
+        APPFOLIO_CLIENT_ID: Boolean(process.env.APPFOLIO_CLIENT_ID),
+        APPFOLIO_CLIENT_SECRET: Boolean(process.env.APPFOLIO_CLIENT_SECRET),
+        APPFOLIO_DEVELOPER_ID: Boolean(process.env.APPFOLIO_DEVELOPER_ID),
+        APPFOLIO_DATABASE_SUBDOMAIN: Boolean(
+          process.env.APPFOLIO_DATABASE_SUBDOMAIN,
+        ),
+        APPFOLIO_REPORTS_CLIENT_ID: Boolean(
+          process.env.APPFOLIO_REPORTS_CLIENT_ID,
+        ),
+        APPFOLIO_REPORTS_CLIENT_SECRET: Boolean(
+          process.env.APPFOLIO_REPORTS_CLIENT_SECRET,
+        ),
+        BREEZE_ADMIN_TOKEN: Boolean(process.env.BREEZE_ADMIN_TOKEN),
+      },
+    },
     database_api_v0_control: sampleSection(v0Properties, 3, 'properties'),
     chart_of_accounts: sampleSection(coa, 500, 'accounts'),
     general_ledger: sampleSection(gl, 50, 'entries'),
