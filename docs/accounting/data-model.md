@@ -296,20 +296,22 @@ Indexes: `(organization_id, status, due_date)`,
 ### `receipts` and `receipt_allocations`
 
 A receipt is "money in." Allocations link a single receipt to one or
-more `posted_charges` it pays down.
+more `posted_charges` it pays down. A receipt does NOT directly hit a
+bank account — it sits in **Undeposited Funds** until it's bundled into
+a `deposit` and the deposit clears.
 
 `receipts`:
 
 | Column | Type | Notes |
 |---|---|---|
-| `tenant_id` | `uuid NULL FK tenants` | Most receipts have a tenant. Some don't (owner contribution, refund return). |
+| `tenant_id` | `uuid NULL FK tenants` | Most receipts have a tenant. Some don't (owner contribution, refund return, Section 8 omnibus). |
 | `lease_id` | `uuid NULL FK leases` | The lease this receipt is associated with (if any). |
-| `received_date` | `date NOT NULL` | |
+| `received_date` | `date NOT NULL` | When we accepted the payment, not when it deposits. |
 | `amount_cents` | `bigint NOT NULL` | |
-| `payment_method` | `payment_method` enum | `ach` \| `check` \| `credit_card` \| `cash` \| `money_order` \| `paynearme` \| `other` |
-| `external_reference` | `text` | Check number, PayNearMe receipt id, Plaid transaction id, etc. |
-| `bank_account_id` | `uuid NULL FK bank_accounts` | Which bank account this deposited into. Null until reconciled. |
-| `journal_entry_id` | `uuid NOT NULL FK journal_entries` | The JE that recorded this receipt. |
+| `payment_method` | `payment_method` enum | `ach` \| `check` \| `credit_card` \| `cash` \| `money_order` \| `paynearme` \| `section_8` \| `other` |
+| `external_reference` | `text` | Check number, PayNearMe receipt id, Plaid txn id, Section 8 voucher number, etc. |
+| `deposit_id` | `uuid NULL FK deposits` | Set when this receipt is included in a deposit. Null = still in undeposited funds. |
+| `journal_entry_id` | `uuid NOT NULL FK journal_entries` | The JE that recorded this receipt: Dr Undeposited Funds, Cr AR (or Cr Tenant Credit if unallocated). |
 | `status` | `receipt_status` enum | `pending` \| `cleared` \| `nsf_returned` \| `voided` |
 | `notes` | `text` | |
 
@@ -330,10 +332,69 @@ Unallocated receipts sit in a `prepaid_rent` or `tenant_credit` GL
 account until allocated. The journal entry handles that automatically.
 
 Indexes on receipts: `(organization_id, received_date)`,
-`(tenant_id)`, `(lease_id)`, `(bank_account_id)`,
+`(tenant_id)`, `(lease_id)`, `(deposit_id)`,
 `(external_reference)`.
 
 Indexes on receipt_allocations: `(receipt_id)`, `(posted_charge_id)`.
+
+### `deposits` and `deposit_items`
+
+A deposit bundles one or more receipts that physically (or via ACH
+batch) land in a bank account together. This is what makes check-
+scanner batches, Section 8 omnibus payments, and ACH settlement
+batches work cleanly.
+
+The flow:
+
+1. Receipt arrives → JE: `Dr Undeposited Funds, Cr AR (or Tenant Credit)`.
+2. Receipt sits in undeposited funds (its `deposit_id` is null).
+3. Staff scans a stack of checks (or an omnibus ACH lands) →
+   `deposits` row created, several `deposit_items` rows link receipts
+   to the deposit, `receipts.deposit_id` set.
+4. Deposit posts → JE: `Dr Cash (bank GL), Cr Undeposited Funds`.
+5. A `match_candidate` proposes pairing the deposit's JE with the
+   `bank_transaction` Plaid sees when the money actually lands.
+
+`deposits`:
+
+| Column | Type | Notes |
+|---|---|---|
+| `bank_account_id` | `uuid NOT NULL FK bank_accounts` | Where the deposit lands. |
+| `deposit_date` | `date NOT NULL` | The date the deposit hits the bank (or is expected to). |
+| `amount_cents` | `bigint NOT NULL` | Must equal `SUM(deposit_items.amount_cents)`. Trigger-enforced. |
+| `deposit_type` | `deposit_type` enum | `check_batch` \| `ach_batch` \| `cash` \| `wire` \| `section_8_omnibus` \| `other`. Free-form notes in `notes` if needed. |
+| `external_reference` | `text` | Deposit slip number, ACH batch id, Section 8 batch id. |
+| `journal_entry_id` | `uuid NOT NULL FK journal_entries` | The JE that posted the deposit. |
+| `status` | `deposit_status` enum | `pending` \| `cleared` \| `nsf_returned` \| `voided`. `nsf_returned` cascades — receipts in the deposit revert to undeposited and their allocations reverse. |
+| `notes` | `text` | |
+
+`deposit_items`:
+
+| Column | Type | Notes |
+|---|---|---|
+| `deposit_id` | `uuid NOT NULL FK deposits` | |
+| `receipt_id` | `uuid NOT NULL FK receipts UNIQUE` | A receipt belongs to at most one deposit. UNIQUE enforces this. |
+| `amount_cents` | `bigint NOT NULL` | Should match `receipts.amount_cents` in v1. Stored separately to allow partial-deposit edge cases later (e.g. a single oversize check split across two deposits — rare but legal). |
+
+Indexes on deposits: `(organization_id, deposit_date)`,
+`(bank_account_id, status)`, `(external_reference)`.
+
+Indexes on deposit_items: `(deposit_id)`, `UNIQUE(receipt_id)`.
+
+Constraints:
+- Trigger: `deposits.amount_cents = SUM(deposit_items.amount_cents)`.
+- Trigger: every receipt in a deposit must have
+  `receipts.organization_id = deposits.organization_id` (tenancy
+  isolation).
+- Trigger: a receipt cannot be added to a deposit if its `status` is
+  `voided` or `nsf_returned`.
+
+Why this matters for **Section 8 specifically**: HUD/PHA sends one
+ACH per month covering many tenants. That ACH is *one* deposit; the
+allocations within it are *many* receipts (one per Section 8 tenant
+voucher). Modeling this collapsed (AppFolio-style) makes the per-unit
+attribution dance painful. Modeling it as deposit-of-many-receipts
+keeps the unit ledger clean.
 
 ## Section 3 — Banking & Reconciliation (Stage 3)
 
@@ -444,11 +505,17 @@ reporting.md` — not yet written).
   `scheduled_charges`.
 - **`posted_bills`** — Stage 5. Becomes a JE: Dr Expense, Cr AP.
 - **`bill_payments`** — Stage 5. Pays down a bill, JE: Dr AP, Cr Cash.
-- **`payment_provider_instances`** — Stage 4. Configured rail providers
-  (PayNearMe, Zego, Stripe). Stubbed; abstraction lives in
+- **`payment_provider_instances`** — Stage 4. Configured rail
+  providers. Inbound (PayNearMe, Zego, Stripe), outbound (Modern
+  Treasury, Plaid Transfer), and **Bill.com** for the
+  charge-card / vendor-pay rail Breeze currently uses. Bill.com is
+  dual-purpose — outbound AP and a transaction-feed source whose
+  card/ACH activity needs to flow into `bank_transactions` (or a
+  sibling `card_transactions` table, decision pending) for
+  reconciliation. Stubbed; abstraction lives in
   `lib/backends/payments/`.
 - **`ach_provider_instances`** — Stage 4. Modern Treasury / Plaid
-  Transfer config.
+  Transfer config (and Bill.com if used for outbound ACH).
 - **`owner_statements`** — Stage 7. Generated per-owner monthly
   summary, snapshotted at generation time so historical statements
   don't change.
@@ -469,22 +536,47 @@ reporting.md` — not yet written).
 - **Partitioning.** Not needed until `journal_lines` exceeds ~50M rows.
   Index strategy above is the bottleneck; partitioning is the relief.
 
-## Open questions before schema implementation
+## Settled design decisions
 
-1. **Chart-of-accounts template.** Do we ship a default chart for new
-   orgs (NAA-style, Yardi-style, etc.) or require setup? Recommend:
-   ship a default, allow override.
-2. **Receipt → bank deposit lag.** AppFolio assumes receipts and
-   deposits are the same event. We're separating them (a receipt can
-   sit in undeposited funds until a deposit groups several receipts and
-   hits the bank). Confirm: do you want undeposited-funds modeling now,
-   or treat each receipt as its own deposit?
-3. **Period close cadence.** Monthly is standard. Quarterly is too lax
-   for trust accounting (later). Confirm monthly.
-4. **Backdated entries.** Allowed into open periods only? Allowed into
-   soft-closed periods with override? Disallowed entirely once posted?
-   Standard answer: allowed into open, override into soft-closed,
-   forbidden in hard-closed. Confirm.
+1. **Chart of accounts** — flexible per org. We will support both
+   (a) shipping a default residential-PM template for new orgs, and
+   (b) seeding from an org's existing AppFolio chart of accounts at
+   migration time. The default template is hard-coded; the seeded
+   version is a one-time import. **Constraint: the seeding/templating
+   process MUST NOT auto-link bank-account-shaped GL accounts to real
+   bank accounts.** Bank account linkage is always explicit, via the
+   `bank_accounts.gl_account_id` UNIQUE FK. No magic.
+2. **Undeposited funds** — modeled as a first-class concept. The
+   `deposits` + `deposit_items` tables above implement this. AppFolio's
+   collapsed model is explicitly rejected because it cannot represent
+   check-scanner batches, ACH settlement batches, or Section 8 omnibus
+   payments without losing per-receipt granularity.
+3. **Period close cadence** — flexible per org. Schema does not
+   assume monthly; `accounting_periods.period_start/end` can be any
+   range. Default policy: monthly close, but the AI-driven near-
+   real-time reconciliation goal lets us tighten to daily or
+   3-day-trailing for orgs that want it. Pending bank transactions
+   are the dominant slow-point and will gate aspirational cadences.
+   This is a v1 goal, not a v1 deliverable.
+4. **Backdated entries** — allowed into `open` periods, allowed into
+   `soft_closed` periods only via an explicit user override that
+   writes an `audit_events` row, forbidden in `hard_closed` periods.
+   Reversal-and-repost is always allowed in any open period regardless
+   of the original entry's period (this is how corrections work in
+   accounting; you don't backdate, you reverse forward).
 
-These can be answered when we start schema implementation — they don't
-block the data-model approval.
+## Aspirational design goals (track, don't build yet)
+
+- **Near-real-time reconciliation as a fraud control.** Three-way
+  reconciliation that runs daily (or within 3 days, pending-aware)
+  catches Okun-style trust-account schemes the day the books stop
+  matching the bank. AI-assisted anomaly review on pending transactions
+  is the bottleneck. Worth building as a deliberate Stage-3 capability
+  rather than retrofitting later.
+- **AppFolio chart-of-accounts importer.** Will need access to the
+  AppFolio GL endpoints (currently blocked by IP allowlist) before this
+  can be built.
+- **Bill.com integration as a dual-purpose provider.** Outbound vendor
+  pay and inbound card-transaction feed. Will need to decide
+  `bank_transactions` vs `card_transactions` table separation when we
+  get to Stage 4.

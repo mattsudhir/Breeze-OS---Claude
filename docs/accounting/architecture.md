@@ -190,7 +190,8 @@ There are two interfaces:
 - `AchProvider` — outbound money movement (owner distributions, vendor
   bill pay). Implementations: Modern Treasury (primary), Plaid Transfer
   (secondary, for low-volume use cases that fit within Plaid Transfer's
-  limits).
+  limits), Bill.com (currently used at Breeze for vendor pay + charge
+  cards; gets wrapped behind this interface).
 
 Plaid sits across both layers:
 
@@ -200,6 +201,26 @@ Plaid sits across both layers:
 - **Plaid Transfer** — one possible implementation of `AchProvider` for
   cases where its limits ($100K/day default, no RTP, no wires) are
   acceptable.
+
+Bill.com is dual-purpose: outbound AP rail AND an inbound transaction
+feed (its card and ACH activity must reconcile against our books). The
+transaction-feed side ingests into `bank_transactions` (or a sibling
+`card_transactions` table — TBD at Stage 4) alongside Plaid's feed.
+
+## Aspirational: near-real-time reconciliation
+
+Industry norm is monthly reconciliation. With Plaid (and eventually
+Bill.com) feeding transactions live and the match-candidate model
+described above, three-way reconciliation can run daily — or, for
+orgs that want it, on a 3-day-trailing window once pending
+transactions clear.
+
+This isn't just an efficiency play. Daily three-way reconciliation is
+the structural defense against Okun-style fraud in fiduciary accounts:
+the day the books stop matching the bank, the alarm fires. AI-assisted
+review of pending transactions and exception queues is the human-in-
+the-loop layer. Track this as a deliberate Stage-3 capability rather
+than retrofitting it later.
 
 ## File ownership during parallel-session work
 
