@@ -52,28 +52,48 @@ function sampleSection(result, sampleSize = 50, sampleKey) {
   };
 }
 
+const SLEEP = (ms) => new Promise((r) => setTimeout(r, ms));
+
 export default withAdminHandler(async (req, res) => {
-  const { from_date: explicitFrom, to_date: explicitTo, days } = req.query || {};
+  const {
+    from_date: explicitFrom,
+    to_date: explicitTo,
+    days,
+    probe,
+  } = req.query || {};
   const range =
     explicitFrom && explicitTo
       ? { from_date: explicitFrom, to_date: explicitTo }
       : defaultDateRange(days);
 
-  // Control test: hit Database API v0 (list_properties) with no filters
-  // beyond the required LastUpdatedAtFrom. This API uses a different
-  // host (api.appfolio.com) and a different auth/route pattern than the
-  // Reports API, so it's an independent signal of whether the
-  // credentials + IP allowlist are working at all. Useful diagnostic
-  // when Reports API requests are returning 404 or 403 — distinguishes
-  // "neither API works" from "v0 works but Reports doesn't".
-  const [v0Properties, coa, gl, bills, receipts, urlProbe] = await Promise.all([
-    executeTool('list_properties', {}),
-    executeTool('list_gl_accounts', {}),
-    executeTool('list_general_ledger', range),
-    executeTool('list_bill_detail', { ...range, status: 'All' }),
-    executeTool('list_income_register', range),
-    probeReportsEndpoints(),
-  ]);
+  // Hit the v0 control in parallel — it's a different host with its
+  // own rate budget, no impact on Reports throttling.
+  const v0Properties = executeTool('list_properties', {});
+
+  // Reports API calls run SEQUENTIALLY with a small delay between
+  // them. AppFolio's Reports API rate-limits aggressively and 429s
+  // entire bursts even for distinct endpoints. Keep us comfortably
+  // under whatever the limit is.
+  const REPORTS_DELAY_MS = 750;
+
+  const coa = await executeTool('list_gl_accounts', {});
+  await SLEEP(REPORTS_DELAY_MS);
+  const gl = await executeTool('list_general_ledger', range);
+  await SLEEP(REPORTS_DELAY_MS);
+  const bills = await executeTool('list_bill_detail', { ...range, status: 'All' });
+  await SLEEP(REPORTS_DELAY_MS);
+  const receipts = await executeTool('list_income_register', range);
+
+  // The URL probe is now opt-in via ?probe=1. It's served its
+  // purpose; running it on every call wastes Reports-API rate budget
+  // and slows the response.
+  let urlProbe = null;
+  if (probe) {
+    await SLEEP(REPORTS_DELAY_MS);
+    urlProbe = await probeReportsEndpoints();
+  }
+
+  const v0Result = await v0Properties;
 
   return res.status(200).json({
     ok: true,
@@ -87,8 +107,6 @@ export default withAdminHandler(async (req, res) => {
         ? process.env.VERCEL_GIT_COMMIT_SHA.slice(0, 12)
         : null,
       vercel_url: process.env.VERCEL_URL || null,
-      // Boolean presence only — values intentionally omitted. Confirms
-      // whether the runtime sees each env var without exposing secrets.
       appfolio_env_vars_present: {
         APPFOLIO_CLIENT_ID: Boolean(process.env.APPFOLIO_CLIENT_ID),
         APPFOLIO_CLIENT_SECRET: Boolean(process.env.APPFOLIO_CLIENT_SECRET),
@@ -105,25 +123,19 @@ export default withAdminHandler(async (req, res) => {
         BREEZE_ADMIN_TOKEN: Boolean(process.env.BREEZE_ADMIN_TOKEN),
       },
     },
-    database_api_v0_control: sampleSection(v0Properties, 3, 'properties'),
+    database_api_v0_control: sampleSection(v0Result, 3, 'properties'),
     chart_of_accounts: sampleSection(coa, 500, 'accounts'),
     general_ledger: sampleSection(gl, 50, 'entries'),
     bill_detail: sampleSection(bills, 50, 'bills'),
     income_register: sampleSection(receipts, 50, 'receipts'),
     _reports_url_probe: urlProbe,
     notes: [
-      'database_api_v0_control is a diagnostic ping against the v0',
-      'API at api.appfolio.com. If it succeeds while Reports calls',
-      'fail, the issue is specifically with Reports API URL/scope,',
-      'not with credentials or IP allowlisting in general.',
-      '_reports_url_probe tries several URL/method combinations for',
-      'the chart_of_accounts report and surfaces the raw HTTP status',
-      'and body snippet for each — look for whichever variant',
-      'returns a non-404 / non-403 status to identify the right URL',
-      'shape for this account.',
-      'Chart of accounts (Reports API) is returned in full when',
-      'available (up to 500 rows).',
-      'GL / bills / receipts are sampled to 50 rows each.',
+      'Reports API calls now run sequentially with a 750ms delay',
+      'between them, and postReport() retries 429s with exponential',
+      'backoff (2s, 4s, 8s, capped at 4 attempts).',
+      'The URL probe is opt-in via ?probe=1 — running it on every',
+      'call wasted Reports-API rate budget unnecessarily once we',
+      'knew which URL pattern works (v2 POST).',
     ],
   });
 });
