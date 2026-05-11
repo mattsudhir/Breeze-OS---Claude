@@ -27,7 +27,7 @@
 //   - Empty results if the date range has no activity.
 
 import { withAdminHandler } from '../../lib/adminHelpers.js';
-import { executeTool } from '../../lib/backends/appfolio.js';
+import { executeTool, probeReportsEndpoints } from '../../lib/backends/appfolio.js';
 
 function defaultDateRange(daysParam) {
   const days = Math.min(Math.max(parseInt(daysParam, 10) || 30, 1), 365);
@@ -66,12 +66,13 @@ export default withAdminHandler(async (req, res) => {
   // credentials + IP allowlist are working at all. Useful diagnostic
   // when Reports API requests are returning 404 or 403 — distinguishes
   // "neither API works" from "v0 works but Reports doesn't".
-  const [v0Properties, coa, gl, bills, receipts] = await Promise.all([
+  const [v0Properties, coa, gl, bills, receipts, urlProbe] = await Promise.all([
     executeTool('list_properties', {}),
     executeTool('list_gl_accounts', {}),
     executeTool('list_general_ledger', range),
     executeTool('list_bill_detail', { ...range, status: 'All' }),
     executeTool('list_income_register', range),
+    probeReportsEndpoints(),
   ]);
 
   return res.status(200).json({
@@ -85,19 +86,20 @@ export default withAdminHandler(async (req, res) => {
     general_ledger: sampleSection(gl, 50, 'entries'),
     bill_detail: sampleSection(bills, 50, 'bills'),
     income_register: sampleSection(receipts, 50, 'receipts'),
+    _reports_url_probe: urlProbe,
     notes: [
       'database_api_v0_control is a diagnostic ping against the v0',
       'API at api.appfolio.com. If it succeeds while Reports calls',
       'fail, the issue is specifically with Reports API URL/scope,',
       'not with credentials or IP allowlisting in general.',
+      '_reports_url_probe tries several URL/method combinations for',
+      'the chart_of_accounts report and surfaces the raw HTTP status',
+      'and body snippet for each — look for whichever variant',
+      'returns a non-404 / non-403 status to identify the right URL',
+      'shape for this account.',
       'Chart of accounts (Reports API) is returned in full when',
       'available (up to 500 rows).',
       'GL / bills / receipts are sampled to 50 rows each.',
-      'If any section reports a 403 "Host not in allowlist", the',
-      'host calling AppFolio is not on the Developer Space IP',
-      'allowlist. See docs/accounting/appfolio-access-setup.md.',
-      'If sections return 404 with empty bodies, the URL path is',
-      'wrong (subdomain, API version, or report name).',
     ],
   });
 });
