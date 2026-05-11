@@ -92,12 +92,16 @@ In the Vercel project's **Settings → Environment Variables**, ensure:
 
 | Variable | Required | Notes |
 |---|---|---|
-| `APPFOLIO_CLIENT_ID` | yes | From Developer Space. |
-| `APPFOLIO_CLIENT_SECRET` | yes | From Developer Space. **Mark Sensitive.** |
-| `APPFOLIO_DEVELOPER_ID` | yes | Customer/Developer UUID. |
+| `APPFOLIO_CLIENT_ID` | yes | Database API v0 — from Developer Space. |
+| `APPFOLIO_CLIENT_SECRET` | yes | Database API v0 — from Developer Space. **Mark Sensitive.** |
+| `APPFOLIO_DEVELOPER_ID` | yes | Customer/Developer UUID — Database API v0. |
 | `APPFOLIO_DATABASE_SUBDOMAIN` | optional | Defaults to `breezepg`. Set explicitly if migrating to a different subdomain. |
+| `APPFOLIO_REPORTS_USERNAME` | yes for Reports API | Reports API Basic Auth username — configured in the AppFolio web UI (Tools → Database or Tools → API), NOT the Developer Space. Different credential from `APPFOLIO_CLIENT_ID`. |
+| `APPFOLIO_REPORTS_PASSWORD` | yes for Reports API | Reports API Basic Auth password — paired with the username above. **Mark Sensitive.** |
 | `BREEZE_ADMIN_TOKEN` | yes | Gates `/api/admin/*` including the introspect endpoint. |
 | `HTTP_PROXY` | optional | Only if using Option B above. Not yet honored — see note in Step 1. |
+
+**Why two credential pairs?** Empirically (confirmed by probing `/api/v1/reports/*.json` from Vercel), AppFolio gates the **Database API v0** at `api.appfolio.com` with the Developer Space Client ID/Secret + Developer ID header, but gates the **Reports API** at `<subdomain>.appfolio.com` with a separate HTTP Basic Auth username/password pair configured per-customer in the AppFolio web UI. Use both pairs; they are not interchangeable.
 
 Apply to all environments (Production, Preview, Development). Redeploy
 the project so the env vars take effect.
