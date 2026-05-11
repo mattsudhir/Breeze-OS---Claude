@@ -1,13 +1,100 @@
 # Breeze OS — Android setup playbook
 
 This is the end-to-end guide for getting the Breeze OS Android app
-running on an emulator or physical device, then onto the Play Store.
+onto a phone. There are two paths:
+
+- **[Phone-only path](#phone-only-path-no-laptop-required)** — CI
+  builds the APK in the cloud, you install it from the GitHub Actions
+  artifact link. No Android Studio, no laptop, no SDK install.
+- **[Laptop path](#laptop-path)** — Android Studio + emulator for a
+  faster inner loop. Use this when you want to iterate on the app
+  itself in seconds rather than minutes.
 
 The Android Capacitor project lives in `/android` and is committed to
 the repo. You don't need to run `npx cap add android` — it's already
 been done.
 
 ---
+
+## Phone-only path (no laptop required)
+
+The `.github/workflows/android.yml` workflow builds the APK on
+GitHub's Ubuntu runners every time you push to a `claude/*` or `main`
+branch. You install the APK on your phone by tapping a link.
+
+### First-time setup (5 minutes, once)
+
+1. **Allow APK installs on your phone**:
+   - Android 8+: Settings → Apps → Special access → Install unknown
+     apps → pick Chrome (or whichever browser you'll download from)
+     → Allow.
+   - You can flip this off again after you've installed Breeze OS.
+2. **Install the GitHub mobile app** (App Store / Play Store). It
+   makes running workflows and downloading artifacts a one-tap
+   experience.
+3. (Optional) **Create the Firebase project** so push notifications
+   work in the next build:
+   - https://console.firebase.google.com → Add project →
+     "Breeze OS".
+   - Inside the project: Add app → Android → package name
+     `com.breeze.os` → Register.
+   - Download the `google-services.json` it gives you.
+   - In GitHub: repo → Settings → Secrets and variables → Actions →
+     New repository secret. Name: `GOOGLE_SERVICES_JSON`. Value:
+     paste the **full contents** of the JSON file. Save.
+   - The next CI build will bake it into the APK automatically.
+
+### The day-to-day loop
+
+```
+1. Tell me what to change in the chat thread.
+2. I commit + push.
+3. GitHub Actions runs (visible in the GitHub mobile app under
+   Actions → Android build → latest run).
+4. When it finishes (5–8 min), tap "breeze-os-debug-apk" in the
+   Artifacts section to download.
+5. Tap the downloaded .apk in your phone's Downloads. Android asks
+   "Install?" — yes. Done.
+```
+
+You'll see the build progress in real time in the GitHub mobile app.
+No laptop touched at any point.
+
+### Manually triggering a build from the phone
+
+GitHub app → repo → Actions → "Android build" → Run workflow → pick
+the branch → Run. Useful when you want a fresh APK without committing
+anything new.
+
+### Signed release build for the Play Store
+
+Eventually you'll want to upload to the Play Console. That needs a
+signed AAB (not a debug APK). To enable that path:
+
+1. Generate a release keystore once (on any machine with `keytool`,
+   or have CI generate one and email you the file — let me know if
+   you want that flow):
+   ```bash
+   keytool -genkey -v \
+     -keystore breeze-os-release.jks \
+     -keyalg RSA -keysize 2048 -validity 10000 \
+     -alias breeze-release
+   ```
+2. Add four GitHub repo secrets (Settings → Secrets → Actions):
+   - `ANDROID_KEYSTORE_BASE64` — `base64 -i breeze-os-release.jks`
+     and paste the output.
+   - `ANDROID_KEYSTORE_PASSWORD`
+   - `ANDROID_KEY_ALIAS` — `breeze-release`
+   - `ANDROID_KEY_PASSWORD`
+3. Trigger the workflow with `build_type=release`. Download the AAB
+   from the run's artifacts. Upload to Play Console.
+
+**Lose the keystore = lose the ability to ship updates under the
+same Play Store listing, forever.** Back it up to a password manager.
+
+---
+
+## Laptop path
 
 ## 1. One-time tooling install
 
