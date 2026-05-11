@@ -59,9 +59,15 @@ export default withAdminHandler(async (req, res) => {
       ? { from_date: explicitFrom, to_date: explicitTo }
       : defaultDateRange(days);
 
-  // The chart of accounts is the primary deliverable — fetch first and
-  // surface its result even if the transactional pulls fail.
-  const [coa, gl, bills, receipts] = await Promise.all([
+  // Control test: hit Database API v0 (list_properties) with no filters
+  // beyond the required LastUpdatedAtFrom. This API uses a different
+  // host (api.appfolio.com) and a different auth/route pattern than the
+  // Reports API, so it's an independent signal of whether the
+  // credentials + IP allowlist are working at all. Useful diagnostic
+  // when Reports API requests are returning 404 or 403 — distinguishes
+  // "neither API works" from "v0 works but Reports doesn't".
+  const [v0Properties, coa, gl, bills, receipts] = await Promise.all([
+    executeTool('list_properties', {}),
     executeTool('list_gl_accounts', {}),
     executeTool('list_general_ledger', range),
     executeTool('list_bill_detail', { ...range, status: 'All' }),
@@ -72,16 +78,26 @@ export default withAdminHandler(async (req, res) => {
     ok: true,
     generated_at: new Date().toISOString(),
     date_range: range,
+    appfolio_subdomain:
+      process.env.APPFOLIO_DATABASE_SUBDOMAIN || '(default: breezepg)',
+    database_api_v0_control: sampleSection(v0Properties, 3, 'properties'),
     chart_of_accounts: sampleSection(coa, 500, 'accounts'),
     general_ledger: sampleSection(gl, 50, 'entries'),
     bill_detail: sampleSection(bills, 50, 'bills'),
     income_register: sampleSection(receipts, 50, 'receipts'),
     notes: [
-      'Chart of accounts is returned in full (up to 500 rows).',
-      'General ledger / bills / receipts are sampled to 50 rows each.',
-      'If any section reports a 403 error, the host calling AppFolio',
-      'is not on the Developer Space IP allowlist. See',
-      'docs/accounting/appfolio-access-setup.md for the runbook.',
+      'database_api_v0_control is a diagnostic ping against the v0',
+      'API at api.appfolio.com. If it succeeds while Reports calls',
+      'fail, the issue is specifically with Reports API URL/scope,',
+      'not with credentials or IP allowlisting in general.',
+      'Chart of accounts (Reports API) is returned in full when',
+      'available (up to 500 rows).',
+      'GL / bills / receipts are sampled to 50 rows each.',
+      'If any section reports a 403 "Host not in allowlist", the',
+      'host calling AppFolio is not on the Developer Space IP',
+      'allowlist. See docs/accounting/appfolio-access-setup.md.',
+      'If sections return 404 with empty bodies, the URL path is',
+      'wrong (subdomain, API version, or report name).',
     ],
   });
 });
