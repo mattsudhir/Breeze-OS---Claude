@@ -96,8 +96,8 @@ In the Vercel project's **Settings → Environment Variables**, ensure:
 | `APPFOLIO_CLIENT_SECRET` | yes | Database API v0 — from Developer Space. **Mark Sensitive.** |
 | `APPFOLIO_DEVELOPER_ID` | yes | Customer/Developer UUID — Database API v0. |
 | `APPFOLIO_DATABASE_SUBDOMAIN` | optional | Defaults to `breezepg`. Set explicitly if migrating to a different subdomain. |
-| `APPFOLIO_REPORTS_USERNAME` | yes for Reports API | Reports API Basic Auth username — configured in the AppFolio web UI (Tools → Database or Tools → API), NOT the Developer Space. Different credential from `APPFOLIO_CLIENT_ID`. |
-| `APPFOLIO_REPORTS_PASSWORD` | yes for Reports API | Reports API Basic Auth password — paired with the username above. **Mark Sensitive.** |
+| `APPFOLIO_REPORTS_CLIENT_ID` | yes for Reports API | Reports API Client ID — generated in the AppFolio web UI at **Tools → API Settings → Reports API → Generate New Credentials**, NOT the Developer Space. Different credential pair from `APPFOLIO_CLIENT_ID`. |
+| `APPFOLIO_REPORTS_CLIENT_SECRET` | yes for Reports API | Reports API Client Secret — paired with the Client ID above. **Mark Sensitive.** |
 | `BREEZE_ADMIN_TOKEN` | yes | Gates `/api/admin/*` including the introspect endpoint. |
 | `HTTP_PROXY` | optional | Only if using Option B above. Not yet honored — see note in Step 1. |
 
