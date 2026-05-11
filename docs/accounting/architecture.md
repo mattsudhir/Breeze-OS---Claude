@@ -21,6 +21,14 @@ Out of scope for v1:
 - **Multi-currency** — USD only.
 - **Charging *our* SaaS customers** — a `subscriptions` stub will exist
   but no billing infra is built yet.
+- **1099-MISC / 1099-NEC reporting** — deprioritized. The schema
+  retains vendor TIN fields so we can layer reporting in later without
+  a migration, but no 1099 generation in v1.
+- **Money-movement *implementations*** — deprioritized. The provider
+  abstractions (`PaymentProvider`, `AchProvider`) are built so v1 has
+  the seams in the right place, but the only inbound provider wired up
+  in v1 is a stub. PayNearMe / Modern Treasury / Plaid Transfer
+  integrations come later behind the same interfaces.
 
 ## Source-of-truth strategy vs AppFolio
 
@@ -97,20 +105,29 @@ impossible. AppFolio's looser model is part of why its reporting is
 rigid. Every reportable number in this system is derived from journal
 lines, not from per-domain side tables.
 
-### 2. `bank_account` and `gl_account` are different tables
+### 2. `bank_account` and `gl_account` are different tables, 1:1 linked
 
 - `gl_account` is "1010 — Cash, Operating." It lives in the chart of
   accounts and is what journal lines reference.
 - `bank_account` is "Chase ****1234, Plaid item `xyz`, ABA `021000021`,
-  account `1234567890`." It is a real-world banking object.
-- They are linked by FK: each `bank_account` has a `gl_account_id`. A
-  GL account can technically map to multiple bank accounts (rare, but
-  legal — e.g. split deposit sweeps).
+  account `1234567890`, current balance, last sync at." It is a
+  real-world banking object.
+- Each `bank_account` has a `gl_account_id` FK with a `UNIQUE`
+  constraint — exactly one bank account per cash GL account. Sweeps,
+  transfers between accounts, etc. are modeled as two GL accounts with
+  a transfer journal entry, not as one GL fanning out.
+
+Why two tables instead of one: GL accounts number in the dozens-to-
+hundreds (income, expense, AR, AP, equity, etc.); bank accounts number
+in single digits. Putting Plaid item IDs, routing numbers, balances,
+and sync state on every GL row leaves 95% NULL. Lifecycle differs too
+— GL accounts close at year-end, bank accounts come and go when banks
+change.
 
 Why this matters: trust accounting later is `bank_account.is_trust=true`
 plus a beneficiary sub-ledger keyed off journal lines — additive, not a
-rewrite. Conflating the two now means untangling them later under
-regulatory pressure.
+rewrite. Each trust bank account gets its own segregated GL account,
+which the 1:1 constraint already enforces.
 
 ### 3. Unit-level granularity throughout
 
@@ -217,12 +234,18 @@ sessions edit different files in the same directory.
 | 4 | Payments rail: provider interface + PayNearMe + 1 stub | 8–10 wk |
 | 5 | AP: vendors, bills, anticipated bills, bill pay | 10–12 wk |
 | 6 | AppFolio one-way migration tooling | 6–8 wk |
-| 7 | Reporting v1: owner statements, P&L, rent roll, 1099 | 12–16 wk |
+| 7 | Reporting v1: owner statements, P&L, rent roll (no 1099) | 10–14 wk |
 | 8 | UI buildout for /accounting end-to-end | 16–20 wk |
 | 9 | Trust accounting | 8–12 wk |
 | 10+ | Hardening, edge cases, multi-state, SaaS productization | rolling |
 
-~2 PY MVP + ~3 PY polish/coverage ≈ 5 PY total.
+~2 PY MVP + ~3 PY polish/coverage ≈ 5 PY total at human-only effort. AI
+augmentation compresses raw work to ~1.5–3 PY, but human review/decision
+time remains the binding constraint: 8–12 weeks of focused review to
+reach a demoable foundation (stages 0–3), 30–50 weeks over 12–18
+calendar months to reach a system worth cutting over to (through stage
+8). Going faster than that is possible but optimistic — most of the
+slack is in real-world integration testing, not in writing code.
 
 ## Open decisions
 
