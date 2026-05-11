@@ -28,12 +28,35 @@ dist-ssr
 .env.local
 .env.*.local
 
-# Capacitor native shells. Generated locally with `npx cap add`. The
-# tracked Capacitor surface is capacitor.config.json + the JS plugin
-# bindings in src/. Native projects are too large and tooling-coupled
-# to commit until there's a concrete reason.
-ios/
-android/
+# Capacitor native shells.
+#
+# We commit the generated Android and iOS projects so checkouts can
+# `npx cap sync && open in Android Studio / Xcode` without re-running
+# `npx cap add`. Custom AndroidManifest tweaks, signing configs, icons,
+# and splash screens live inside these dirs and need to be tracked.
+#
+# Per-platform generated build artefacts ARE ignored below so we don't
+# bloat the repo with debug APKs or Gradle caches.
+android/.gradle/
+android/.idea/
+android/build/
+android/app/build/
+android/app/release/
+android/captures/
+android/local.properties
+android/keystore.properties
+android/app/google-services.json
+*.keystore
+*.jks
+
+ios/Pods/
+ios/build/
+ios/App/build/
+ios/DerivedData/
+ios/App/App.xcworkspace/xcuserdata/
+ios/App/App.xcodeproj/xcuserdata/
+ios/App/App.xcodeproj/project.xcworkspace/xcuserdata/
+ios/App/App/GoogleService-Info.plist
 
 # Firebase service account files. Use FIREBASE_SERVICE_ACCOUNT_JSON
 # secret instead of checking these in.

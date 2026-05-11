@@ -1,0 +1,21 @@
+ext {
+    // minSdk 24 = Android 7.0 (Aug 2016). Covers 99%+ of active
+    // devices and lets us drop a pile of legacy WebView shims.
+    minSdkVersion = 24
+    // Play Console requires targetSdk 35 (Android 15) for new apps
+    // and updates as of August 2025. Compile and target stay locked
+    // unless there's a specific reason to diverge.
+    compileSdkVersion = 35
+    targetSdkVersion = 35
+    androidxActivityVersion = '1.8.0'
+    androidxAppCompatVersion = '1.6.1'
+    androidxCoordinatorLayoutVersion = '1.2.0'
+    androidxCoreVersion = '1.12.0'
+    androidxFragmentVersion = '1.6.2'
+    coreSplashScreenVersion = '1.0.1'
+    androidxWebkitVersion = '1.9.0'
+    junitVersion = '4.13.2'
+    androidxJunitVersion = '1.1.5'
+    androidxEspressoCoreVersion = '3.5.1'
+    cordovaAndroidVersion = '10.1.1'
+}

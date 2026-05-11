@@ -1,11 +1,14 @@
 # Breeze OS mobile shells (Capacitor)
 
-This directory is the home for the iOS and Android Capacitor projects.
-The shells are intentionally **not committed in their entirety** until
-you generate them locally — they contain platform-specific tooling
-(CocoaPods, Gradle wrappers, signing configs) that needs to be set up
-on a real Mac (for iOS) or any machine with the Android SDK (for
-Android).
+Platform-specific playbooks:
+
+- **[ANDROID.md](./ANDROID.md)** — full Android setup, FCM, signing,
+  Play Store release. The `/android` project is committed.
+- **iOS** — coming next; the `/ios` project gets generated on a Mac
+  with `npx cap add ios`.
+
+This file is the high-level orientation; the playbooks have the
+step-by-step.
 
 ## What Capacitor is, in one sentence
 

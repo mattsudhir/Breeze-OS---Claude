@@ -1,0 +1,22 @@
+{
+  "_comment": "PLACEHOLDER FILE. Do not commit a real google-services.json — it's gitignored. Copy your Firebase-downloaded google-services.json next to this file (android/app/google-services.json) and Capacitor will auto-apply the google-services Gradle plugin (see android/app/build.gradle bottom). Bundle ID/package must match com.breeze.os.",
+  "project_info": {
+    "project_number": "REPLACE_ME",
+    "project_id": "breeze-os-REPLACE",
+    "storage_bucket": "breeze-os-REPLACE.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "REPLACE_ME",
+        "android_client_info": {
+          "package_name": "com.breeze.os"
+        }
+      },
+      "api_key": [
+        { "current_key": "REPLACE_ME" }
+      ]
+    }
+  ],
+  "configuration_version": "1"
+}
