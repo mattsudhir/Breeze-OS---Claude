@@ -2735,9 +2735,17 @@ function DepositsTab({ token, onTokenInvalid }) {
 // ── Reports tab ─────────────────────────────────────────────────
 
 function ReportsTab({ token, onTokenInvalid }) {
+  const [reportType, setReportType] = useState('trial_balance'); // 'trial_balance' | 'owner_statement'
   const [entities, setEntities] = useState([]);
+  const [properties, setProperties] = useState([]);
   const [selectedEntity, setSelectedEntity] = useState('');
+  const [selectedProperty, setSelectedProperty] = useState('');
   const [asOf, setAsOf] = useState(new Date().toISOString().slice(0, 10));
+  const [fromDate, setFromDate] = useState(() => {
+    const d = new Date();
+    d.setUTCMonth(d.getUTCMonth() - 1);
+    return d.toISOString().slice(0, 10);
+  });
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -2745,12 +2753,20 @@ function ReportsTab({ token, onTokenInvalid }) {
   useEffect(() => {
     (async () => {
       try {
-        const url = new URL('/api/admin/list-entities', window.location.origin);
-        url.searchParams.set('secret', token);
-        const res = await fetch(url.toString());
-        if (res.status === 401) { onTokenInvalid(); return; }
-        const json = await res.json();
-        setEntities(json.entities || []);
+        const u = (path) => {
+          const url = new URL(path, window.location.origin);
+          url.searchParams.set('secret', token);
+          return url;
+        };
+        const [eRes, pRes] = await Promise.all([
+          fetch(u('/api/admin/list-entities').toString()),
+          fetch(u('/api/admin/list-properties-with-entity').toString()),
+        ]);
+        if (eRes.status === 401 || pRes.status === 401) { onTokenInvalid(); return; }
+        const eJson = await eRes.json();
+        const pJson = pRes.ok ? await pRes.json() : { properties: [] };
+        setEntities(eJson.entities || []);
+        setProperties(pJson.properties || []);
       } catch { /* fine */ }
     })();
   }, [token, onTokenInvalid]);
@@ -2760,10 +2776,20 @@ function ReportsTab({ token, onTokenInvalid }) {
     setError(null);
     setReport(null);
     try {
-      const url = new URL('/api/admin/entity-trial-balance', window.location.origin);
-      url.searchParams.set('secret', token);
-      if (selectedEntity) url.searchParams.set('entity_id', selectedEntity);
-      if (asOf) url.searchParams.set('as_of', asOf);
+      let url;
+      if (reportType === 'owner_statement') {
+        if (!selectedProperty) { setError('Pick a property'); return; }
+        url = new URL('/api/admin/property-statement', window.location.origin);
+        url.searchParams.set('secret', token);
+        url.searchParams.set('property_id', selectedProperty);
+        if (fromDate) url.searchParams.set('from', fromDate);
+        if (asOf) url.searchParams.set('to', asOf);
+      } else {
+        url = new URL('/api/admin/entity-trial-balance', window.location.origin);
+        url.searchParams.set('secret', token);
+        if (selectedEntity) url.searchParams.set('entity_id', selectedEntity);
+        if (asOf) url.searchParams.set('as_of', asOf);
+      }
       const res = await fetch(url.toString());
       if (res.status === 401) { onTokenInvalid(); return; }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -2773,7 +2799,7 @@ function ReportsTab({ token, onTokenInvalid }) {
     } finally {
       setLoading(false);
     }
-  }, [token, onTokenInvalid, selectedEntity, asOf]);
+  }, [token, onTokenInvalid, reportType, selectedEntity, selectedProperty, fromDate, asOf]);
 
   const byType = (type) => (report?.accounts || []).filter((a) => a.account_type === type);
   const sumByType = (type) => byType(type).reduce((s, a) => s + a.net_cents, 0);
@@ -2798,20 +2824,60 @@ function ReportsTab({ token, onTokenInvalid }) {
       <div className="dashboard-card" style={{ padding: '14px 16px', marginBottom: 12 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
           <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12, color: '#444', gap: 3 }}>
-            <span style={{ fontWeight: 600 }}>Entity</span>
+            <span style={{ fontWeight: 600 }}>Report</span>
             <select
-              value={selectedEntity}
-              onChange={(e) => setSelectedEntity(e.target.value)}
-              style={{ padding: '7px 10px', border: '1px solid #CCC', borderRadius: 6, fontSize: 13, minWidth: 240 }}
+              value={reportType}
+              onChange={(e) => { setReportType(e.target.value); setReport(null); }}
+              style={{ padding: '7px 10px', border: '1px solid #CCC', borderRadius: 6, fontSize: 13, minWidth: 200 }}
             >
-              <option value="">All (consolidated)</option>
-              {entities.map((e) => (
-                <option key={e.id} value={e.id}>{e.name}</option>
-              ))}
+              <option value="trial_balance">Trial balance (entity)</option>
+              <option value="owner_statement">Owner statement (property)</option>
             </select>
           </label>
+          {reportType === 'trial_balance' ? (
+            <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12, color: '#444', gap: 3 }}>
+              <span style={{ fontWeight: 600 }}>Entity</span>
+              <select
+                value={selectedEntity}
+                onChange={(e) => setSelectedEntity(e.target.value)}
+                style={{ padding: '7px 10px', border: '1px solid #CCC', borderRadius: 6, fontSize: 13, minWidth: 240 }}
+              >
+                <option value="">All (consolidated)</option>
+                {entities.map((e) => (
+                  <option key={e.id} value={e.id}>{e.name}</option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12, color: '#444', gap: 3 }}>
+              <span style={{ fontWeight: 600 }}>Property *</span>
+              <select
+                value={selectedProperty}
+                onChange={(e) => setSelectedProperty(e.target.value)}
+                style={{ padding: '7px 10px', border: '1px solid #CCC', borderRadius: 6, fontSize: 13, minWidth: 280 }}
+              >
+                <option value="">— pick a property —</option>
+                {properties.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.display_name} ({p.service_city}, {p.service_state})
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {reportType === 'owner_statement' && (
+            <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12, color: '#444', gap: 3 }}>
+              <span style={{ fontWeight: 600 }}>From</span>
+              <input
+                type="date"
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+                style={{ padding: '7px 10px', border: '1px solid #CCC', borderRadius: 6, fontSize: 13 }}
+              />
+            </label>
+          )}
           <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12, color: '#444', gap: 3 }}>
-            <span style={{ fontWeight: 600 }}>As of</span>
+            <span style={{ fontWeight: 600 }}>{reportType === 'owner_statement' ? 'To' : 'As of'}</span>
             <input
               type="date"
               value={asOf}
@@ -2840,7 +2906,38 @@ function ReportsTab({ token, onTokenInvalid }) {
         </div>
       )}
 
-      {report && (
+      {report && reportType === 'owner_statement' && (
+        <>
+          <div className="dashboard-card" style={{ padding: '14px 16px', marginBottom: 8 }}>
+            <div style={{ fontWeight: 700, fontSize: 16 }}>{report.property?.display_name}</div>
+            <div style={{ fontSize: 12, color: '#666' }}>
+              {report.property?.service_address}
+              {report.property?.entity_name && ` · ${report.property.entity_name}`}
+            </div>
+            <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+              Period: {report.period?.from || '(start)'} → {report.period?.to || '(now)'}
+            </div>
+          </div>
+          <div className="dashboard-card" style={{ padding: '12px 16px', marginBottom: 8, display: 'flex', flexWrap: 'wrap', gap: 24 }}>
+            <SummaryStat label="Income"       value={formatCents(report.total_income_cents)} color="#2E7D32" />
+            <SummaryStat label="Expenses"     value={formatCents(report.total_expense_cents)} color="#C62828" />
+            <SummaryStat label="Net cash flow" value={formatCents(report.net_cash_flow_cents)} color={report.net_cash_flow_cents >= 0 ? '#2E7D32' : '#C62828'} />
+          </div>
+          {report.income.length > 0 && (
+            <StatementSection title="Income" rows={report.income} totalCents={report.total_income_cents} accent="#2E7D32" />
+          )}
+          {report.expenses.length > 0 && (
+            <StatementSection title="Expenses" rows={report.expenses} totalCents={report.total_expense_cents} accent="#C62828" />
+          )}
+          <div className="dashboard-card" style={{ padding: '12px 16px', background: '#FAFAFA', fontWeight: 700, display: 'flex', justifyContent: 'space-between', fontSize: 15 }}>
+            <span>Net cash flow</span>
+            <span style={{ fontFamily: 'monospace', color: report.net_cash_flow_cents >= 0 ? '#2E7D32' : '#C62828' }}>
+              {formatCents(report.net_cash_flow_cents)}
+            </span>
+          </div>
+        </>
+      )}
+      {report && reportType === 'trial_balance' && (
         <>
           <div className="dashboard-card" style={{ padding: '12px 16px', marginBottom: 8, display: 'flex', flexWrap: 'wrap', gap: 16 }}>
             <SummaryStat label="Total debits"  value={formatCents(report.total_debit_cents)} />
@@ -2906,6 +3003,38 @@ function SummaryStat({ label, value, color }) {
     <div>
       <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</div>
       <div style={{ fontSize: 14, fontWeight: 700, color: color || '#1A1A1A', fontFamily: 'monospace' }}>{value}</div>
+    </div>
+  );
+}
+
+function StatementSection({ title, rows, totalCents, accent }) {
+  return (
+    <div className="dashboard-card" style={{ marginBottom: 8, padding: 0, overflow: 'hidden' }}>
+      <div style={{
+        padding: '10px 14px',
+        background: `${accent}15`,
+        color: accent,
+        fontWeight: 700,
+        fontSize: 13,
+        display: 'flex',
+        justifyContent: 'space-between',
+      }}>
+        <span>{title} <span style={{ fontWeight: 400, opacity: 0.7 }}>({rows.length})</span></span>
+        <span style={{ fontFamily: 'monospace' }}>{formatCents(totalCents)}</span>
+      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.gl_account_id} style={{ borderBottom: '1px solid #F0F0F0' }}>
+              <td style={{ ...td, fontFamily: 'monospace', color: '#666', width: 80 }}>{r.code}</td>
+              <td style={td}>{r.name}</td>
+              <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>
+                {formatCents(r.net_cents)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
