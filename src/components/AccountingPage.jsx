@@ -659,68 +659,90 @@ function BankAccountsTab({ token, onTokenInvalid }) {
         </div>
       ) : (
         <div className="dashboard-card" style={{ padding: 0, overflow: 'hidden' }}>
-          <table className="properties-table" style={{ width: '100%' }}>
-            <thead>
-              <tr>
-                <th style={{ width: '70px' }}>Code</th>
-                <th>Display Name</th>
-                <th>Institution</th>
-                <th style={{ width: '100px' }}>Type</th>
-                <th style={{ width: '120px', textAlign: 'right' }}>Balance</th>
-                <th style={{ width: '110px' }}>Plaid</th>
-              </tr>
-            </thead>
-            <tbody>
-              {accounts.map((b) => (
-                <tr key={b.id}>
-                  <td style={{ fontFamily: 'monospace', fontWeight: 600 }}>{b.gl_code}</td>
-                  <td>
+          <style>{`
+            .ba-list { display: flex; flex-direction: column; }
+            .ba-row {
+              display: grid;
+              grid-template-columns: 70px 1fr 130px 110px;
+              gap: 12px;
+              padding: 12px 14px;
+              border-bottom: 1px solid #F0F0F0;
+              align-items: center;
+              border-left: 3px solid transparent;
+            }
+            .ba-row:last-child { border-bottom: 0; }
+            .ba-row-checking      { border-left-color: #1565C0; }
+            .ba-row-savings       { border-left-color: #1565C0; }
+            .ba-row-money_market  { border-left-color: #1565C0; }
+            .ba-row-investment    { border-left-color: #6A1B9A; }
+            .ba-row-credit_card   { border-left-color: #C62828; }
+            .ba-code  { font-family: monospace; font-weight: 600; font-size: 13px; }
+            .ba-name  { font-weight: 600; font-size: 14px; }
+            .ba-meta  { color: #666; font-size: 12px; margin-top: 2px; }
+            .ba-meta code { font-family: monospace; }
+            .ba-balance { text-align: right; font-family: monospace; font-variant-numeric: tabular-nums; font-weight: 600; }
+            .ba-plaid { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+            .ba-pill {
+              display: inline-block; padding: 2px 8px;
+              border-radius: 10px; font-size: 10px; font-weight: 700;
+            }
+            .ba-pill-linked     { background: #E8F5E9; color: #2E7D32; }
+            .ba-pill-reauth     { background: #FFF3E0; color: #E65100; }
+            .ba-pill-disconn    { background: #FFEBEE; color: #C62828; }
+            .ba-pill-unlinked   { background: #F5F5F5; color: #666; }
+            .ba-pill-trust      { background: #6A1B9A; color: #fff; margin-left: 6px; }
+
+            @media (max-width: 720px) {
+              .ba-row {
+                grid-template-columns: 1fr auto;
+                grid-template-areas:
+                  "head plaid"
+                  "meta balance";
+                gap: 4px 8px;
+              }
+              .ba-cell-code   { display: none; }
+              .ba-cell-name   { grid-area: head; }
+              .ba-cell-meta   { grid-area: meta; }
+              .ba-cell-balance { grid-area: balance; }
+              .ba-cell-plaid  { grid-area: plaid; }
+              .ba-name { font-size: 15px; }
+              .ba-balance { font-size: 14px; }
+            }
+          `}</style>
+          <div className="ba-list">
+            {accounts.map((b) => (
+              <div key={b.id} className={`ba-row ba-row-${b.account_type}`}>
+                <div className="ba-cell-code ba-code">{b.gl_code}</div>
+                <div className="ba-cell-name">
+                  <div className="ba-name">
                     {b.display_name}
-                    {b.is_trust && (
-                      <span style={{
-                        marginLeft: '6px', fontSize: '10px', color: '#fff',
-                        background: '#6A1B9A', padding: '1px 6px', borderRadius: '8px',
-                      }}>trust</span>
-                    )}
-                  </td>
-                  <td style={{ fontSize: '12px', color: '#666' }}>
-                    {b.institution_name || '—'}
-                    {b.account_last4 && <span style={{ fontFamily: 'monospace', marginLeft: '4px' }}>****{b.account_last4}</span>}
-                  </td>
-                  <td>
-                    <span style={{
-                      display: 'inline-block', padding: '2px 8px', borderRadius: '10px',
-                      background: b.account_type === 'credit_card' ? '#FFEBEE' : '#E3F2FD',
-                      color: b.account_type === 'credit_card' ? '#C62828' : '#1565C0',
-                      fontSize: '11px', fontWeight: 600,
-                    }}>
-                      {b.account_type}
-                    </span>
-                  </td>
-                  <td style={{ textAlign: 'right', fontFamily: 'monospace' }}>
-                    {formatCents(b.current_balance_cents)}
-                  </td>
-                  <td>
-                    <span style={{
-                      display: 'inline-block', padding: '2px 8px', borderRadius: '10px',
-                      background: b.plaid_status === 'linked' ? '#E8F5E9' :
-                                  b.plaid_status === 're_auth_required' ? '#FFF3E0' :
-                                  b.plaid_status === 'disconnected' ? '#FFEBEE' : '#F5F5F5',
-                      color: b.plaid_status === 'linked' ? '#2E7D32' :
-                             b.plaid_status === 're_auth_required' ? '#E65100' :
-                             b.plaid_status === 'disconnected' ? '#C62828' : '#666',
-                      fontSize: '11px', fontWeight: 600,
-                    }}>
-                      {b.plaid_status}
-                    </span>
-                    {b.plaid_status === 'linked' && (
-                      <SyncTransactionsButton token={token} bankAccountId={b.id} onTokenInvalid={onTokenInvalid} />
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    {b.is_trust && <span className="ba-pill ba-pill-trust">trust</span>}
+                  </div>
+                  <div className="ba-meta">
+                    <span style={{ textTransform: 'capitalize' }}>{b.account_type.replace('_', ' ')}</span>
+                    {b.institution_name && <> · {b.institution_name}</>}
+                    {b.account_last4 && <> · <code>****{b.account_last4}</code></>}
+                  </div>
+                </div>
+                <div className="ba-cell-balance ba-balance">
+                  {formatCents(b.current_balance_cents)}
+                </div>
+                <div className="ba-cell-plaid ba-plaid">
+                  <span className={
+                    b.plaid_status === 'linked'           ? 'ba-pill ba-pill-linked' :
+                    b.plaid_status === 're_auth_required' ? 'ba-pill ba-pill-reauth' :
+                    b.plaid_status === 'disconnected'     ? 'ba-pill ba-pill-disconn' :
+                                                            'ba-pill ba-pill-unlinked'
+                  }>
+                    {b.plaid_status}
+                  </span>
+                  {b.plaid_status === 'linked' && (
+                    <SyncTransactionsButton token={token} bankAccountId={b.id} onTokenInvalid={onTokenInvalid} />
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
