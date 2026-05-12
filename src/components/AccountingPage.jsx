@@ -91,7 +91,7 @@ export default function AccountingPage() {
             {activeTab === 'ar' && <PlaceholderTab label="Receivables" hint="Open posted_charges grouped by tenant / lease / property." />}
             {activeTab === 'receipts' && <PlaceholderTab label="Receipts" hint="Recent receipts + record-receipt form. Backed by /api/admin/ar-happy-path or a focused record endpoint." />}
             {activeTab === 'deposits' && <PlaceholderTab label="Deposits" hint="Undeposited Funds queue + build-deposit form." />}
-            {activeTab === 'banks' && <PlaceholderTab label="Bank Accounts" hint="Bank accounts with current balance + Plaid sync status. Bulk-convert the 35 parked AppFolio GLs into real bank_account rows from here." />}
+            {activeTab === 'banks' && <BankAccountsTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'reports' && <PlaceholderTab label="Reports" hint="P&L, rent roll, owner statements (Stage 7)." />}
           </div>
         </>
@@ -473,5 +473,207 @@ function Pill({ label, value, bg = '#E0E0E0', fg = '#333' }) {
       <span style={{ textTransform: 'capitalize' }}>{label}</span>
       <span style={{ fontWeight: 700 }}>{value}</span>
     </span>
+  );
+}
+
+function formatCents(cents) {
+  if (cents === null || cents === undefined) return '—';
+  const n = Number(cents) / 100;
+  const abs = Math.abs(n);
+  const sign = n < 0 ? '-' : '';
+  return `${sign}$${abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// ── Bank Accounts tab ───────────────────────────────────────────
+
+function BankAccountsTab({ token, onTokenInvalid }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [converting, setConverting] = useState(false);
+  const [convertResult, setConvertResult] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const url = new URL('/api/admin/list-bank-accounts', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString());
+      if (res.status === 401) { onTokenInvalid(); return; }
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+      }
+      setData(await res.json());
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); /* eslint-disable-line react-hooks/exhaustive-deps */ }, []);
+
+  const runConvert = async (dryRun) => {
+    setConverting(true);
+    setConvertResult(null);
+    try {
+      const url = new URL('/api/admin/convert-parked-bank-accounts', window.location.origin);
+      url.searchParams.set('secret', token);
+      url.searchParams.set('dry_run', String(dryRun));
+      const res = await fetch(url.toString(), { method: 'POST' });
+      if (res.status === 401) { onTokenInvalid(); return; }
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+      }
+      setConvertResult(await res.json());
+      if (!dryRun) await load();
+    } catch (err) {
+      setConvertResult({ ok: false, error: err.message || String(err) });
+    } finally {
+      setConverting(false);
+    }
+  };
+
+  if (loading) return <div style={{ padding: '24px', color: '#666' }}>Loading...</div>;
+  if (error) {
+    return (
+      <div className="dashboard-card" style={{ padding: '16px', background: '#FFEBEE', color: '#C62828' }}>
+        <strong>Failed to load:</strong> {error}
+      </div>
+    );
+  }
+
+  const parked = data?.parked_summary;
+  const accounts = data?.bank_accounts || [];
+
+  return (
+    <div>
+      {parked && parked.still_unlinked > 0 && (
+        <div className="dashboard-card" style={{
+          padding: '16px', marginBottom: '12px',
+          borderLeft: '4px solid #E65100', background: '#FFF8E1',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+            <AlertCircle size={18} color="#E65100" />
+            <strong>{parked.still_unlinked} parked GL accounts not yet linked as bank_accounts</strong>
+          </div>
+          <p style={{ color: '#555', fontSize: '13px', margin: '0 0 12px' }}>
+            The AppFolio COA importer parked {parked.bank} bank GLs and {parked.credit_card} credit-card GLs
+            as inactive placeholders. Click below to create a <code>bank_account</code> row for each,
+            wired 1:1 to its GL (credit-card GLs are also reclassified asset → liability).
+          </p>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => runConvert(true)}
+              disabled={converting}
+              style={{ padding: '6px 14px' }}
+            >
+              {converting ? 'Running...' : 'Dry-run preview'}
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => runConvert(false)}
+              disabled={converting}
+              style={{ padding: '6px 14px' }}
+            >
+              {converting ? 'Converting...' : `Convert all ${parked.still_unlinked}`}
+            </button>
+          </div>
+          {convertResult && (
+            <div style={{
+              marginTop: '10px', padding: '8px', borderRadius: '6px',
+              background: convertResult.ok === false ? '#FFEBEE' : '#E8F5E9',
+              fontSize: '12px',
+            }}>
+              {convertResult.ok === false ? (
+                <span style={{ color: '#C62828' }}>{convertResult.error}</span>
+              ) : (
+                <>
+                  <strong>{convertResult.dry_run ? 'Dry run' : 'Conversion'}:</strong>{' '}
+                  processed {convertResult.summary?.processed}, created{' '}
+                  {convertResult.summary?.created_count}, skipped{' '}
+                  {convertResult.summary?.skipped_count}, errors{' '}
+                  {convertResult.summary?.error_count}.
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {accounts.length === 0 ? (
+        <div className="dashboard-card" style={{ padding: '24px', textAlign: 'center', color: '#666' }}>
+          No bank accounts yet. {parked && parked.still_unlinked > 0 && 'Use the converter above to create them from the parked AppFolio GLs.'}
+        </div>
+      ) : (
+        <div className="dashboard-card" style={{ padding: 0, overflow: 'hidden' }}>
+          <table className="properties-table" style={{ width: '100%' }}>
+            <thead>
+              <tr>
+                <th style={{ width: '70px' }}>Code</th>
+                <th>Display Name</th>
+                <th>Institution</th>
+                <th style={{ width: '100px' }}>Type</th>
+                <th style={{ width: '120px', textAlign: 'right' }}>Balance</th>
+                <th style={{ width: '110px' }}>Plaid</th>
+              </tr>
+            </thead>
+            <tbody>
+              {accounts.map((b) => (
+                <tr key={b.id}>
+                  <td style={{ fontFamily: 'monospace', fontWeight: 600 }}>{b.gl_code}</td>
+                  <td>
+                    {b.display_name}
+                    {b.is_trust && (
+                      <span style={{
+                        marginLeft: '6px', fontSize: '10px', color: '#fff',
+                        background: '#6A1B9A', padding: '1px 6px', borderRadius: '8px',
+                      }}>trust</span>
+                    )}
+                  </td>
+                  <td style={{ fontSize: '12px', color: '#666' }}>
+                    {b.institution_name || '—'}
+                    {b.account_last4 && <span style={{ fontFamily: 'monospace', marginLeft: '4px' }}>****{b.account_last4}</span>}
+                  </td>
+                  <td>
+                    <span style={{
+                      display: 'inline-block', padding: '2px 8px', borderRadius: '10px',
+                      background: b.account_type === 'credit_card' ? '#FFEBEE' : '#E3F2FD',
+                      color: b.account_type === 'credit_card' ? '#C62828' : '#1565C0',
+                      fontSize: '11px', fontWeight: 600,
+                    }}>
+                      {b.account_type}
+                    </span>
+                  </td>
+                  <td style={{ textAlign: 'right', fontFamily: 'monospace' }}>
+                    {formatCents(b.current_balance_cents)}
+                  </td>
+                  <td>
+                    <span style={{
+                      display: 'inline-block', padding: '2px 8px', borderRadius: '10px',
+                      background: b.plaid_status === 'linked' ? '#E8F5E9' :
+                                  b.plaid_status === 're_auth_required' ? '#FFF3E0' :
+                                  b.plaid_status === 'disconnected' ? '#FFEBEE' : '#F5F5F5',
+                      color: b.plaid_status === 'linked' ? '#2E7D32' :
+                             b.plaid_status === 're_auth_required' ? '#E65100' :
+                             b.plaid_status === 'disconnected' ? '#C62828' : '#666',
+                      fontSize: '11px', fontWeight: 600,
+                    }}>
+                      {b.plaid_status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
