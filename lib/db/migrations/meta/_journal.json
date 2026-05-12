@@ -120,6 +120,13 @@
       "when": 1778745600000,
       "tag": "0016_plaid_secrets",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1778832000000,
+      "tag": "0017_match_rule_description",
+      "breakpoints": true
     }
   ]
 }

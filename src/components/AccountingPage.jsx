@@ -18,7 +18,7 @@ import { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   DollarSign, Receipt, CreditCard, Landmark, FileSpreadsheet,
   BookOpen, BarChart3, AlertCircle, RefreshCw, Search, Tag, Eye, EyeOff,
-  Link2, Download,
+  Link2, Download, Sparkles, Check, X,
 } from 'lucide-react';
 import { usePlaidLink } from 'react-plaid-link';
 
@@ -29,6 +29,7 @@ const TABS = [
   { id: 'receipts',  label: 'Receipts',          icon: DollarSign },
   { id: 'deposits',  label: 'Deposits',          icon: Landmark },
   { id: 'banks',     label: 'Bank Accounts',     icon: CreditCard },
+  { id: 'recon',     label: 'Reconciliation',    icon: Sparkles },
   { id: 'reports',   label: 'Reports',           icon: BarChart3 },
 ];
 
@@ -94,6 +95,7 @@ export default function AccountingPage() {
             {activeTab === 'receipts' && <PlaceholderTab label="Receipts" hint="Recent receipts + record-receipt form. Backed by /api/admin/ar-happy-path or a focused record endpoint." />}
             {activeTab === 'deposits' && <PlaceholderTab label="Deposits" hint="Undeposited Funds queue + build-deposit form." />}
             {activeTab === 'banks' && <BankAccountsTab token={token} onTokenInvalid={() => setToken('')} />}
+            {activeTab === 'recon' && <ReconciliationTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'reports' && <PlaceholderTab label="Reports" hint="P&L, rent roll, owner statements (Stage 7)." />}
           </div>
         </>
@@ -1222,5 +1224,329 @@ function SyncTransactionsButton({ token, bankAccountId, onTokenInvalid }) {
         </span>
       )}
     </span>
+  );
+}
+
+// ── Reconciliation tab ──────────────────────────────────────────
+
+function ReconciliationTab({ token, onTokenInvalid }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const url = new URL('/api/admin/list-pending-reconciliation', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString());
+      if (res.status === 401) { onTokenInvalid(); return; }
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+      }
+      setData(await res.json());
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [token, onTokenInvalid]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <div style={{ padding: '24px', color: '#666' }}>Loading...</div>;
+  if (error) {
+    return (
+      <div className="dashboard-card" style={{ padding: '16px', background: '#FFEBEE', color: '#C62828' }}>
+        <strong>Failed to load:</strong> {error}
+      </div>
+    );
+  }
+
+  const txns = data?.transactions || [];
+
+  return (
+    <div>
+      <style>{`
+        .recon-intro {
+          background: linear-gradient(135deg, #F3E5F5 0%, #E8EAF6 100%);
+          border-left: 3px solid #6A1B9A;
+          padding: 14px 16px; border-radius: 8px;
+          margin-bottom: 12px; font-size: 13px; color: #444;
+        }
+        .recon-txn-card {
+          padding: 12px 14px; border-bottom: 1px solid #F0F0F0;
+        }
+        .recon-txn-card:last-child { border-bottom: 0; }
+        .recon-txn-head {
+          display: flex; justify-content: space-between;
+          align-items: baseline; gap: 8px; flex-wrap: wrap;
+        }
+        .recon-txn-merchant { font-weight: 600; font-size: 14px; color: #1A1A1A; }
+        .recon-txn-amount {
+          font-family: monospace; font-weight: 700; font-size: 15px;
+          font-variant-numeric: tabular-nums;
+        }
+        .recon-txn-amount-out { color: #C62828; }
+        .recon-txn-amount-in  { color: #2E7D32; }
+        .recon-txn-meta { color: #777; font-size: 12px; margin-top: 2px; }
+        .recon-txn-desc {
+          color: #555; font-size: 12px; margin-top: 4px;
+          font-family: monospace; word-break: break-word;
+        }
+        .recon-input-row { display: flex; gap: 8px; margin-top: 10px; align-items: stretch; }
+        .recon-input {
+          flex: 1; padding: 8px 12px; border: 1px solid #ddd;
+          border-radius: 6px; font-size: 13px; font-family: inherit;
+        }
+        .recon-input:focus { border-color: #6A1B9A; outline: none; }
+        .recon-submit {
+          padding: 8px 14px; border: none; border-radius: 6px;
+          background: #6A1B9A; color: white; font-weight: 600;
+          font-size: 13px; cursor: pointer; display: inline-flex;
+          align-items: center; gap: 6px; white-space: nowrap;
+        }
+        .recon-submit:disabled { background: #BBB; cursor: not-allowed; }
+        .recon-candidate {
+          margin-top: 10px; padding: 8px 12px; border-radius: 6px;
+          background: #F3E5F5; border-left: 3px solid #6A1B9A;
+        }
+        .recon-candidate-actions {
+          display: flex; gap: 6px; margin-top: 8px;
+        }
+        .recon-btn {
+          padding: 4px 10px; font-size: 12px; border-radius: 6px;
+          border: 1px solid; cursor: pointer; display: inline-flex;
+          align-items: center; gap: 4px;
+        }
+        .recon-btn-confirm {
+          background: #2E7D32; color: white; border-color: #2E7D32;
+        }
+        .recon-btn-reject {
+          background: white; color: #C62828; border-color: #C62828;
+        }
+      `}</style>
+
+      <div className="recon-intro">
+        <strong style={{ color: '#6A1B9A' }}>
+          <Sparkles size={14} style={{ verticalAlign: '-2px' }} /> AI-assisted reconciliation
+        </strong>
+        <p style={{ margin: '6px 0 0' }}>
+          For each unreconciled bank transaction, type a one-line explanation
+          ("plumber for SLM units" / "monthly software bill") and Claude generates
+          a reusable rule that auto-categorizes similar future transactions. Rules
+          earn auto-trust as they're confirmed; rules rejected 3+ times auto-disable.
+        </p>
+      </div>
+
+      <div style={{ marginBottom: '8px' }}>
+        <button
+          type="button"
+          onClick={load}
+          className="btn-secondary"
+          style={{ padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+        >
+          <RefreshCw size={14} />
+          Refresh
+        </button>
+        <span style={{ marginLeft: '8px', fontSize: '13px', color: '#666' }}>
+          {txns.length} transaction{txns.length === 1 ? '' : 's'} awaiting review
+        </span>
+      </div>
+
+      {txns.length === 0 ? (
+        <div className="dashboard-card" style={{ padding: '24px', textAlign: 'center', color: '#666' }}>
+          No transactions waiting on reconciliation. Sync a Plaid-linked bank account
+          to pull fresh ones.
+        </div>
+      ) : (
+        <div className="dashboard-card" style={{ padding: 0, overflow: 'hidden' }}>
+          {txns.map((t) => (
+            <ReconTxnRow
+              key={t.id}
+              txn={t}
+              token={token}
+              onTokenInvalid={onTokenInvalid}
+              onChanged={load}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReconTxnRow({ txn, token, onTokenInvalid, onChanged }) {
+  const [oneLiner, setOneLiner] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [resultMsg, setResultMsg] = useState(null);
+
+  const submit = async () => {
+    if (!oneLiner.trim()) return;
+    setSubmitting(true);
+    setResultMsg(null);
+    try {
+      const url = new URL('/api/admin/explain-and-rule', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bank_transaction_id: txn.id,
+          one_liner: oneLiner.trim(),
+        }),
+      });
+      if (res.status === 401) { onTokenInvalid(); return; }
+      const json = await res.json();
+      if (!json.ok) {
+        setResultMsg({ error: json.error || 'rule generation failed' });
+        return;
+      }
+      setResultMsg({
+        success: true,
+        ruleName: json.rule.name,
+        glAccount: json.rule.target?.gl_account_code,
+        confidence: json.rule.initial_confidence,
+        explanation: json.rule.explanation,
+        candidateId: json.candidate?.candidate_id,
+      });
+      setOneLiner('');
+      onChanged();
+    } catch (err) {
+      setResultMsg({ error: err.message || String(err) });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const candidateAction = async (candidateId, action) => {
+    const url = new URL('/api/admin/match-candidate-action', window.location.origin);
+    url.searchParams.set('secret', token);
+    const res = await fetch(url.toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ candidate_id: candidateId, action }),
+    });
+    if (res.status === 401) { onTokenInvalid(); return; }
+    onChanged();
+  };
+
+  // Plaid sign convention: positive = money OUT (debit) of the
+  // bank, negative = money IN (credit). Render with $ sign and a
+  // visual cue.
+  const isOutflow = Number(txn.amount_cents) > 0;
+  const dollars = (Math.abs(Number(txn.amount_cents)) / 100).toLocaleString('en-US', {
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  });
+
+  return (
+    <div className="recon-txn-card">
+      <div className="recon-txn-head">
+        <div>
+          <div className="recon-txn-merchant">
+            {txn.merchant_name || txn.description || '(no description)'}
+          </div>
+          <div className="recon-txn-meta">
+            {txn.posted_date} · {txn.bank_account_name || '(unknown bank)'}
+            {txn.pending && (
+              <span style={{
+                marginLeft: 6, padding: '1px 6px', borderRadius: 8,
+                background: '#FFF3E0', color: '#E65100',
+                fontSize: 10, fontWeight: 600,
+              }}>pending</span>
+            )}
+          </div>
+        </div>
+        <div className={
+          'recon-txn-amount ' +
+          (isOutflow ? 'recon-txn-amount-out' : 'recon-txn-amount-in')
+        }>
+          {isOutflow ? '−' : '+'}${dollars}
+        </div>
+      </div>
+      {txn.description && txn.description !== txn.merchant_name && (
+        <div className="recon-txn-desc">{txn.description}</div>
+      )}
+
+      {/* Existing candidates from prior rule matches */}
+      {txn.candidates.length > 0 && txn.candidates.map((c) => (
+        <div key={c.id} className="recon-candidate">
+          <div style={{ fontSize: '12px' }}>
+            <strong>Auto-match candidate</strong>
+            {' · '}confidence {(c.confidence_score * 100).toFixed(0)}%
+            {' · '}status: {c.status}
+          </div>
+          <div style={{ fontSize: '11px', color: '#666', marginTop: 2 }}>
+            Reasons: {(c.match_reason_codes || []).join(', ')}
+          </div>
+          {c.status !== 'confirmed' && c.status !== 'rejected' && (
+            <div className="recon-candidate-actions">
+              <button
+                type="button"
+                className="recon-btn recon-btn-confirm"
+                onClick={() => candidateAction(c.id, 'confirm')}
+              >
+                <Check size={11} /> Confirm
+              </button>
+              <button
+                type="button"
+                className="recon-btn recon-btn-reject"
+                onClick={() => candidateAction(c.id, 'reject')}
+              >
+                <X size={11} /> Reject
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
+
+      {/* Natural-language input */}
+      <div className="recon-input-row">
+        <input
+          type="text"
+          value={oneLiner}
+          onChange={(e) => setOneLiner(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && submit()}
+          disabled={submitting}
+          placeholder="Tell me what this is, e.g. 'plumber for SLM units, all repairs'"
+          className="recon-input"
+        />
+        <button
+          type="button"
+          onClick={submit}
+          disabled={submitting || !oneLiner.trim()}
+          className="recon-submit"
+          title="Generate a rule from this explanation"
+        >
+          <Sparkles size={13} />
+          {submitting ? 'Thinking…' : 'Categorize'}
+        </button>
+      </div>
+
+      {resultMsg && (
+        <div style={{
+          marginTop: 8, padding: '8px 10px', borderRadius: 6,
+          background: resultMsg.error ? '#FFEBEE' : '#E8F5E9',
+          fontSize: 12,
+          color: resultMsg.error ? '#C62828' : '#2E7D32',
+        }}>
+          {resultMsg.error ? (
+            <>Failed: {resultMsg.error}</>
+          ) : (
+            <>
+              <strong>Rule created: {resultMsg.ruleName}</strong>
+              {' · '}GL {resultMsg.glAccount}
+              {' · '}confidence {(resultMsg.confidence * 100).toFixed(0)}%
+              <div style={{ marginTop: 4, color: '#555' }}>{resultMsg.explanation}</div>
+              <div style={{ marginTop: 4, color: '#888' }}>
+                Refresh — the rule is now active and will auto-suggest matches for similar transactions going forward.
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
