@@ -22,6 +22,7 @@ import {
   Users, FileText, Send,
 } from 'lucide-react';
 import { usePlaidLink } from 'react-plaid-link';
+import MigrationFixButton from './MigrationFixButton.jsx';
 
 const TABS = [
   { id: 'coa',       label: 'Chart of Accounts', icon: BookOpen },
@@ -379,6 +380,7 @@ function ChartOfAccountsTab({ token, onTokenInvalid }) {
       {error && (
         <div className="dashboard-card" style={{ padding: '16px', background: '#FFEBEE', color: '#C62828' }}>
           <strong>Failed to load:</strong> {error}
+          <MigrationFixButton error={error} />
         </div>
       )}
 
@@ -606,6 +608,7 @@ function BankAccountsTab({ token, onTokenInvalid }) {
     return (
       <div className="dashboard-card" style={{ padding: '16px', background: '#FFEBEE', color: '#C62828' }}>
         <strong>Failed to load:</strong> {error}
+        <MigrationFixButton error={error} />
       </div>
     );
   }
@@ -820,6 +823,7 @@ function ReceivablesTab({ token, onTokenInvalid }) {
     return (
       <div className="dashboard-card" style={{ padding: '16px', background: '#FFEBEE', color: '#C62828' }}>
         <strong>Failed to load:</strong> {error}
+        <MigrationFixButton error={error} />
       </div>
     );
   }
@@ -970,6 +974,7 @@ function JournalEntriesTab({ token, onTokenInvalid }) {
     return (
       <div className="dashboard-card" style={{ padding: '16px', background: '#FFEBEE', color: '#C62828' }}>
         <strong>Failed to load:</strong> {error}
+        <MigrationFixButton error={error} />
       </div>
     );
   }
@@ -1386,6 +1391,7 @@ function ReconciliationTab({ token, onTokenInvalid }) {
     return (
       <div className="dashboard-card" style={{ padding: '16px', background: '#FFEBEE', color: '#C62828' }}>
         <strong>Failed to load:</strong> {error}
+        <MigrationFixButton error={error} />
       </div>
     );
   }
@@ -1726,6 +1732,7 @@ function RulesTab({ token, onTokenInvalid }) {
     return (
       <div className="dashboard-card" style={{ padding: '16px', background: '#FFEBEE', color: '#C62828' }}>
         <strong>Failed to load:</strong> {error}
+        <MigrationFixButton error={error} />
       </div>
     );
   }
@@ -2072,6 +2079,7 @@ function EntitiesTab({ token, onTokenInvalid }) {
     return (
       <div className="dashboard-card" style={{ padding: '16px', background: '#FFEBEE', color: '#C62828' }}>
         <strong>Failed to load:</strong> {error}
+        <MigrationFixButton error={error} />
       </div>
     );
   }
@@ -2473,6 +2481,7 @@ function ReceiptsTab({ token, onTokenInvalid }) {
     return (
       <div className="dashboard-card" style={{ padding: 16, background: '#FFEBEE', color: '#C62828' }}>
         <strong>Failed to load:</strong> {error}
+        <MigrationFixButton error={error} />
       </div>
     );
   }
@@ -2630,6 +2639,7 @@ function DepositsTab({ token, onTokenInvalid }) {
     return (
       <div className="dashboard-card" style={{ padding: 16, background: '#FFEBEE', color: '#C62828' }}>
         <strong>Failed to load:</strong> {error}
+        <MigrationFixButton error={error} />
       </div>
     );
   }
@@ -3102,6 +3112,7 @@ function VendorsTab({ token, onTokenInvalid }) {
     return (
       <div className="dashboard-card" style={{ padding: 16, background: '#FFEBEE', color: '#C62828' }}>
         <strong>Failed to load:</strong> {error}
+        <MigrationFixButton error={error} />
       </div>
     );
   }
@@ -3515,6 +3526,7 @@ function BillsTab({ token, onTokenInvalid }) {
     return (
       <div className="dashboard-card" style={{ padding: 16, background: '#FFEBEE', color: '#C62828' }}>
         <strong>Failed to load:</strong> {error}
+        <MigrationFixButton error={error} />
       </div>
     );
   }
