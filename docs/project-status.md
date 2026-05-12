@@ -37,15 +37,15 @@ progress.
 | 1.5 | COA seeder + AppFolio importer (Stage 6 work pulled forward) | 2–3 wk | done | **100%** |
 | 1.6 | Multi-dimensional tagging design + vocabulary stubs + schema | ~1 wk | doc + stubs + schema landed | **80%** |
 | 2 | AR (leases, tenants, scheduled/posted charges, receipts, deposits) | 10–12 wk | full schema + service layer + happy-path verified end-to-end against real Breeze data in production | **85%** |
-| 3 | Banking (bank_accounts, Plaid, fuzzy recon) | 8–10 wk | schema + migration 0008 + is_bank trigger landed; bulk-converter for the 35 parked AppFolio GLs + Plaid sync still pending | **30%** |
+| 3 | Banking (bank_accounts, Plaid, fuzzy recon) | 8–10 wk | schema + migration 0008/0009 + is_bank trigger + parked-GL bulk converter + full Plaid Link/exchange/sync wired in UI + AES-256-GCM encryption for access tokens; fuzzy-recon match engine still pending | **75%** |
 | 4 | Payments rail abstraction + 1 inbound provider | 8–10 wk | pending | 0% |
 | 5 | AP (vendors, bills, anticipated bills, bill pay) | 10–12 wk | pending | 0% |
 | 6 | AppFolio migration tooling (rest of it — JE / bill / receipt importers) | 6–8 wk | partial (COA done) | **20%** |
 | 7 | Reporting v1 (owner statements, P&L, rent roll) | 10–14 wk | pending | 0% |
-| 8 | UI buildout for /accounting end-to-end | 16–20 wk | Accounting page refactored to a 7-tab workspace with live Chart of Accounts browser; remaining 6 tabs are placeholders awaiting their service-layer plumbing | **10%** |
+| 8 | UI buildout for /accounting end-to-end | 16–20 wk | Accounting page is a 7-tab workspace with 4 live tabs (Chart of Accounts / Receivables / Bank Accounts / Journal Entries with drill-into-lines), plus Plaid Link UI; Receipts / Deposits / Reports tabs still placeholder | **40%** |
 | 9 | Trust accounting v2 | 8–12 wk | reserved-fields only | **5%** |
 
-**Weighted overall: ~33%** of the architectural plan.
+**Weighted overall: ~45%** of the architectural plan.
 
 Caveat: this is the architectural completion against the planned
 *scope*. Real production-readiness includes a lot of work that's not

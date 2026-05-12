@@ -89,8 +89,8 @@ export default function AccountingPage() {
           <TabBar activeTab={activeTab} onChange={setActiveTab} />
           <div style={{ marginTop: '16px' }}>
             {activeTab === 'coa' && <ChartOfAccountsTab token={token} onTokenInvalid={() => setToken('')} />}
-            {activeTab === 'journal' && <PlaceholderTab label="Journal Entries" hint="Recent entries + posting form. Backed by /api/admin/post-journal-entry (coming soon)." />}
-            {activeTab === 'ar' && <PlaceholderTab label="Receivables" hint="Open posted_charges grouped by tenant / lease / property." />}
+            {activeTab === 'journal' && <JournalEntriesTab token={token} onTokenInvalid={() => setToken('')} />}
+            {activeTab === 'ar' && <ReceivablesTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'receipts' && <PlaceholderTab label="Receipts" hint="Recent receipts + record-receipt form. Backed by /api/admin/ar-happy-path or a focused record endpoint." />}
             {activeTab === 'deposits' && <PlaceholderTab label="Deposits" hint="Undeposited Funds queue + build-deposit form." />}
             {activeTab === 'banks' && <BankAccountsTab token={token} onTokenInvalid={() => setToken('')} />}
@@ -677,6 +677,310 @@ function BankAccountsTab({ token, onTokenInvalid }) {
                   </td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Receivables tab ──────────────────────────────────────────────
+
+function ReceivablesTab({ token, onTokenInvalid }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [statusFilter, setStatusFilter] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const url = new URL('/api/admin/list-posted-charges', window.location.origin);
+      url.searchParams.set('secret', token);
+      if (statusFilter) url.searchParams.set('status', statusFilter);
+      const res = await fetch(url.toString());
+      if (res.status === 401) { onTokenInvalid(); return; }
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+      }
+      setData(await res.json());
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [token, statusFilter, onTokenInvalid]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <div style={{ padding: '24px', color: '#666' }}>Loading...</div>;
+  if (error) {
+    return (
+      <div className="dashboard-card" style={{ padding: '16px', background: '#FFEBEE', color: '#C62828' }}>
+        <strong>Failed to load:</strong> {error}
+      </div>
+    );
+  }
+  const charges = data?.charges || [];
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          style={{
+            padding: '8px 10px', border: '1px solid #ddd',
+            borderRadius: '6px', fontSize: '13px', background: 'white',
+          }}
+        >
+          <option value="">All non-voided</option>
+          <option value="open">Open</option>
+          <option value="partially_paid">Partially paid</option>
+          <option value="paid">Paid</option>
+          <option value="voided">Voided</option>
+        </select>
+        <button
+          type="button"
+          onClick={load}
+          className="btn-secondary"
+          style={{ padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+        >
+          <RefreshCw size={14} />
+          Refresh
+        </button>
+      </div>
+
+      {data?.summary_by_status && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
+          {data.summary_by_status.map((s) => (
+            <Pill
+              key={s.status}
+              label={s.status}
+              value={`${s.count} (${formatCents(s.total_balance_cents)} owed)`}
+              bg={s.status === 'paid' ? '#E8F5E9' : s.status === 'voided' ? '#F5F5F5' : '#FFF3E0'}
+              fg={s.status === 'paid' ? '#2E7D32' : s.status === 'voided' ? '#888' : '#E65100'}
+            />
+          ))}
+        </div>
+      )}
+
+      {charges.length === 0 ? (
+        <div className="dashboard-card" style={{ padding: '24px', textAlign: 'center', color: '#666' }}>
+          No posted charges yet. Hit <code>/api/admin/ar-happy-path</code> to fire the smoke-test scheduled charge.
+        </div>
+      ) : (
+        <div className="dashboard-card" style={{ padding: 0, overflow: 'hidden' }}>
+          <table className="properties-table" style={{ width: '100%' }}>
+            <thead>
+              <tr>
+                <th>Due</th>
+                <th>Tenant</th>
+                <th>Lease</th>
+                <th>Type</th>
+                <th>Description</th>
+                <th style={{ textAlign: 'right' }}>Amount</th>
+                <th style={{ textAlign: 'right' }}>Balance</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {charges.map((c) => (
+                <tr key={c.id}>
+                  <td style={{ fontFamily: 'monospace', fontSize: '12px' }}>{c.due_date}</td>
+                  <td>{c.tenant_display || <span style={{ color: '#bbb' }}>—</span>}</td>
+                  <td style={{ fontFamily: 'monospace', fontSize: '12px' }}>{c.lease_number || '—'}</td>
+                  <td>{c.charge_type}</td>
+                  <td style={{ color: '#555', fontSize: '13px' }}>{c.description}</td>
+                  <td style={{ textAlign: 'right', fontFamily: 'monospace' }}>{formatCents(c.amount_cents)}</td>
+                  <td style={{
+                    textAlign: 'right', fontFamily: 'monospace',
+                    color: c.balance_cents === 0 ? '#999' : '#222',
+                  }}>
+                    {formatCents(c.balance_cents)}
+                  </td>
+                  <td>
+                    <span style={{
+                      display: 'inline-block', padding: '2px 8px', borderRadius: '10px',
+                      background: c.status === 'paid' ? '#E8F5E9' :
+                                  c.status === 'voided' ? '#F5F5F5' :
+                                  c.status === 'partially_paid' ? '#FFF3E0' : '#E3F2FD',
+                      color: c.status === 'paid' ? '#2E7D32' :
+                             c.status === 'voided' ? '#888' :
+                             c.status === 'partially_paid' ? '#E65100' : '#1565C0',
+                      fontSize: '11px', fontWeight: 600,
+                    }}>
+                      {c.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Journal Entries tab ──────────────────────────────────────────
+
+function JournalEntriesTab({ token, onTokenInvalid }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [expanded, setExpanded] = useState(new Set());
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const url = new URL('/api/admin/list-journal-entries', window.location.origin);
+      url.searchParams.set('secret', token);
+      url.searchParams.set('include_lines', 'true');
+      url.searchParams.set('limit', '100');
+      const res = await fetch(url.toString());
+      if (res.status === 401) { onTokenInvalid(); return; }
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+      }
+      setData(await res.json());
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [token, onTokenInvalid]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const toggle = (id) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  if (loading) return <div style={{ padding: '24px', color: '#666' }}>Loading...</div>;
+  if (error) {
+    return (
+      <div className="dashboard-card" style={{ padding: '16px', background: '#FFEBEE', color: '#C62828' }}>
+        <strong>Failed to load:</strong> {error}
+      </div>
+    );
+  }
+  const entries = data?.entries || [];
+
+  return (
+    <div>
+      <div style={{ marginBottom: '12px' }}>
+        <button
+          type="button"
+          onClick={load}
+          className="btn-secondary"
+          style={{ padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+        >
+          <RefreshCw size={14} />
+          Refresh
+        </button>
+        <span style={{ marginLeft: '8px', fontSize: '13px', color: '#666' }}>
+          {entries.length} most recent {entries.length === 100 ? '(limited)' : ''}
+        </span>
+      </div>
+
+      {entries.length === 0 ? (
+        <div className="dashboard-card" style={{ padding: '24px', textAlign: 'center', color: '#666' }}>
+          No journal entries yet.
+        </div>
+      ) : (
+        <div className="dashboard-card" style={{ padding: 0, overflow: 'hidden' }}>
+          <table className="properties-table" style={{ width: '100%' }}>
+            <thead>
+              <tr>
+                <th style={{ width: '50px' }}>#</th>
+                <th>Date</th>
+                <th>Type</th>
+                <th>Memo</th>
+                <th style={{ textAlign: 'right' }}>Total</th>
+                <th>Status</th>
+                <th>Lines</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((e) => {
+                const isExpanded = expanded.has(e.id);
+                return (
+                  <>
+                    <tr
+                      key={e.id}
+                      onClick={() => toggle(e.id)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <td style={{ fontFamily: 'monospace', fontWeight: 600 }}>{e.entry_number}</td>
+                      <td style={{ fontFamily: 'monospace', fontSize: '12px' }}>{e.entry_date}</td>
+                      <td style={{ fontSize: '12px' }}>{e.entry_type}</td>
+                      <td style={{ color: '#555', fontSize: '13px' }}>{e.memo || '—'}</td>
+                      <td style={{ textAlign: 'right', fontFamily: 'monospace' }}>
+                        {formatCents(e.total_debit_cents)}
+                      </td>
+                      <td>
+                        <span style={{
+                          display: 'inline-block', padding: '2px 8px', borderRadius: '10px',
+                          background: e.status === 'posted' ? '#E8F5E9' :
+                                      e.status === 'reversed' ? '#FFF3E0' : '#F5F5F5',
+                          color: e.status === 'posted' ? '#2E7D32' :
+                                 e.status === 'reversed' ? '#E65100' : '#888',
+                          fontSize: '11px', fontWeight: 600,
+                        }}>
+                          {e.status}
+                        </span>
+                      </td>
+                      <td style={{ fontSize: '12px', color: '#666' }}>
+                        {e.line_count} {isExpanded ? '▾' : '▸'}
+                      </td>
+                    </tr>
+                    {isExpanded && e.lines && (
+                      <tr key={`${e.id}-lines`}>
+                        <td colSpan="7" style={{ background: '#FAFAFA', padding: '0' }}>
+                          <table style={{ width: '100%' }}>
+                            <thead>
+                              <tr style={{ background: '#F0F0F0', fontSize: '11px' }}>
+                                <th style={{ padding: '4px 12px' }}>#</th>
+                                <th style={{ padding: '4px 12px' }}>GL</th>
+                                <th style={{ padding: '4px 12px' }}>Memo</th>
+                                <th style={{ padding: '4px 12px', textAlign: 'right' }}>Debit</th>
+                                <th style={{ padding: '4px 12px', textAlign: 'right' }}>Credit</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {e.lines.map((l) => (
+                                <tr key={l.id} style={{ fontSize: '12px' }}>
+                                  <td style={{ padding: '4px 12px', fontFamily: 'monospace', color: '#888' }}>{l.line_number}</td>
+                                  <td style={{ padding: '4px 12px', fontFamily: 'monospace' }}>
+                                    {l.gl_code} <span style={{ color: '#888' }}>· {l.gl_name}</span>
+                                  </td>
+                                  <td style={{ padding: '4px 12px', color: '#555' }}>{l.memo || '—'}</td>
+                                  <td style={{ padding: '4px 12px', textAlign: 'right', fontFamily: 'monospace' }}>
+                                    {l.debit_cents > 0 ? formatCents(l.debit_cents) : ''}
+                                  </td>
+                                  <td style={{ padding: '4px 12px', textAlign: 'right', fontFamily: 'monospace' }}>
+                                    {l.credit_cents > 0 ? formatCents(l.credit_cents) : ''}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                );
+              })}
             </tbody>
           </table>
         </div>
