@@ -36,16 +36,16 @@ progress.
 | 1 | GL core (accounts, periods, entries, lines, counters) | 6–8 wk | done | **100%** |
 | 1.5 | COA seeder + AppFolio importer (Stage 6 work pulled forward) | 2–3 wk | done | **100%** |
 | 1.6 | Multi-dimensional tagging design + vocabulary stubs + schema | ~1 wk | doc + stubs + schema landed | **80%** |
-| 2 | AR (leases, tenants, scheduled/posted charges, receipts, deposits) | 10–12 wk | schema + migration + default tags + posting primitives + AR flows + happy-path smoke test all landed | **75%** |
-| 3 | Banking (bank_accounts, Plaid, fuzzy recon) | 8–10 wk | pending | 0% |
+| 2 | AR (leases, tenants, scheduled/posted charges, receipts, deposits) | 10–12 wk | full schema + service layer + happy-path verified end-to-end against real Breeze data in production | **85%** |
+| 3 | Banking (bank_accounts, Plaid, fuzzy recon) | 8–10 wk | schema + migration 0008 + is_bank trigger landed; bulk-converter for the 35 parked AppFolio GLs + Plaid sync still pending | **30%** |
 | 4 | Payments rail abstraction + 1 inbound provider | 8–10 wk | pending | 0% |
 | 5 | AP (vendors, bills, anticipated bills, bill pay) | 10–12 wk | pending | 0% |
 | 6 | AppFolio migration tooling (rest of it — JE / bill / receipt importers) | 6–8 wk | partial (COA done) | **20%** |
 | 7 | Reporting v1 (owner statements, P&L, rent roll) | 10–14 wk | pending | 0% |
-| 8 | UI buildout for /accounting end-to-end | 16–20 wk | pending | 0% |
+| 8 | UI buildout for /accounting end-to-end | 16–20 wk | Accounting page refactored to a 7-tab workspace with live Chart of Accounts browser; remaining 6 tabs are placeholders awaiting their service-layer plumbing | **10%** |
 | 9 | Trust accounting v2 | 8–12 wk | reserved-fields only | **5%** |
 
-**Weighted overall: ~28%** of the architectural plan.
+**Weighted overall: ~33%** of the architectural plan.
 
 Caveat: this is the architectural completion against the planned
 *scope*. Real production-readiness includes a lot of work that's not
@@ -127,7 +127,29 @@ product".
     creates a tenant + lease + scheduled_charge, fires the charge,
     records a fully-allocated receipt, builds a single-receipt
     deposit. Auto-creates Undeposited Funds (1110) on demand if
-    missing from the chart.
+    missing from the chart. **Verified end-to-end against real
+    Breeze production data: 3 sequential balanced JEs (entry
+    numbers 1/2/3), 574ms elapsed, all DB triggers passed.**
+18. Stage 3 banking schema (4 new tables + 3 new enums + migration
+    0008): `bank_accounts` with 1:1 UNIQUE constraint on
+    `gl_account_id`, `bank_transactions` immutable Plaid feed,
+    `match_candidates` fuzzy-recon queue with partial unique
+    index on confirmed status, `match_rules` learnable engine.
+    Retroactive `deposits.bank_account_id` FK. Trigger
+    `bank_accounts_maintain_is_bank_flag` syncs
+    `gl_accounts.is_bank` on link/unlink.
+19. Stage 8 UI scaffolding: `AccountingPage.jsx` rewritten as a
+    7-tab workspace (Chart of Accounts / Journal Entries /
+    Receivables / Receipts / Deposits / Bank Accounts / Reports).
+    First live tab is **Chart of Accounts** — fetches
+    `/api/admin/list-gl-accounts`, renders a searchable /
+    filterable table with type pills, sub-account indentation,
+    system/bank/inactive badges, posting counts, and flattened
+    tag chips. Admin token gated via sessionStorage; cleared on
+    401 or tab close.
+20. `api/admin/list-gl-accounts.js` — read endpoint feeding the
+    COA tab. Returns each account with posting_count from
+    journal_lines + flattened tag map from gl_account_tags.
 
 ## What's next
 
