@@ -19,12 +19,14 @@ import {
   DollarSign, Receipt, CreditCard, Landmark, FileSpreadsheet,
   BookOpen, BarChart3, AlertCircle, RefreshCw, Search, Tag, Eye, EyeOff,
   Link2, Download, Sparkles, Check, X, Settings, Trash2, Power, Building2, Plus,
+  Users,
 } from 'lucide-react';
 import { usePlaidLink } from 'react-plaid-link';
 
 const TABS = [
   { id: 'coa',       label: 'Chart of Accounts', icon: BookOpen },
   { id: 'entities',  label: 'Entities',          icon: Building2 },
+  { id: 'vendors',   label: 'Vendors',           icon: Users },
   { id: 'journal',   label: 'Journal Entries',   icon: FileSpreadsheet },
   { id: 'ar',        label: 'Receivables',       icon: Receipt },
   { id: 'receipts',  label: 'Receipts',          icon: DollarSign },
@@ -102,6 +104,7 @@ export default function AccountingPage() {
           <div style={{ marginTop: '16px' }}>
             {activeTab === 'coa' && <ChartOfAccountsTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'entities' && <EntitiesTab token={token} onTokenInvalid={() => setToken('')} />}
+            {activeTab === 'vendors' && <VendorsTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'journal' && <JournalEntriesTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'ar' && <ReceivablesTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'receipts' && <ReceiptsTab token={token} onTokenInvalid={() => setToken('')} />}
@@ -2858,3 +2861,400 @@ function SummaryStat({ label, value, color }) {
 
 const th = { padding: '10px 12px', textAlign: 'left', fontWeight: 600, color: '#555', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 };
 const td = { padding: '10px 12px', color: '#222' };
+
+// ── Vendors tab ─────────────────────────────────────────────────
+
+const VENDOR_TYPE_LABELS = {
+  individual: 'Individual / 1099',
+  business: 'Business / LLC / Corp',
+  government: 'Government / Tax authority',
+  utility: 'Utility',
+  insurance: 'Insurance carrier',
+  other: 'Other',
+};
+
+function VendorsTab({ token, onTokenInvalid }) {
+  const [vendors, setVendors] = useState([]);
+  const [glAccounts, setGlAccounts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [editing, setEditing] = useState(null);
+  const [showInactive, setShowInactive] = useState(false);
+  const [search, setSearch] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const vUrl = new URL('/api/admin/list-vendors', window.location.origin);
+      vUrl.searchParams.set('secret', token);
+      if (showInactive) vUrl.searchParams.set('include_inactive', 'true');
+      const gUrl = new URL('/api/admin/list-gl-accounts', window.location.origin);
+      gUrl.searchParams.set('secret', token);
+      const [vRes, gRes] = await Promise.all([fetch(vUrl.toString()), fetch(gUrl.toString())]);
+      if (vRes.status === 401 || gRes.status === 401) { onTokenInvalid(); return; }
+      const vJson = await vRes.json();
+      const gJson = gRes.ok ? await gRes.json() : { accounts: [] };
+      setVendors(vJson.vendors || []);
+      setGlAccounts(gJson.accounts || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [token, onTokenInvalid, showInactive]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return vendors;
+    const q = search.trim().toLowerCase();
+    return vendors.filter((v) =>
+      v.display_name?.toLowerCase().includes(q) ||
+      v.legal_name?.toLowerCase().includes(q) ||
+      v.contact_email?.toLowerCase().includes(q) ||
+      v.default_gl_code?.includes(q),
+    );
+  }, [vendors, search]);
+
+  if (loading) return <div style={{ padding: 24, color: '#666' }}>Loading…</div>;
+  if (error) {
+    return (
+      <div className="dashboard-card" style={{ padding: 16, background: '#FFEBEE', color: '#C62828' }}>
+        <strong>Failed to load:</strong> {error}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{
+        padding: '14px 16px', marginBottom: 12,
+        background: 'linear-gradient(135deg, #E8F5E9 0%, #C8E6C9 100%)',
+        borderLeft: '3px solid #2E7D32', borderRadius: 8,
+      }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: '#2E7D32', marginBottom: 4 }}>
+          <Users size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />
+          Vendors
+        </div>
+        <div style={{ fontSize: 12, color: '#555' }}>
+          Anyone you pay — plumbers, lawn care, utilities, taxing authorities, insurance.
+          Default GL routing lets bills auto-code; 1099-eligible vendors are flagged for
+          year-end reporting.
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          onClick={load}
+          className="btn-secondary"
+          style={{ padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+        >
+          <RefreshCw size={14} /> Refresh
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditing('new')}
+          style={{
+            padding: '6px 14px', background: '#2E7D32', color: 'white',
+            border: 'none', borderRadius: 6, fontWeight: 600, fontSize: 13,
+            cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6,
+          }}
+        >
+          <Plus size={14} /> New vendor
+        </button>
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search name / email / GL code"
+          style={{ padding: '6px 10px', border: '1px solid #CCC', borderRadius: 6, fontSize: 13, minWidth: 220, flex: 1, maxWidth: 320 }}
+        />
+        <span style={{ fontSize: 13, color: '#666' }}>
+          {filtered.length} of {vendors.length}
+        </span>
+        <label style={{ marginLeft: 'auto', fontSize: 13, color: '#555', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <input
+            type="checkbox"
+            checked={showInactive}
+            onChange={(e) => setShowInactive(e.target.checked)}
+          />
+          Show inactive
+        </label>
+      </div>
+
+      {editing && (
+        <VendorEditor
+          vendor={editing === 'new' ? null : editing}
+          glAccounts={glAccounts}
+          token={token}
+          onSaved={() => { setEditing(null); load(); }}
+          onCancel={() => setEditing(null)}
+          onTokenInvalid={onTokenInvalid}
+        />
+      )}
+
+      {filtered.length === 0 ? (
+        <div className="dashboard-card" style={{ padding: 24, textAlign: 'center', color: '#666' }}>
+          {vendors.length === 0
+            ? 'No vendors yet. Click "New vendor" to create your first one.'
+            : 'No vendors match your search.'}
+        </div>
+      ) : (
+        <div className="dashboard-card" style={{ padding: 0, overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: '#FAFAFA', borderBottom: '1px solid #E0E0E0' }}>
+                <th style={th}>Vendor</th>
+                <th style={th}>Type</th>
+                <th style={th}>Default GL</th>
+                <th style={th}>Terms</th>
+                <th style={th}>1099?</th>
+                <th style={th}>Contact</th>
+                <th style={th}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((v) => (
+                <tr
+                  key={v.id}
+                  style={{
+                    borderBottom: '1px solid #F0F0F0',
+                    opacity: v.is_active ? 1 : 0.55,
+                  }}
+                >
+                  <td style={td}>
+                    <div style={{ fontWeight: 600 }}>{v.display_name}</div>
+                    {v.legal_name && v.legal_name !== v.display_name && (
+                      <div style={{ fontSize: 11, color: '#888' }}>{v.legal_name}</div>
+                    )}
+                  </td>
+                  <td style={td}>
+                    <span style={{
+                      padding: '1px 8px', borderRadius: 10, fontSize: 11, fontWeight: 600,
+                      background: '#E3F2FD', color: '#1565C0',
+                    }}>
+                      {VENDOR_TYPE_LABELS[v.vendor_type] || v.vendor_type}
+                    </span>
+                  </td>
+                  <td style={td}>
+                    {v.default_gl_code ? (
+                      <span>
+                        <strong>{v.default_gl_code}</strong>
+                        <span style={{ color: '#888', marginLeft: 6, fontSize: 11 }}>
+                          {v.default_gl_name}
+                        </span>
+                      </span>
+                    ) : <span style={{ color: '#999' }}>—</span>}
+                  </td>
+                  <td style={td}>net {v.payment_terms_days}</td>
+                  <td style={td}>
+                    {v.is_1099_eligible ? (
+                      <span style={{
+                        padding: '1px 8px', borderRadius: 10, fontSize: 11, fontWeight: 600,
+                        background: '#FFF3E0', color: '#E65100',
+                      }}>1099</span>
+                    ) : <span style={{ color: '#999' }}>—</span>}
+                  </td>
+                  <td style={{ ...td, fontSize: 11, color: '#666' }}>
+                    {v.contact_email && <div>{v.contact_email}</div>}
+                    {v.contact_phone && <div>{v.contact_phone}</div>}
+                    {!v.contact_email && !v.contact_phone && <span style={{ color: '#999' }}>—</span>}
+                  </td>
+                  <td style={{ ...td, textAlign: 'right' }}>
+                    <button
+                      type="button"
+                      onClick={() => setEditing(v)}
+                      style={{
+                        padding: '5px 10px', fontSize: 12, borderRadius: 5,
+                        border: '1px solid #999', background: 'white', color: '#444',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Edit
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function VendorEditor({ vendor, glAccounts, token, onSaved, onCancel, onTokenInvalid }) {
+  const [displayName, setDisplayName] = useState(vendor?.display_name || '');
+  const [legalName, setLegalName] = useState(vendor?.legal_name || '');
+  const [vendorType, setVendorType] = useState(vendor?.vendor_type || 'business');
+  const [contactEmail, setContactEmail] = useState(vendor?.contact_email || '');
+  const [contactPhone, setContactPhone] = useState(vendor?.contact_phone || '');
+  const [remitCity, setRemitCity] = useState(vendor?.remit_city || '');
+  const [remitState, setRemitState] = useState(vendor?.remit_state || '');
+  const [taxId, setTaxId] = useState('');
+  const [is1099, setIs1099] = useState(vendor?.is_1099_eligible || false);
+  const [paymentTermsDays, setPaymentTermsDays] = useState(vendor?.payment_terms_days ?? 30);
+  const [defaultGlAccountId, setDefaultGlAccountId] = useState(vendor?.default_gl_account_id || '');
+  const [isActive, setIsActive] = useState(vendor?.is_active ?? true);
+  const [notes, setNotes] = useState(vendor?.notes || '');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+
+  // Filter GL accounts to the expense set most relevant for AP
+  // default routing. Asset / liability accounts are still valid
+  // (insurance prepayments hit 1300), so don't fully exclude.
+  const sortedGl = useMemo(() => {
+    return [...glAccounts]
+      .filter((a) => a.is_active)
+      .sort((a, b) => a.code.localeCompare(b.code));
+  }, [glAccounts]);
+
+  const save = async () => {
+    if (!displayName.trim()) { setErr('Display name required'); return; }
+    setSaving(true);
+    setErr(null);
+    try {
+      const body = {
+        id: vendor?.id,
+        display_name: displayName.trim(),
+        legal_name: legalName.trim() || null,
+        vendor_type: vendorType,
+        contact_email: contactEmail.trim() || null,
+        contact_phone: contactPhone.trim() || null,
+        remit_city: remitCity.trim() || null,
+        remit_state: remitState.trim() || null,
+        is_1099_eligible: is1099,
+        payment_terms_days: Number(paymentTermsDays),
+        default_gl_account_id: defaultGlAccountId || null,
+        is_active: isActive,
+        notes: notes.trim() || null,
+      };
+      if (taxId.trim()) body.tax_id = taxId.trim();
+
+      const url = new URL('/api/admin/upsert-vendor', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (res.status === 401) { onTokenInvalid(); return; }
+      const json = await res.json();
+      if (!json.ok) { setErr(json.error || 'save failed'); return; }
+      onSaved();
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="dashboard-card" style={{ padding: 16, marginBottom: 12, border: '2px solid #2E7D32' }}>
+      <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12, color: '#2E7D32' }}>
+        {vendor ? `Edit ${vendor.display_name}` : 'New vendor'}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <VendField label="Display name *">
+          <input type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)} style={vendInput} />
+        </VendField>
+        <VendField label="Legal name (if different)">
+          <input type="text" value={legalName} onChange={(e) => setLegalName(e.target.value)} style={vendInput} />
+        </VendField>
+        <VendField label="Vendor type">
+          <select value={vendorType} onChange={(e) => setVendorType(e.target.value)} style={vendInput}>
+            {Object.entries(VENDOR_TYPE_LABELS).map(([k, v]) => (
+              <option key={k} value={k}>{v}</option>
+            ))}
+          </select>
+        </VendField>
+        <VendField label="Default GL account (for new bills)">
+          <select
+            value={defaultGlAccountId}
+            onChange={(e) => setDefaultGlAccountId(e.target.value)}
+            style={vendInput}
+          >
+            <option value="">— none —</option>
+            {sortedGl.map((a) => (
+              <option key={a.id} value={a.id}>{a.code} · {a.name}</option>
+            ))}
+          </select>
+        </VendField>
+        <VendField label="Contact email">
+          <input type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} style={vendInput} />
+        </VendField>
+        <VendField label="Contact phone">
+          <input type="tel" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} style={vendInput} />
+        </VendField>
+        <VendField label="Remit city">
+          <input type="text" value={remitCity} onChange={(e) => setRemitCity(e.target.value)} style={vendInput} />
+        </VendField>
+        <VendField label="Remit state">
+          <input type="text" maxLength={2} value={remitState} onChange={(e) => setRemitState(e.target.value)} placeholder="OH" style={vendInput} />
+        </VendField>
+        <VendField label={`EIN / Tax ID ${vendor?.tax_id_last4 ? `(currently ending ${vendor.tax_id_last4})` : ''}`}>
+          <input
+            type="text" value={taxId} onChange={(e) => setTaxId(e.target.value)}
+            placeholder={vendor?.tax_id_last4 ? 'Leave blank to keep' : '12-3456789'}
+            style={vendInput}
+          />
+        </VendField>
+        <VendField label="Payment terms (days)">
+          <input type="number" min="0" value={paymentTermsDays} onChange={(e) => setPaymentTermsDays(e.target.value)} style={vendInput} />
+        </VendField>
+        <VendField label="1099 eligible?">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, paddingTop: 6 }}>
+            <input type="checkbox" checked={is1099} onChange={(e) => setIs1099(e.target.checked)} />
+            {is1099 ? 'Yes — generate 1099 at year-end' : 'No'}
+          </label>
+        </VendField>
+        <VendField label="Active?">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, paddingTop: 6 }}>
+            <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
+            {isActive ? 'Active' : 'Inactive'}
+          </label>
+        </VendField>
+        <div style={{ gridColumn: 'span 2' }}>
+          <VendField label="Notes">
+            <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} style={{ ...vendInput, fontFamily: 'inherit' }} />
+          </VendField>
+        </div>
+      </div>
+      {err && <div style={{ marginTop: 8, color: '#C62828', fontSize: 12 }}>Error: {err}</div>}
+      <div style={{ marginTop: 12, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          style={{ padding: '7px 14px', border: '1px solid #999', background: 'white', color: '#444', borderRadius: 6, fontSize: 13, cursor: saving ? 'not-allowed' : 'pointer' }}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving}
+          style={{ padding: '7px 16px', background: saving ? '#BBB' : '#2E7D32', color: 'white', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: 13, cursor: saving ? 'not-allowed' : 'pointer' }}
+        >
+          {saving ? 'Saving…' : (vendor ? 'Save changes' : 'Create vendor')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const vendInput = {
+  padding: '7px 10px', border: '1px solid #CCC', borderRadius: 5,
+  fontSize: 13, width: '100%', boxSizing: 'border-box',
+};
+
+function VendField({ label, children }) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12, color: '#444', gap: 3 }}>
+      <span style={{ fontWeight: 600 }}>{label}</span>
+      {children}
+    </label>
+  );
+}
