@@ -18,7 +18,7 @@ import { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   DollarSign, Receipt, CreditCard, Landmark, FileSpreadsheet,
   BookOpen, BarChart3, AlertCircle, RefreshCw, Search, Tag, Eye, EyeOff,
-  Link2, Download, Sparkles, Check, X,
+  Link2, Download, Sparkles, Check, X, Settings, Trash2, Power,
 } from 'lucide-react';
 import { usePlaidLink } from 'react-plaid-link';
 
@@ -30,6 +30,7 @@ const TABS = [
   { id: 'deposits',  label: 'Deposits',          icon: Landmark },
   { id: 'banks',     label: 'Bank Accounts',     icon: CreditCard },
   { id: 'recon',     label: 'Reconciliation',    icon: Sparkles },
+  { id: 'rules',     label: 'Rules',             icon: Settings },
   { id: 'reports',   label: 'Reports',           icon: BarChart3 },
 ];
 
@@ -96,6 +97,7 @@ export default function AccountingPage() {
             {activeTab === 'deposits' && <PlaceholderTab label="Deposits" hint="Undeposited Funds queue + build-deposit form." />}
             {activeTab === 'banks' && <BankAccountsTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'recon' && <ReconciliationTab token={token} onTokenInvalid={() => setToken('')} />}
+            {activeTab === 'rules' && <RulesTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'reports' && <PlaceholderTab label="Reports" hint="P&L, rent roll, owner statements (Stage 7)." />}
           </div>
         </>
@@ -1545,6 +1547,349 @@ function ReconTxnRow({ txn, token, onTokenInvalid, onChanged }) {
               </div>
             </>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Rules tab ───────────────────────────────────────────────────
+
+function RulesTab({ token, onTokenInvalid }) {
+  const [rules, setRules] = useState([]);
+  const [settings, setSettings] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [showInactive, setShowInactive] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const rulesUrl = new URL('/api/admin/list-match-rules', window.location.origin);
+      rulesUrl.searchParams.set('secret', token);
+      if (showInactive) rulesUrl.searchParams.set('include_inactive', 'true');
+      const settingsUrl = new URL('/api/admin/recon-settings', window.location.origin);
+      settingsUrl.searchParams.set('secret', token);
+
+      const [rulesRes, settingsRes] = await Promise.all([
+        fetch(rulesUrl.toString()),
+        fetch(settingsUrl.toString()),
+      ]);
+      if (rulesRes.status === 401 || settingsRes.status === 401) {
+        onTokenInvalid();
+        return;
+      }
+      if (!rulesRes.ok) throw new Error(`list-match-rules HTTP ${rulesRes.status}`);
+      if (!settingsRes.ok) throw new Error(`recon-settings HTTP ${settingsRes.status}`);
+      const rulesJson = await rulesRes.json();
+      const settingsJson = await settingsRes.json();
+      setRules(rulesJson.rules || []);
+      setSettings({
+        autoMatchConfidence: settingsJson.auto_match_confidence,
+        autoMatchMinTimesUsed: settingsJson.auto_match_min_times_used,
+      });
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [token, onTokenInvalid, showInactive]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <div style={{ padding: '24px', color: '#666' }}>Loading...</div>;
+  if (error) {
+    return (
+      <div className="dashboard-card" style={{ padding: '16px', background: '#FFEBEE', color: '#C62828' }}>
+        <strong>Failed to load:</strong> {error}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <ReconSettingsCard
+        settings={settings}
+        token={token}
+        onSaved={load}
+        onTokenInvalid={onTokenInvalid}
+      />
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '12px 0 8px' }}>
+        <button
+          type="button"
+          onClick={load}
+          className="btn-secondary"
+          style={{ padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+        >
+          <RefreshCw size={14} /> Refresh
+        </button>
+        <span style={{ fontSize: '13px', color: '#666' }}>
+          {rules.length} rule{rules.length === 1 ? '' : 's'}
+        </span>
+        <label style={{ marginLeft: 'auto', fontSize: '13px', color: '#555', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+          <input
+            type="checkbox"
+            checked={showInactive}
+            onChange={(e) => setShowInactive(e.target.checked)}
+          />
+          Show inactive
+        </label>
+      </div>
+
+      {rules.length === 0 ? (
+        <div className="dashboard-card" style={{ padding: '24px', textAlign: 'center', color: '#666' }}>
+          No rules yet. Rules are created from the <strong>Reconciliation</strong> tab — type a one-line
+          explanation of any pending bank transaction and Claude generates one.
+        </div>
+      ) : (
+        <div className="dashboard-card" style={{ padding: 0, overflow: 'hidden' }}>
+          {rules.map((r) => (
+            <RuleRow
+              key={r.id}
+              rule={r}
+              token={token}
+              onChanged={load}
+              onTokenInvalid={onTokenInvalid}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReconSettingsCard({ settings, token, onSaved, onTokenInvalid }) {
+  const [confidence, setConfidence] = useState(settings?.autoMatchConfidence ?? 0.95);
+  const [minTimesUsed, setMinTimesUsed] = useState(settings?.autoMatchMinTimesUsed ?? 5);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  // Sync from props when parent reloads.
+  useEffect(() => {
+    if (settings) {
+      setConfidence(settings.autoMatchConfidence);
+      setMinTimesUsed(settings.autoMatchMinTimesUsed);
+    }
+  }, [settings]);
+
+  const dirty =
+    settings &&
+    (Number(confidence) !== Number(settings.autoMatchConfidence) ||
+      Number(minTimesUsed) !== Number(settings.autoMatchMinTimesUsed));
+
+  const save = async () => {
+    setSaving(true);
+    setMsg(null);
+    try {
+      const url = new URL('/api/admin/recon-settings', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          auto_match_confidence: Number(confidence),
+          auto_match_min_times_used: Number(minTimesUsed),
+        }),
+      });
+      if (res.status === 401) { onTokenInvalid(); return; }
+      const json = await res.json();
+      if (!json.ok) {
+        setMsg({ error: json.error || 'save failed' });
+        return;
+      }
+      setMsg({ success: true });
+      onSaved();
+    } catch (err) {
+      setMsg({ error: err.message || String(err) });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="dashboard-card" style={{ padding: '14px 16px', background: 'linear-gradient(135deg, #F3E5F5 0%, #E8EAF6 100%)', borderLeft: '3px solid #6A1B9A' }}>
+      <div style={{ fontSize: '14px', fontWeight: 600, color: '#6A1B9A', marginBottom: '4px' }}>
+        <Sparkles size={14} style={{ verticalAlign: '-2px', marginRight: '4px' }} />
+        Auto-match thresholds
+      </div>
+      <div style={{ fontSize: '12px', color: '#555', marginBottom: '10px' }}>
+        A pending candidate is auto-matched (skips human review) when its confidence is at least
+        the threshold AND its rule has been confirmed at least the minimum number of times.
+        Lower these to ramp auto-trust faster; raise them for stricter review.
+      </div>
+      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', fontSize: '12px', color: '#444' }}>
+          Confidence threshold (0–1)
+          <input
+            type="number"
+            min="0"
+            max="1"
+            step="0.01"
+            value={confidence}
+            onChange={(e) => setConfidence(e.target.value)}
+            style={{ padding: '6px 10px', border: '1px solid #ccc', borderRadius: '6px', width: '120px', marginTop: '2px' }}
+          />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', fontSize: '12px', color: '#444' }}>
+          Min rule uses
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={minTimesUsed}
+            onChange={(e) => setMinTimesUsed(e.target.value)}
+            style={{ padding: '6px 10px', border: '1px solid #ccc', borderRadius: '6px', width: '120px', marginTop: '2px' }}
+          />
+        </label>
+        <button
+          type="button"
+          onClick={save}
+          disabled={!dirty || saving}
+          style={{
+            padding: '8px 16px',
+            background: !dirty || saving ? '#BBB' : '#6A1B9A',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            fontWeight: 600,
+            fontSize: '13px',
+            cursor: !dirty || saving ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        {msg && (
+          <span style={{ fontSize: '12px', color: msg.error ? '#C62828' : '#2E7D32', marginLeft: '8px' }}>
+            {msg.error ? `Failed: ${msg.error}` : 'Saved'}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RuleRow({ rule, token, onChanged, onTokenInvalid }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const action = async (act) => {
+    if (act === 'delete' && !window.confirm(`Delete rule "${rule.name}"? This cannot be undone.`)) {
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      const url = new URL('/api/admin/match-rule-action', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rule_id: rule.id, action: act }),
+      });
+      if (res.status === 401) { onTokenInvalid(); return; }
+      const json = await res.json();
+      if (!json.ok) {
+        setErr(json.error || 'action failed');
+        return;
+      }
+      onChanged();
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const target = rule.target || {};
+  const confidence = (Number(rule.confidence_score) * 100).toFixed(0);
+  const useRate =
+    rule.times_used + rule.times_rejected > 0
+      ? Math.round((rule.times_used / (rule.times_used + rule.times_rejected)) * 100)
+      : null;
+
+  return (
+    <div style={{
+      padding: '12px 14px',
+      borderBottom: '1px solid #F0F0F0',
+      opacity: rule.is_active ? 1 : 0.55,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: '200px' }}>
+          <div style={{ fontWeight: 600, fontSize: '14px', color: '#1A1A1A' }}>
+            {rule.name}
+            <span style={{
+              marginLeft: '8px',
+              padding: '1px 8px',
+              borderRadius: '10px',
+              fontSize: '10px',
+              fontWeight: 600,
+              background: rule.is_active ? '#E8F5E9' : '#EEEEEE',
+              color: rule.is_active ? '#2E7D32' : '#757575',
+              verticalAlign: '2px',
+            }}>
+              {rule.is_active ? 'active' : 'inactive'}
+            </span>
+          </div>
+          {rule.natural_language_description && (
+            <div style={{ fontSize: '12px', color: '#666', fontStyle: 'italic', marginTop: '3px' }}>
+              "{rule.natural_language_description}"
+            </div>
+          )}
+          <div style={{ fontSize: '12px', color: '#555', marginTop: '4px' }}>
+            <strong>Target:</strong> {target.gl_account_code || '(none)'}
+            {' · '}
+            <strong>Confidence:</strong> {confidence}%
+            {' · '}
+            <strong>Used:</strong> {rule.times_used}
+            {' · '}
+            <strong>Rejected:</strong> {rule.times_rejected}
+            {useRate !== null && ` (${useRate}% accept rate)`}
+            {rule.last_matched_at && (
+              <>
+                {' · '}
+                <strong>Last match:</strong> {new Date(rule.last_matched_at).toLocaleDateString()}
+              </>
+            )}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+          <button
+            type="button"
+            onClick={() => action(rule.is_active ? 'disable' : 'enable')}
+            disabled={busy}
+            title={rule.is_active ? 'Stop applying this rule' : 'Resume applying this rule'}
+            style={{
+              padding: '6px 10px', fontSize: '12px', borderRadius: '6px',
+              border: '1px solid #999', background: 'white', color: '#444',
+              cursor: busy ? 'not-allowed' : 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: '4px',
+            }}
+          >
+            <Power size={12} />
+            {rule.is_active ? 'Disable' : 'Enable'}
+          </button>
+          <button
+            type="button"
+            onClick={() => action('delete')}
+            disabled={busy}
+            title="Delete this rule (historical candidates remain)"
+            style={{
+              padding: '6px 10px', fontSize: '12px', borderRadius: '6px',
+              border: '1px solid #C62828', background: 'white', color: '#C62828',
+              cursor: busy ? 'not-allowed' : 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: '4px',
+            }}
+          >
+            <Trash2 size={12} />
+            Delete
+          </button>
+        </div>
+      </div>
+      {err && (
+        <div style={{ marginTop: '6px', padding: '6px 10px', background: '#FFEBEE', color: '#C62828', borderRadius: '4px', fontSize: '12px' }}>
+          {err}
         </div>
       )}
     </div>
