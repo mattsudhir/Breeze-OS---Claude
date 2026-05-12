@@ -50,6 +50,13 @@
       "when": 1778486400000,
       "tag": "0006_accounting_gl_core",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1778572800000,
+      "tag": "0007_accounting_ar",
+      "breakpoints": true
     }
   ]
 }
