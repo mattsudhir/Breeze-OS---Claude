@@ -35,9 +35,24 @@ export default withAdminHandler(async (req, res) => {
       expiration,
     });
   } catch (err) {
+    // Plaid SDK errors come through Axios. The real Plaid error
+    // (error_type / error_code / error_message) lives on
+    // err.response.data — bubble it up instead of relaying just
+    // the generic "Request failed with status code N" message.
+    const plaid = err?.response?.data || {};
     return res.status(502).json({
       ok: false,
-      error: err.message || String(err),
+      error: plaid.error_message || err.message || String(err),
+      error_type: plaid.error_type || null,
+      error_code: plaid.error_code || null,
+      display_message: plaid.display_message || null,
+      // Env-var sanity check: helps localize "wrong env" vs "wrong key" vs
+      // "wrong secret format" without revealing values.
+      env_check: {
+        PLAID_ENV: process.env.PLAID_ENV || '(unset)',
+        PLAID_CLIENT_ID_present: Boolean(process.env.PLAID_CLIENT_ID),
+        PLAID_SECRET_present: Boolean(process.env.PLAID_SECRET),
+      },
     });
   }
 });
