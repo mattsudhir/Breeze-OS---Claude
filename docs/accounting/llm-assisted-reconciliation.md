@@ -106,11 +106,21 @@ Default model: `claude-sonnet-4-6`. Override via
 ## Confidence ramp-up
 
 Newly created rules start at the LLM-suggested confidence (typically
-0.55–0.95). Auto-confirm threshold:
+0.55–0.95). Auto-match gate is **per-org configurable** (migration
+0018 adds two columns to `organizations`):
 
-- Confidence ≥ 0.95 AND `times_used` > 5 → `auto_matched` (queue still
-  shows the candidate but tagged as auto-applied)
-- Otherwise → `pending_review` (staff confirms / rejects)
+- `recon_auto_match_confidence` real, default 0.95
+- `recon_auto_match_min_times_used` integer, default 5
+
+A candidate is `auto_matched` (vs `pending_review`) iff
+`confidence_score >= recon_auto_match_confidence AND
+rule.times_used >= recon_auto_match_min_times_used`. Set either
+to a more lenient value to ramp auto-trust faster (e.g. 0.85 / 3),
+or stricter (e.g. 0.99 / 20) for high-stakes orgs. Set
+`min_times_used = 0` to auto-match purely by confidence with no
+trust-history requirement.
+
+Read or update via `GET / POST /api/admin/recon-settings`.
 
 Staff confirmation increments `times_used` + updates
 `last_matched_at`. Rejection increments `times_rejected`. Auto-
