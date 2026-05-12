@@ -3270,6 +3270,7 @@ const BILL_PAYMENT_METHOD_LABELS = {
   credit_card: 'Credit card',
   bill_pay_provider: 'Bill pay provider',
   cash: 'Cash',
+  bill_com: 'Bill.com',
   other: 'Other',
 };
 
@@ -3704,20 +3705,34 @@ function PayBillForm({ bill, banks, token, onPaid, onCancel, onTokenInvalid }) {
     setSaving(true);
     setErr(null);
     try {
-      const url = new URL('/api/admin/pay-bill', window.location.origin);
+      // Bill.com flow routes to a different endpoint that calls
+      // Bill.com first, then writes the same payBill internals.
+      const path = paymentMethod === 'bill_com'
+        ? '/api/payments/bill-com-schedule'
+        : '/api/admin/pay-bill';
+      const body = paymentMethod === 'bill_com'
+        ? {
+            bill_id: bill.id,
+            bank_account_id: bankAccountId,
+            payment_date: paymentDate,
+            memo: memo.trim() || null,
+            amount_cents: Math.round(Number(amount) * 100),
+          }
+        : {
+            vendor_id: bill.vendor_id,
+            bank_account_id: bankAccountId,
+            payment_date: paymentDate,
+            payment_method: paymentMethod,
+            external_reference: externalRef.trim() || null,
+            memo: memo.trim() || null,
+            allocations: [{ bill_id: bill.id, amount_cents: Math.round(Number(amount) * 100) }],
+          };
+      const url = new URL(path, window.location.origin);
       url.searchParams.set('secret', token);
       const res = await fetch(url.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          vendor_id: bill.vendor_id,
-          bank_account_id: bankAccountId,
-          payment_date: paymentDate,
-          payment_method: paymentMethod,
-          external_reference: externalRef.trim() || null,
-          memo: memo.trim() || null,
-          allocations: [{ bill_id: bill.id, amount_cents: Math.round(Number(amount) * 100) }],
-        }),
+        body: JSON.stringify(body),
       });
       if (res.status === 401) { onTokenInvalid(); return; }
       const json = await res.json();
