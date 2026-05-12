@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   Bot, PhoneOutgoing, Sparkles, ShieldAlert, ArrowRight, Settings, Power,
-  Phone, RefreshCw,
+  Phone, RefreshCw, Check, X as XIcon,
 } from 'lucide-react';
 
 const CLERK_ENABLED = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
@@ -31,6 +31,7 @@ const SLUG_TO_VIEW = {
   payment_plan_followup:   'ai-payment-plan-followup',
 };
 const VIEW_TO_SLUG = Object.fromEntries(Object.entries(SLUG_TO_VIEW).map(([k, v]) => [v, k]));
+const APPROVAL_QUEUE_VIEW = 'ai-approval-queue';
 
 const AUTONOMY_LABELS = {
   draft_only:             'Draft only — staff sends manually',
@@ -56,6 +57,7 @@ async function fetchJson(path, opts = {}) {
 }
 
 export default function AiAgentsPage({ activeView, onNavigate }) {
+  if (activeView === APPROVAL_QUEUE_VIEW) return <ApprovalQueuePage />;
   const slug = VIEW_TO_SLUG[activeView] || null;
   if (slug) return <WorkflowPage slug={slug} />;
   return <HubPage onNavigate={onNavigate} />;
@@ -519,6 +521,169 @@ function PlaceCallCard({ workflow }) {
           <strong>{result.status === 'queued' ? 'Queued' : 'Dialed'}.</strong>
           {result.vapi_call_id && <> Vapi call id: <code>{result.vapi_call_id}</code>.</>}
           {result.note && <> {result.note}</>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Approval Queue page ─────────────────────────────────────────
+
+function ApprovalQueuePage() {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [busyId, setBusyId] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const json = await fetchJson('/api/admin/list-pending-approvals');
+      setItems(json.pending || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const approve = async (messageId) => {
+    setBusyId(messageId);
+    try {
+      await fetchJson('/api/admin/approve-queued-call', {
+        method: 'POST',
+        body: { message_id: messageId },
+      });
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+  const reject = async (messageId) => {
+    const reason = window.prompt('Rejection reason (optional)?', 'rejected by staff');
+    if (reason === null) return;
+    setBusyId(messageId);
+    try {
+      await fetchJson('/api/admin/reject-queued-call', {
+        method: 'POST',
+        body: { message_id: messageId, reason },
+      });
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (loading) return <div style={{ padding: 24, color: '#666' }}>Loading…</div>;
+
+  return (
+    <div style={{ padding: '24px', maxWidth: '1000px', margin: '0 auto' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px', paddingBottom: '12px', borderBottom: '1px solid #EEE' }}>
+        <div style={{
+          width: 52, height: 52, borderRadius: 12,
+          background: '#E6510015', color: '#E65100',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <ShieldAlert size={28} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <h2 style={{ margin: 0 }}>Approval Queue</h2>
+          <p style={{ color: '#666', marginTop: 6, marginBottom: 0, fontSize: 14 }}>
+            Outbound calls and messages that the autonomy threshold parked here for staff review.
+            Approve to dispatch; reject to discard.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={load}
+          className="btn-secondary"
+          style={{ padding: '7px 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+        >
+          <RefreshCw size={14} /> Refresh
+        </button>
+      </div>
+
+      {error && (
+        <div style={{ marginTop: 12, padding: '10px 12px', background: '#FFEBEE', color: '#C62828', borderRadius: 6, fontSize: 13 }}>
+          {error}
+        </div>
+      )}
+
+      {items.length === 0 ? (
+        <div className="dashboard-card" style={{ marginTop: 16, padding: 24, textAlign: 'center', color: '#666' }}>
+          Nothing pending. The queue fills when an AI workflow's autonomy level requires staff
+          approval before dispatch.
+        </div>
+      ) : (
+        <div className="dashboard-card" style={{ marginTop: 16, padding: 0, overflow: 'hidden' }}>
+          {items.map((m) => (
+            <div key={m.id} style={{ padding: '14px 16px', borderBottom: '1px solid #F0F0F0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: 240 }}>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>
+                    {m.workflow_name || '(no workflow)'}
+                    <span style={{
+                      marginLeft: 8, padding: '1px 8px', borderRadius: 10,
+                      fontSize: 10, fontWeight: 600, textTransform: 'uppercase',
+                      background: '#FFF3E0', color: '#E65100',
+                    }}>
+                      queued
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+                    {m.channel} · {m.direction} · to <strong>{m.to_address || '(unknown)'}</strong>
+                    {' · '}
+                    {new Date(m.created_at).toLocaleString()}
+                  </div>
+                  {m.body && (
+                    <div style={{ fontSize: 12, color: '#444', marginTop: 6, fontStyle: 'italic' }}>
+                      {m.body}
+                    </div>
+                  )}
+                  {!m.workflow_has_assistant && (
+                    <div style={{ fontSize: 11, color: '#C62828', marginTop: 6 }}>
+                      ⚠ Workflow has no VAPI assistant configured — approval will fail until you set one.
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                  <button
+                    type="button"
+                    onClick={() => approve(m.id)}
+                    disabled={busyId === m.id}
+                    style={{
+                      padding: '6px 12px', fontSize: 12, borderRadius: 6,
+                      background: '#2E7D32', color: 'white', border: 'none',
+                      fontWeight: 600, cursor: busyId === m.id ? 'not-allowed' : 'pointer',
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                    }}
+                  >
+                    <Check size={12} /> Approve
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => reject(m.id)}
+                    disabled={busyId === m.id}
+                    style={{
+                      padding: '6px 12px', fontSize: 12, borderRadius: 6,
+                      background: 'white', color: '#C62828', border: '1px solid #C62828',
+                      cursor: busyId === m.id ? 'not-allowed' : 'pointer',
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                    }}
+                  >
+                    <XIcon size={12} /> Reject
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
