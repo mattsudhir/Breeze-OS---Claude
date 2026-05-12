@@ -18,6 +18,7 @@ import {
   Bot, PhoneOutgoing, Sparkles, ShieldAlert, ArrowRight, Settings, Power,
   Phone, RefreshCw, Check, X as XIcon,
 } from 'lucide-react';
+import MigrationFixButton from './MigrationFixButton.jsx';
 
 const CLERK_ENABLED = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
 const ADMIN_TOKEN_KEY = 'breeze.admin.token';
@@ -93,6 +94,7 @@ function HubPage({ onNavigate }) {
       <div style={{ padding: 24 }}>
         <div className="dashboard-card" style={{ padding: 16, background: '#FFEBEE', color: '#C62828' }}>
           <strong>Failed to load:</strong> {error}
+          <MigrationFixButton error={error} />
         </div>
       </div>
     );
@@ -436,6 +438,7 @@ function WorkflowPage({ slug }) {
       <div style={{ padding: 24 }}>
         <div className="dashboard-card" style={{ padding: 16, background: '#FFEBEE', color: '#C62828' }}>
           <strong>Failed to load:</strong> {error}
+          <MigrationFixButton error={error} />
         </div>
       </div>
     );
