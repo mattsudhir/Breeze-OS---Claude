@@ -36,7 +36,7 @@ progress.
 | 1 | GL core (accounts, periods, entries, lines, counters) | 6–8 wk | done | **100%** |
 | 1.5 | COA seeder + AppFolio importer (Stage 6 work pulled forward) | 2–3 wk | done | **100%** |
 | 1.6 | Multi-dimensional tagging design + vocabulary stubs + schema | ~1 wk | doc + stubs + schema landed | **80%** |
-| 2 | AR (leases, tenants, scheduled/posted charges, receipts, deposits) | 10–12 wk | schema + migration + default tag rules landed; service-layer posting helpers pending | **35%** |
+| 2 | AR (leases, tenants, scheduled/posted charges, receipts, deposits) | 10–12 wk | schema + migration + default tags + posting primitives + AR flows + happy-path smoke test all landed | **75%** |
 | 3 | Banking (bank_accounts, Plaid, fuzzy recon) | 8–10 wk | pending | 0% |
 | 4 | Payments rail abstraction + 1 inbound provider | 8–10 wk | pending | 0% |
 | 5 | AP (vendors, bills, anticipated bills, bill pay) | 10–12 wk | pending | 0% |
@@ -45,7 +45,7 @@ progress.
 | 8 | UI buildout for /accounting end-to-end | 16–20 wk | pending | 0% |
 | 9 | Trust accounting v2 | 8–12 wk | reserved-fields only | **5%** |
 
-**Weighted overall: ~20%** of the architectural plan.
+**Weighted overall: ~28%** of the architectural plan.
 
 Caveat: this is the architectural completion against the planned
 *scope*. Real production-readiness includes a lot of work that's not
@@ -99,6 +99,35 @@ product".
     tax_treatment / functional / asset_category) at seed/import
     time. Applied to the 176-account default chart: 103 accounts
     pick up 235 default tags, zero unknown vocabulary refs.
+14. `lib/accounting/applyDefaultGlAccountTags.js` +
+    `api/admin/backfill-gl-account-tags.js` — service helper that
+    cascades default tags onto new gl_account inserts (wired into
+    seeder + importer) plus a backfill endpoint for existing rows.
+    First production run: 245 AppFolio-imported accounts processed,
+    135 tagged, 246 tag rows inserted.
+15. `lib/accounting/posting.js` — Stage 2 foundational posting
+    primitives:
+      ensureAccountingPeriod() — find/create monthly period
+      lookupGlAccountByCode() — resolve code to gl_account.id
+      postJournalEntry() — the load-bearing helper: locks the
+        per-org counter, inserts draft entry, inserts lines,
+        cascades tags (account defaults + explicit overrides,
+        validates against vocabulary rules), flips to posted at
+        which point the DB trigger validates balance.
+16. `lib/accounting/arPostingFlows.js` — Stage 2 AR domain flows:
+      postScheduledCharge() — fire a due scheduled_charge,
+        produce posted_charges + JE, advance recurrence.
+      recordReceipt() — insert receipt + JE; per-allocation list
+        decrements posted_charges.balance_cents and transitions
+        status. Unallocated remainder goes to Tenant Credit.
+      buildDeposit() — bundle receipts into a deposit + JE,
+        validate same-org / not-voided / not-already-deposited.
+17. `api/admin/ar-happy-path.js` — end-to-end smoke test endpoint
+    that exercises the full Stage 2 flow in one transaction:
+    creates a tenant + lease + scheduled_charge, fires the charge,
+    records a fully-allocated receipt, builds a single-receipt
+    deposit. Auto-creates Undeposited Funds (1110) on demand if
+    missing from the chart.
 
 ## What's next
 
