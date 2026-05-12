@@ -35,8 +35,8 @@ progress.
 | 0 | Architecture + data-model + schema-split refactor | ~1 wk | done | **100%** |
 | 1 | GL core (accounts, periods, entries, lines, counters) | 6–8 wk | done | **100%** |
 | 1.5 | COA seeder + AppFolio importer (Stage 6 work pulled forward) | 2–3 wk | done | **100%** |
-| 1.6 | Multi-dimensional tagging design + vocabulary stubs | ~1 wk | doc/stub done; schema lands with Stage 2 | **40%** |
-| 2 | AR (leases, tenants, scheduled/posted charges, receipts, deposits) | 10–12 wk | in progress | **0%** |
+| 1.6 | Multi-dimensional tagging design + vocabulary stubs + schema | ~1 wk | doc + stubs + schema landed | **80%** |
+| 2 | AR (leases, tenants, scheduled/posted charges, receipts, deposits) | 10–12 wk | schema + migration + default tag rules landed; service-layer posting helpers pending | **35%** |
 | 3 | Banking (bank_accounts, Plaid, fuzzy recon) | 8–10 wk | pending | 0% |
 | 4 | Payments rail abstraction + 1 inbound provider | 8–10 wk | pending | 0% |
 | 5 | AP (vendors, bills, anticipated bills, bill pay) | 10–12 wk | pending | 0% |
@@ -45,7 +45,7 @@ progress.
 | 8 | UI buildout for /accounting end-to-end | 16–20 wk | pending | 0% |
 | 9 | Trust accounting v2 | 8–12 wk | reserved-fields only | **5%** |
 
-**Weighted overall: ~15%** of the architectural plan.
+**Weighted overall: ~20%** of the architectural plan.
 
 Caveat: this is the architectural completion against the planned
 *scope*. Real production-readiness includes a lot of work that's not
@@ -85,6 +85,20 @@ product".
     `lib/accounting/tagVocabularies.js` — design doc and validation
     rules for the fact-and-dimensions tagging pattern that fixes
     AppFolio's "one classification per account" limitation.
+12. Stage 2 schema landed: 12 new tables (tenants, leases,
+    lease_tenants, lease_rent_changes, deposits, scheduled_charges,
+    receipts, posted_charges, receipt_allocations, deposit_items,
+    gl_account_tags, journal_line_tags) + 10 new enums.
+    Migration `0007_accounting_ar.sql` with CHECK constraints
+    on balance / amount integrity and four PL/pgSQL triggers for
+    deposit & allocation sum integrity, voided-receipt rejection,
+    and cross-org-reference defense. Retroactive journal_lines
+    FKs to leases and tenants now wired.
+13. `lib/accounting/defaultGlAccountTags.js` — 22 rules that
+    automatically classify new GL accounts (cost_class /
+    tax_treatment / functional / asset_category) at seed/import
+    time. Applied to the 176-account default chart: 103 accounts
+    pick up 235 default tags, zero unknown vocabulary refs.
 
 ## What's next
 
