@@ -47,29 +47,78 @@
     {
       "idx": 6,
       "version": "7",
-      "when": 1778486400000,
-      "tag": "0006_accounting_gl_core",
+      "when": 1762387200000,
+      "tag": "0006_agent_actions",
       "breakpoints": true
     },
     {
       "idx": 7,
       "version": "7",
-      "when": 1778572800000,
-      "tag": "0007_accounting_ar",
+      "when": 1762473600000,
+      "tag": "0007_notifications_and_follows",
       "breakpoints": true
     },
     {
       "idx": 8,
       "version": "7",
-      "when": 1778659200000,
-      "tag": "0008_accounting_banking",
+      "when": 1762560000000,
+      "tag": "0008_appfolio_cache",
       "breakpoints": true
     },
     {
       "idx": 9,
       "version": "7",
+      "when": 1762646400000,
+      "tag": "0009_push_subscriptions",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1762732800000,
+      "tag": "0010_category_subscriptions",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1762819200000,
+      "tag": "0011_human_tasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1762905600000,
+      "tag": "0012_issue_gl_mappings",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1778486400000,
+      "tag": "0013_accounting_gl_core",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1778572800000,
+      "tag": "0014_accounting_ar",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1778659200000,
+      "tag": "0015_accounting_banking",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
       "when": 1778745600000,
-      "tag": "0009_plaid_secrets",
+      "tag": "0016_plaid_secrets",
       "breakpoints": true
     }
   ]

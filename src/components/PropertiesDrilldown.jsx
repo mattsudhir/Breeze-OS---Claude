@@ -4,7 +4,8 @@ import {
   MapPin, Home, CheckCircle2, AlertCircle, Wrench, DollarSign,
   Loader2, WifiOff,
 } from 'lucide-react';
-import { getProperties, getUnits, getWorkOrders } from '../services/rentManager';
+import { getProperties, getUnits, getWorkOrders } from '../services/data';
+import { useDataSource } from '../contexts/DataSourceContext.jsx';
 
 // Analytics-style "drilldown" landing page for Properties. Reached from
 // the Dashboard → Properties stat card (see ClassicDashboard.jsx). Shows
@@ -92,7 +93,9 @@ function formatCurrency(n) {
   return `$${Math.round(n).toLocaleString('en-US')}`;
 }
 
-export default function PropertiesDrilldown() {
+export default function PropertiesDrilldown({ initialFilters } = {}) {
+  const { dataSource, sources } = useDataSource();
+  const sourceLabel = sources.find((s) => s.value === dataSource)?.label || dataSource;
   const [properties, setProperties] = useState(null);
   const [units, setUnits] = useState(null);
   const [workOrders, setWorkOrders] = useState(null);
@@ -101,15 +104,19 @@ export default function PropertiesDrilldown() {
   const [sortKey, setSortKey] = useState('totalUnits');
   const [sortDir, setSortDir] = useState('desc');
   const [expandedId, setExpandedId] = useState(null);
+  // When opened from the Properties → Units stat card, expand every
+  // row by default so units are visible immediately. The user can
+  // still collapse individual rows.
+  const [expandAll, setExpandAll] = useState(!!initialFilters?.expandAll);
 
   useEffect(() => {
     let cancelled = false;
     async function fetchAll() {
       setLoading(true);
       const results = await Promise.allSettled([
-        getProperties(),
-        getUnits(),
-        getWorkOrders(),
+        getProperties(dataSource),
+        getUnits(dataSource),
+        getWorkOrders(dataSource, { status: 'all' }),
       ]);
       if (cancelled) return;
       const [propsRes, unitsRes, woRes] = results;
@@ -133,13 +140,34 @@ export default function PropertiesDrilldown() {
     }
     fetchAll();
     return () => { cancelled = true; };
-  }, []);
+  }, [dataSource]);
+
+  // Group units by both propertyId and propertyName. AppFolio
+  // sometimes surfaces only the name on a unit row (multi-unit
+  // configs), so a strict id match silently shows 0 units in the
+  // expand panel — that's what the "click row, page just refreshes"
+  // regression looked like. Mirrors the fallback in PropertiesPage.
+  const unitsByPropertyId = useMemo(() => {
+    return (units || []).reduce((acc, u) => {
+      if (!u.propertyId) return acc;
+      (acc[u.propertyId] ||= []).push(u);
+      return acc;
+    }, {});
+  }, [units]);
+  const unitsByPropertyName = useMemo(() => {
+    return (units || []).reduce((acc, u) => {
+      if (!u.propertyName) return acc;
+      (acc[u.propertyName] ||= []).push(u);
+      return acc;
+    }, {});
+  }, [units]);
 
   // Derived per-property rows with all the metrics.
   const rows = useMemo(() => {
     if (!properties) return [];
     return properties.map((p) => {
-      const propUnits = (units || []).filter((u) => u.propertyId === p.id);
+      const propUnits =
+        unitsByPropertyId[p.id] || unitsByPropertyName[p.name] || [];
       const totalUnits = propUnits.length;
       const occupied = propUnits.filter((u) => {
         const s = (u.status || '').toLowerCase();
@@ -171,7 +199,7 @@ export default function PropertiesDrilldown() {
         units: propUnits,
       };
     });
-  }, [properties, units, workOrders]);
+  }, [properties, units, workOrders, unitsByPropertyId, unitsByPropertyName]);
 
   // Apply sort.
   const sortedRows = useMemo(() => {
@@ -221,6 +249,14 @@ export default function PropertiesDrilldown() {
   };
 
   const handleRowClick = (id) => {
+    // Once the user interacts with any row, drop expand-all mode and
+    // fall back to single-row toggling so collapse-one-row works as
+    // expected.
+    if (expandAll) {
+      setExpandAll(false);
+      setExpandedId(id);
+      return;
+    }
     setExpandedId((prev) => (prev === id ? null : id));
   };
 
@@ -246,9 +282,9 @@ export default function PropertiesDrilldown() {
         border: `1px solid ${isLive ? '#C8E6C9' : '#FFE0B2'}`,
       }}>
         {isLive ? (
-          <><CheckCircle2 size={14} /> Live portfolio data from Rent Manager</>
+          <><CheckCircle2 size={14} /> Live portfolio data from {sourceLabel}</>
         ) : (
-          <><WifiOff size={14} /> Demo data — connect Rent Manager to see live metrics</>
+          <><WifiOff size={14} /> Demo data — couldn't reach {sourceLabel} for live metrics</>
         )}
       </div>
 
@@ -347,7 +383,7 @@ export default function PropertiesDrilldown() {
             </thead>
             <tbody>
               {sortedRows.map((r) => {
-                const expanded = expandedId === r.id;
+                const expanded = expandAll || expandedId === r.id;
                 return (
                   <RowGroup
                     key={r.id}

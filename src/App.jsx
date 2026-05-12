@@ -66,7 +66,9 @@ function App() {
     if (activeView === 'move-events') return <MoveEventsPage />;
     if (activeView === 'settings') return <SettingsPage />;
     if (activeView === 'help') return <HelpPage />;
-    if (activeView === 'properties-drilldown') return <PropertiesDrilldown />;
+    if (activeView === 'properties-drilldown') {
+      return <PropertiesDrilldown initialFilters={pendingFilters['properties-drilldown']} />;
+    }
     if (activeView === 'dashboard' || showClassic) {
       return <ClassicDashboard onNavigate={handleNavigate} />;
     }
@@ -95,6 +97,7 @@ function App() {
           activeView={activeView}
           onMenuToggle={() => setMobileMenuOpen(!mobileMenuOpen)}
           showToggle={showToggle}
+          onNavigate={handleNavigate}
         />
         <main className="content-area">
           {renderContent()}

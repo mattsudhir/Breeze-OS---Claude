@@ -1,4 +1,5 @@
-import { Bell, Menu, MessageSquare, LayoutDashboard } from 'lucide-react';
+import { Menu, MessageSquare, LayoutDashboard } from 'lucide-react';
+import NotificationsBell from './NotificationsBell.jsx';
 
 const TITLES = {
   chat: 'Chat Home',
@@ -15,7 +16,14 @@ const TITLES = {
   help: 'Help',
 };
 
-export default function TopBar({ showClassic, onToggleClassic, activeView, onMenuToggle, showToggle }) {
+export default function TopBar({
+  showClassic,
+  onToggleClassic,
+  activeView,
+  onMenuToggle,
+  showToggle,
+  onNavigate,
+}) {
   return (
     <header className="topbar">
       <div className="topbar-left">
@@ -49,10 +57,7 @@ export default function TopBar({ showClassic, onToggleClassic, activeView, onMen
       </div>
 
       <div className="topbar-right">
-        <button className="topbar-icon-btn" title="Notifications">
-          <Bell size={20} />
-          <span className="notification-dot" />
-        </button>
+        <NotificationsBell onNavigate={onNavigate} />
       </div>
     </header>
   );

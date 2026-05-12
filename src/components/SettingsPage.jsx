@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Settings, User, Bell, Lock, CreditCard, Building2, Database,
   Mail, Phone, Shield, Palette, Users, Save, ChevronRight,
+  Wrench, Loader2, Check,
 } from 'lucide-react';
+import { useDataSource } from '../contexts/DataSourceContext.jsx';
 
 // Placeholder settings UI — wires up to the real backend when we build
 // the account management layer. Tabs mimic the shape of what that will
@@ -10,6 +12,8 @@ import {
 const SECTIONS = [
   { id: 'profile', label: 'Profile', icon: User },
   { id: 'organization', label: 'Organization', icon: Building2 },
+  { id: 'data-source', label: 'Data source', icon: Database },
+  { id: 'charge-categories', label: 'Charge categories', icon: Wrench },
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'security', label: 'Security', icon: Lock },
   { id: 'integrations', label: 'Integrations', icon: Database },
@@ -98,6 +102,8 @@ export default function SettingsPage() {
 
           {active === 'profile' && <ProfileSection />}
           {active === 'organization' && <OrganizationSection />}
+          {active === 'data-source' && <DataSourceSection />}
+          {active === 'charge-categories' && <ChargeCategoriesSection />}
           {active === 'notifications' && <NotificationsSection />}
           {active === 'security' && <SecuritySection />}
           {active === 'integrations' && <IntegrationsSection />}
@@ -210,22 +216,375 @@ function Stat({ label, value }) {
   );
 }
 
+// Data source picker. Lifted out of the TopBar so it stops fighting
+// for header real estate on phones. The choice still applies app-wide
+// (every menu page reads from the active backend); the only thing
+// that changed is the entry point.
+function DataSourceSection() {
+  const { dataSource, setDataSource, sources } = useDataSource();
+  return (
+    <Card title="Active data source" icon={Database}>
+      <div style={{ fontSize: 12, color: '#6A737D', marginBottom: 12 }}>
+        Picks the backend every page reads from — Properties, Tenants,
+        Maintenance, Dashboard, and the chat agent. Long-term we plan to
+        cut over to AppFolio only; the toggle stays for the comparison
+        period.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {sources.map((opt) => {
+          const active = opt.value === dataSource;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setDataSource(opt.value)}
+              style={{
+                display: 'flex', alignItems: 'flex-start', gap: 12,
+                padding: '12px 14px',
+                border: `1px solid ${active ? '#1565C0' : '#D0D7DE'}`,
+                background: active ? '#F0F7FF' : '#FFF',
+                borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+              }}
+            >
+              <div style={{
+                width: 18, height: 18, borderRadius: '50%',
+                border: `2px solid ${active ? '#1565C0' : '#9CA3AF'}`,
+                background: active ? '#1565C0' : 'transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0, marginTop: 2,
+              }}>
+                {active && <Check size={10} color="#FFF" strokeWidth={3} />}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 14, color: '#1A1A1A' }}>
+                  {opt.label}
+                </div>
+                <div style={{ fontSize: 12, color: '#6A737D', marginTop: 2 }}>
+                  {opt.hint}
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+// Issue category → GL account mapping. Persisted to issue_gl_mappings
+// so the Charge Fee modal can auto-fill the GL when the user picks a
+// category instead of forcing them to scroll a flat list of every
+// "Repairs - …" account on every charge.
+function ChargeCategoriesSection() {
+  const { dataSource } = useDataSource();
+  const [categories, setCategories] = useState([]);
+  const [mappings, setMappings] = useState({}); // category id → { glAccountId, glAccountName }
+  const [glAccounts, setGlAccounts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(null);
+  const [error, setError] = useState(null);
+  const [migrationPending, setMigrationPending] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        // Catalog + saved mappings.
+        const settingsRes = await fetch('/api/issue-gl-mappings');
+        const settingsData = await settingsRes.json();
+        if (!settingsData?.ok) throw new Error(settingsData?.error || 'Could not load mappings');
+        if (settingsData.migrationPending) setMigrationPending(true);
+
+        // GL accounts (only available when AppFolio is the active source).
+        let accts = [];
+        if (dataSource === 'appfolio') {
+          const glRes = await fetch('/api/data', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              source: 'appfolio',
+              tool: 'list_gl_accounts',
+              input: { limit: 200 },
+            }),
+          });
+          const glData = await glRes.json();
+          if (glData?.ok) accts = glData.data?.accounts || [];
+        }
+
+        if (cancelled) return;
+        setCategories(settingsData.categories || []);
+        setMappings(settingsData.mappings || {});
+        setGlAccounts(accts);
+      } catch (err) {
+        if (!cancelled) setError(err.message || 'Network error');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [dataSource]);
+
+  const saveMapping = async (categoryId, glAccountName) => {
+    setSaving(categoryId);
+    setError(null);
+    const acct = glAccounts.find((g) => g.name === glAccountName);
+    try {
+      const res = await fetch('/api/issue-gl-mappings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          category: categoryId,
+          gl_account_name: glAccountName,
+          gl_account_id: acct?.id || null,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setMappings((prev) => ({
+        ...prev,
+        [categoryId]: { glAccountId: acct?.id || null, glAccountName },
+      }));
+    } catch (err) {
+      setError(err.message || 'Save failed');
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  return (
+    <Card title="Charge category → GL account" icon={Wrench}>
+      <div style={{ fontSize: 12, color: '#6A737D', marginBottom: 12 }}>
+        Pick a default GL account for each repair-fee category. The Charge
+        Fee form on a tenant uses these to auto-fill the GL when you pick
+        a category — no more scrolling 200 GL accounts on every charge.
+      </div>
+      {dataSource !== 'appfolio' && (
+        <div style={{
+          padding: '8px 12px', background: '#FFF3E0', border: '1px solid #FFE0B2',
+          borderRadius: 6, color: '#E65100', fontSize: 12, marginBottom: 12,
+        }}>
+          Switch to AppFolio (Settings → Data source) to load the GL account list.
+        </div>
+      )}
+      {migrationPending && (
+        <div style={{
+          padding: '8px 12px', background: '#FFF3E0', border: '1px solid #FFE0B2',
+          borderRadius: 6, color: '#E65100', fontSize: 12, marginBottom: 12,
+        }}>
+          Migration pending — apply once at <code>/api/db-migrate</code> and saved
+          mappings will start persisting. The categories below already work as a
+          live preview.
+        </div>
+      )}
+      {loading ? (
+        <div style={{ padding: '12px 0', color: '#6A737D', fontSize: 13 }}>
+          <Loader2 size={14} className="spin" /> Loading…
+        </div>
+      ) : error ? (
+        <div style={{
+          padding: '8px 12px', background: '#FFF3F3', border: '1px solid #F5C6CB',
+          borderRadius: 6, color: '#C62828', fontSize: 12,
+        }}>
+          {error}
+        </div>
+      ) : (
+        categories.map((cat) => {
+          const current = mappings[cat.id]?.glAccountName || '';
+          const isActiveSaving = saving === cat.id;
+          // Suggest accounts whose name contains the hint (case-insensitive).
+          const hint = (cat.glHint || '').toLowerCase();
+          const suggested = hint
+            ? glAccounts.filter((g) => g.name.toLowerCase().includes(hint))
+            : [];
+          const others = glAccounts.filter((g) => !suggested.includes(g));
+          return (
+            <div
+              key={cat.id}
+              style={{
+                padding: '12px 0', borderBottom: '1px solid #EEF0F2',
+                display: 'flex', flexDirection: 'column', gap: 6,
+              }}
+            >
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{cat.label}</div>
+                <div style={{ fontSize: 12, color: '#6A737D' }}>{cat.description}</div>
+              </div>
+              <select
+                value={current}
+                disabled={isActiveSaving || glAccounts.length === 0}
+                onChange={(e) => saveMapping(cat.id, e.target.value)}
+                style={{
+                  padding: 8, border: '1px solid #D0D7DE', borderRadius: 4,
+                  fontSize: 13, maxWidth: 480,
+                }}
+              >
+                <option value="">— Pick a GL account —</option>
+                {suggested.length > 0 && (
+                  <optgroup label="Suggested">
+                    {suggested.map((g) => (
+                      <option key={g.id} value={g.name}>{g.name}</option>
+                    ))}
+                  </optgroup>
+                )}
+                {others.length > 0 && (
+                  <optgroup label="All GL accounts">
+                    {others.map((g) => (
+                      <option key={g.id} value={g.name}>{g.name}</option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+              {isActiveSaving && (
+                <span style={{ fontSize: 11, color: '#6A737D' }}>Saving…</span>
+              )}
+            </div>
+          );
+        })
+      )}
+    </Card>
+  );
+}
+
 function NotificationsSection() {
+  const [categories, setCategories] = useState([]);
+  const [subscribed, setSubscribed] = useState(new Set());
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(null); // category id currently saving
+  const [error, setError] = useState(null);
+
+  // Load the category catalog + the user's current opt-ins.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/category-subscriptions')
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data?.ok) {
+          setCategories(data.categories || []);
+          setSubscribed(new Set(data.subscribed || []));
+        } else {
+          setError(data?.error || 'Could not load subscriptions');
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message || 'Network error');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const toggleCategory = async (categoryId, currentlyOn) => {
+    setSaving(categoryId);
+    setError(null);
+    // Optimistic
+    setSubscribed((prev) => {
+      const next = new Set(prev);
+      if (currentlyOn) next.delete(categoryId);
+      else next.add(categoryId);
+      return next;
+    });
+    try {
+      const res = await fetch('/api/category-subscriptions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: categoryId, enabled: !currentlyOn }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || `HTTP ${res.status}`);
+      }
+    } catch (err) {
+      setError(err.message || 'Save failed');
+      // Roll back optimistic
+      setSubscribed((prev) => {
+        const next = new Set(prev);
+        if (currentlyOn) next.add(categoryId);
+        else next.delete(categoryId);
+        return next;
+      });
+    } finally {
+      setSaving(null);
+    }
+  };
+
   return (
     <>
-      <Card title="Email Notifications" icon={Mail}>
-        <Toggle label="New work orders" desc="Get notified when a tenant submits a maintenance request" defaultOn />
-        <Toggle label="Rent payments" desc="Alert when rent is paid or becomes overdue" defaultOn />
-        <Toggle label="Lease renewals" desc="Reminder 60 days before a lease expires" defaultOn />
-        <Toggle label="Weekly digest" desc="Summary of portfolio activity every Monday morning" defaultOn />
-        <Toggle label="Product updates" desc="New Breeze features and release notes" />
+      <Card title="Notification categories" icon={Bell}>
+        <div style={{ fontSize: 12, color: '#6A737D', marginBottom: 12 }}>
+          Toggle on the events you want to be alerted about across the whole
+          portfolio. Each category fires both the in-app bell and (if enabled)
+          a native push notification.
+        </div>
+        {loading ? (
+          <div style={{ padding: '12px 0', color: '#6A737D', fontSize: 13 }}>
+            Loading…
+          </div>
+        ) : error ? (
+          <div style={{
+            padding: '8px 12px',
+            background: '#FFF3F3',
+            border: '1px solid #F5C6CB',
+            borderRadius: 6,
+            color: '#C62828',
+            fontSize: 12,
+          }}>
+            {error}
+          </div>
+        ) : categories.length === 0 ? (
+          <div style={{ padding: '12px 0', color: '#6A737D', fontSize: 13 }}>
+            No categories configured.
+          </div>
+        ) : (
+          categories.map((cat) => (
+            <BackedToggle
+              key={cat.id}
+              label={cat.label}
+              desc={cat.description}
+              on={subscribed.has(cat.id)}
+              loading={saving === cat.id}
+              onToggle={() => toggleCategory(cat.id, subscribed.has(cat.id))}
+            />
+          ))
+        )}
       </Card>
-      <Card title="SMS & Push" icon={Phone}>
-        <Toggle label="Urgent work orders only" desc="Text me when an urgent or emergency ticket is filed" defaultOn />
-        <Toggle label="Chat responses" desc="Push notification when the AI finishes a long-running query" />
-        <Toggle label="Call summaries" desc="SMS a transcript summary after each outbound AI call" defaultOn />
+      <Card title="Other channels (coming soon)" icon={Phone}>
+        <div style={{ fontSize: 12, color: '#6A737D', lineHeight: 1.5 }}>
+          SMS and email delivery for these categories is in design. For now
+          alerts are delivered as in-app notifications and (with permission) as
+          native browser push pop-ups via the bell icon at the top.
+        </div>
       </Card>
     </>
+  );
+}
+
+// Backend-driven toggle. Same look as <Toggle /> but the on-state is
+// owned by the parent (so optimistic updates roll back cleanly on
+// save failure) and a small spinner replaces the knob while the
+// network call is in flight.
+function BackedToggle({ label, desc, on, loading, onToggle }) {
+  return (
+    <div className="settings-toggle">
+      <div className="settings-toggle-text">
+        <div className="settings-toggle-label">{label}</div>
+        {desc && <div className="settings-toggle-desc">{desc}</div>}
+      </div>
+      <button
+        type="button"
+        onClick={onToggle}
+        disabled={loading}
+        className={`settings-toggle-switch ${on ? 'on' : ''}`}
+        aria-pressed={on}
+        style={{ opacity: loading ? 0.6 : 1 }}
+      >
+        <span className="settings-toggle-knob" />
+      </button>
+    </div>
   );
 }
 

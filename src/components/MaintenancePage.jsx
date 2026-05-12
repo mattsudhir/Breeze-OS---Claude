@@ -5,13 +5,42 @@ import {
   AlertTriangle, Zap, Droplet, Flame, Wind, Lightbulb, Hammer,
   Edit3, Save, X,
 } from 'lucide-react';
+// Data fetches (work orders / properties / units) and the edit
+// write (updateWorkOrder) go through the backend-aware
+// services/data.js. Filter metadata (categories / statuses /
+// priorities) and the detail re-fetch (getWorkOrder) are still
+// RM-only — AppFolio has its own enums but we haven't surfaced
+// them as tools, and AppFolio's docs don't expose a per-record
+// /work_orders/{id} GET (filtered list query is the v0 pattern,
+// which we don't need for the form's pre-fill since the row in
+// memory is already current).
+import { getWorkOrders, getProperties, getUnits, updateWorkOrder } from '../services/data';
 import {
-  getWorkOrders, getProperties, getUnits,
   getWorkOrderCategories, getWorkOrderStatuses, getWorkOrderPriorities,
-  updateWorkOrder, getWorkOrder,
+  getWorkOrder,
 } from '../services/rentManager';
+import { useDataSource } from '../contexts/DataSourceContext.jsx';
+import FollowButton from './FollowButton.jsx';
 
 // ── Helpers ──────────────────────────────────────────────────────
+
+// AppFolio enum values for the edit-form dropdowns (per AppFolio
+// Database API v0 docs). Hardcoded because there's no AppFolio tool
+// equivalent to RM's getWorkOrderStatuses / getWorkOrderPriorities.
+// AppFolio's documented enums are stable; if they grow we update
+// this list.
+const APPFOLIO_WO_STATUSES = [
+  'New',
+  'Assigned',
+  'Scheduled',
+  'Waiting',
+  'Estimate Requested',
+  'Estimated',
+  'Work Completed',
+  'Completed',
+  'Canceled',
+];
+const APPFOLIO_WO_PRIORITIES = ['Urgent', 'Normal', 'Low'];
 
 function normalizeCategory(raw) {
   const c = (raw || '').toLowerCase();
@@ -104,6 +133,8 @@ function WorkOrderDetail({
   workOrder, categories, statuses, priorities, statusLookup,
   onBack, onUpdated,
 }) {
+  const { dataSource, sources } = useDataSource();
+  const sourceLabel = sources.find((s) => s.value === dataSource)?.label || dataSource;
   const catKey = normalizeCategory(workOrder.category);
   const cat = CATEGORY_META[catKey];
   const CatIcon = cat.icon;
@@ -124,17 +155,28 @@ function WorkOrderDetail({
     setEditing(true);
     setEditLoading(true);
 
-    // Seed from the list-view record first for an instant UI
+    // Seed from the list-view record first for an instant UI. Both
+    // backend shapes are populated; the form's render and save use
+    // whichever pair the active backend cares about (priorityId/
+    // statusId for RM, priority/status string enums for AppFolio).
     setForm({
       summary: workOrder.summary || '',
       description: workOrder.description || '',
       priorityId: workOrder.priorityId || '',
       categoryId: workOrder.categoryId || '',
       statusId: workOrder.statusId || '',
+      priority: workOrder.priority || '',
+      status: workOrder.status || '',
     });
 
-    // Then overwrite with a fresh record so the form reflects the current
-    // server state rather than whatever was cached in the list
+    // RM-only: re-fetch the WO record so the form reflects current
+    // server state rather than whatever was cached in the list. The
+    // AppFolio path skips this — list_work_orders' row is already
+    // the canonical source for everything we render in the form.
+    if (dataSource === 'appfolio') {
+      setEditLoading(false);
+      return;
+    }
     try {
       const fresh = await getWorkOrder(workOrder.id);
       if (fresh) {
@@ -162,17 +204,28 @@ function WorkOrderDetail({
     setSaving(true);
     setSaveError(null);
     try {
-      // RM requires numeric IDs for priority/category/status — strings are
-      // rejected with a type conversion error.
+      // services/data.updateWorkOrder accepts a normalised patch and
+      // translates per backend. RM expects numeric IDs (priorityId
+      // etc.); AppFolio expects string enums (priority='Urgent',
+      // status='Completed'). The form populates whichever field
+      // shape the active backend uses.
       const patch = {
         summary: form.summary,
         description: form.description,
       };
-      if (form.priorityId) patch.priorityId = Number(form.priorityId);
-      if (form.categoryId) patch.categoryId = Number(form.categoryId);
-      if (form.statusId) patch.statusId = Number(form.statusId);
+      if (dataSource === 'appfolio') {
+        if (form.priority) patch.priority = form.priority;
+        if (form.status) patch.status = form.status;
+      } else {
+        if (form.priorityId) patch.priorityId = Number(form.priorityId);
+        if (form.categoryId) patch.categoryId = Number(form.categoryId);
+        if (form.statusId) patch.statusId = Number(form.statusId);
+      }
 
-      await updateWorkOrder(workOrder.id, patch);
+      const result = await updateWorkOrder(dataSource, workOrder.id, patch);
+      if (!result.ok) {
+        throw new Error(result.error || 'Update failed');
+      }
       setEditing(false);
       setSaveOk(true);
       if (onUpdated) onUpdated(workOrder.id);
@@ -218,7 +271,7 @@ function WorkOrderDetail({
 
       {saveOk && (
         <div className="save-toast save-toast-ok">
-          <CheckCircle2 size={14} /> Changes saved to Rent Manager
+          <CheckCircle2 size={14} /> Changes saved to {sourceLabel}
         </div>
       )}
       {saveError && (
@@ -264,42 +317,80 @@ function WorkOrderDetail({
             <div className="form-row">
               <label>
                 <span>Priority</span>
-                <select
-                  value={form.priorityId}
-                  onChange={(e) => setForm({ ...form, priorityId: e.target.value })}
-                >
-                  <option value="">—</option>
-                  {priorities.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
+                {dataSource === 'appfolio' ? (
+                  <select
+                    value={form.priority}
+                    onChange={(e) => setForm({ ...form, priority: e.target.value })}
+                  >
+                    <option value="">—</option>
+                    {APPFOLIO_WO_PRIORITIES.map((p) => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <select
+                    value={form.priorityId}
+                    onChange={(e) => setForm({ ...form, priorityId: e.target.value })}
+                  >
+                    <option value="">—</option>
+                    {priorities.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                )}
               </label>
 
               <label>
                 <span>Category</span>
-                <select
-                  value={form.categoryId}
-                  onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
-                >
-                  <option value="">—</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
+                {dataSource === 'appfolio' ? (
+                  // AppFolio doesn't have a categories endpoint that
+                  // matches RM's. The work-order row's VendorTrade
+                  // is the closest concept, but it's free-form on
+                  // AppFolio and not meaningfully editable from this
+                  // form. Render disabled with a hint.
+                  <input
+                    type="text"
+                    value={workOrder.categoryName || ''}
+                    disabled
+                    title="Category isn't editable from Breeze OS when AppFolio is the active source."
+                  />
+                ) : (
+                  <select
+                    value={form.categoryId}
+                    onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
+                  >
+                    <option value="">—</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                )}
               </label>
             </div>
 
             <label>
               <span>Status</span>
-              <select
-                value={form.statusId}
-                onChange={(e) => setForm({ ...form, statusId: e.target.value })}
-              >
-                <option value="">—</option>
-                {statuses.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
+              {dataSource === 'appfolio' ? (
+                <select
+                  value={form.status}
+                  onChange={(e) => setForm({ ...form, status: e.target.value })}
+                >
+                  <option value="">—</option>
+                  {APPFOLIO_WO_STATUSES.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              ) : (
+                <select
+                  value={form.statusId}
+                  onChange={(e) => setForm({ ...form, statusId: e.target.value })}
+                >
+                  <option value="">—</option>
+                  {statuses.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              )}
             </label>
 
             <div className="form-actions">
@@ -392,6 +483,8 @@ function normalizeInitialFilters(initial) {
 }
 
 export default function MaintenancePage({ initialFilters }) {
+  const { dataSource, sources } = useDataSource();
+  const sourceLabel = sources.find((s) => s.value === dataSource)?.label || dataSource;
   const applied = normalizeInitialFilters(initialFilters);
 
   const [workOrders, setWorkOrders] = useState(null);
@@ -444,9 +537,15 @@ export default function MaintenancePage({ initialFilters }) {
       setFetchMs(null);
       const startedAt = Date.now();
       try {
+        // Priorities lookup is RM-only metadata. When AppFolio is the
+        // active source, skip the call (it would return unrelated RM
+        // priority IDs that don't match anything in our work orders)
+        // and let the page fall back to the inline priority strings.
         const [woResult, prioritiesResult] = await Promise.allSettled([
-          getWorkOrders({ throwOnError: true }),
-          getWorkOrderPriorities(),
+          getWorkOrders(dataSource, { status: 'all' }),
+          dataSource === 'appfolio'
+            ? Promise.resolve(null)
+            : getWorkOrderPriorities(),
         ]);
         if (cancelled) return;
         setFetchMs(Date.now() - startedAt);
@@ -457,13 +556,15 @@ export default function MaintenancePage({ initialFilters }) {
         } else {
           setFetchFailed(true);
           const err = woResult.status === 'rejected' ? woResult.reason : null;
-          setFetchError(err?.message || 'Empty response from Rent Manager');
+          setFetchError(err?.message || `Empty response from ${sourceLabel}`);
         }
 
         if (prioritiesResult.status === 'fulfilled' && prioritiesResult.value) {
           const map = {};
           prioritiesResult.value.forEach((p) => { map[p.id] = p.name; });
           setPriorityLookup(map);
+        } else {
+          setPriorityLookup({});
         }
       } catch (err) {
         if (cancelled) return;
@@ -476,7 +577,7 @@ export default function MaintenancePage({ initialFilters }) {
     }
     fetchTickets();
     return () => { cancelled = true; };
-  }, [reloadTick]);
+  }, [reloadTick, dataSource]);
 
   // Phase two: the remaining lookups aren't on the critical path.
   useEffect(() => {
@@ -484,23 +585,28 @@ export default function MaintenancePage({ initialFilters }) {
     let cancelled = false;
 
     async function fetchLookups() {
+      // Properties + units come from the backend-aware service.
+      // Categories + statuses are RM-only metadata; on AppFolio they
+      // resolve to empty lookups and the page falls back to inline
+      // labels and the work-order-row's own .status/.categoryName
+      // strings.
       const steps = [
-        { fn: getProperties, apply: (data) => {
+        { fn: () => getProperties(dataSource), apply: (data) => {
           const map = {};
           data.forEach((p) => { map[p.id] = p.name; });
           setPropertyMap(map);
         }},
-        { fn: getUnits, apply: (data) => {
+        { fn: () => getUnits(dataSource), apply: (data) => {
           const map = {};
           data.forEach((u) => { map[u.id] = u.name; });
           setUnitMap(map);
         }},
-        { fn: getWorkOrderCategories, apply: (data) => {
+        { fn: dataSource === 'appfolio' ? null : getWorkOrderCategories, apply: (data) => {
           const map = {};
           data.forEach((c) => { map[c.id] = c.name; });
           setCategoryLookup(map);
         }},
-        { fn: getWorkOrderStatuses, apply: (data) => {
+        { fn: dataSource === 'appfolio' ? null : getWorkOrderStatuses, apply: (data) => {
           const map = {};
           data.forEach((s) => { map[s.id] = s; });
           setStatusLookup(map);
@@ -509,6 +615,7 @@ export default function MaintenancePage({ initialFilters }) {
 
       for (const step of steps) {
         if (cancelled) return;
+        if (!step.fn) continue; // skipped step (e.g. RM-only on AppFolio)
         try {
           const data = await step.fn();
           if (cancelled) return;
@@ -520,7 +627,7 @@ export default function MaintenancePage({ initialFilters }) {
     }
     fetchLookups();
     return () => { cancelled = true; };
-  }, [workOrders]);
+  }, [workOrders, dataSource]);
 
   // Enrich work orders with names resolved client-side from lookup tables.
   // RM's list endpoint returns both ID fields and legacy string fields (e.g.
@@ -554,7 +661,7 @@ export default function MaintenancePage({ initialFilters }) {
       <div className="properties-page">
         <div className="loading-state">
           <Loader2 size={28} className="spin" />
-          <span>Loading maintenance tickets from Rent Manager...</span>
+          <span>Loading maintenance tickets from {sourceLabel}...</span>
         </div>
       </div>
     );
@@ -565,7 +672,7 @@ export default function MaintenancePage({ initialFilters }) {
       <div className="properties-page">
         <div className="empty-state">
           <WifiOff size={40} />
-          <h3>Couldn't reach Rent Manager</h3>
+          <h3>Couldn't reach {sourceLabel}</h3>
           <p>The work order endpoint didn't respond successfully.</p>
           {fetchError && (
             <div style={{
@@ -603,7 +710,7 @@ export default function MaintenancePage({ initialFilters }) {
         <div className="empty-state">
           <WifiOff size={40} />
           <h3>No maintenance tickets found</h3>
-          <p>Rent Manager returned an empty list. There are no service orders on file.</p>
+          <p>{sourceLabel} returned an empty list. There are no service orders on file.</p>
         </div>
       </div>
     );
@@ -772,10 +879,18 @@ export default function MaintenancePage({ initialFilters }) {
           const status = statusMetaFromWo(w, statusLookup);
 
           return (
-            <button
+            <div
               key={w.id}
               className="tenant-row"
+              role="button"
+              tabIndex={0}
               onClick={() => setSelectedId(w.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setSelectedId(w.id);
+                }
+              }}
             >
               <div
                 className="tenant-avatar"
@@ -812,7 +927,12 @@ export default function MaintenancePage({ initialFilters }) {
                   {status.label}
                 </span>
               </div>
-            </button>
+              <FollowButton
+                entityType="work_order"
+                entityId={w.id}
+                entityLabel={w.displayId || w.summary || `Work Order ${w.id}`}
+              />
+            </div>
           );
         })}
       </div>

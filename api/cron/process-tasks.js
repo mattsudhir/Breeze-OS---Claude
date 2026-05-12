@@ -19,9 +19,12 @@
 // New kinds are added here as the product grows. Keep each handler
 // small and delegate real work to lib/* helpers.
 //
-// Authentication: Vercel cron jobs are invoked with an
-// `x-vercel-cron` header containing a signed token. We also accept
-// BREEZE_ADMIN_TOKEN for manual invocation (debugging).
+// Authentication: Vercel cron jobs are invoked with
+// `Authorization: Bearer <CRON_SECRET>` (where CRON_SECRET is set
+// automatically as a project env var on Hobby plan, or configured
+// manually otherwise). We also accept BREEZE_ADMIN_TOKEN for manual
+// invocation/debugging, and the legacy `x-vercel-cron` header as a
+// belt-and-suspenders check.
 
 import { and, eq, inArray, lte, sql } from 'drizzle-orm';
 import { getDb, schema } from '../../lib/db/index.js';
@@ -32,16 +35,28 @@ const MAX_TASKS_PER_RUN = 20;
 // ── Auth guard ───────────────────────────────────────────────────
 
 function isAuthorizedCron(req) {
-  // Vercel cron sends this header automatically; absent otherwise.
+  // Legacy: older Vercel cron deployments set this header.
   if (req.headers['x-vercel-cron']) return true;
-  // Fall back to admin token for manual invocation.
-  const expected = process.env.BREEZE_ADMIN_TOKEN;
-  if (!expected) return true; // dev / first-boot mode
-  const provided =
-    req.query?.secret ||
-    req.headers['x-breeze-admin-token'] ||
-    (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-  return provided === expected;
+
+  const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  const queryToken = req.query?.secret;
+  const customHeaderToken = req.headers['x-breeze-admin-token'];
+
+  // Modern Vercel cron: Authorization: Bearer ${CRON_SECRET}.
+  // CRON_SECRET is auto-injected by Vercel for Hobby projects with
+  // crons configured.
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret && bearer === cronSecret) return true;
+
+  // Manual invocation: the team's admin token, accepted via query
+  // param, custom header, or bearer.
+  const adminToken = process.env.BREEZE_ADMIN_TOKEN;
+  if (!adminToken && !cronSecret) return true; // dev / first-boot mode
+  if (adminToken) {
+    const provided = queryToken || customHeaderToken || bearer;
+    if (provided === adminToken) return true;
+  }
+  return false;
 }
 
 // ── Date helpers ─────────────────────────────────────────────────

@@ -8,6 +8,11 @@
     { "source": "/api/stt",                           "destination": "/api/stt" },
     { "source": "/api/cliq",                          "destination": "/api/cliq" },
     { "source": "/api/notify",                        "destination": "/api/notify" },
+    { "source": "/api/upload",                        "destination": "/api/upload" },
+    { "source": "/api/notifications",                 "destination": "/api/notifications" },
+    { "source": "/api/follows",                       "destination": "/api/follows" },
+    { "source": "/api/data",                          "destination": "/api/data" },
+    { "source": "/api/webhooks/appfolio",             "destination": "/api/webhooks/appfolio" },
     { "source": "/api/vapi-webhook",                  "destination": "/api/vapi-webhook" },
     { "source": "/api/db-health",                     "destination": "/api/db-health" },
     { "source": "/api/db-migrate",                    "destination": "/api/db-migrate" },
@@ -23,14 +28,27 @@
     { "source": "/api/admin/grid-import",             "destination": "/api/admin/grid-import" },
     { "source": "/api/admin/backfill-unit-ids",       "destination": "/api/admin/backfill-unit-ids" },
     { "source": "/api/admin/zoho-mcp-ping",           "destination": "/api/admin/zoho-mcp-ping" },
+    { "source": "/api/admin/appfolio-sync",           "destination": "/api/admin/appfolio-sync" },
+    { "source": "/api/admin/generate-vapid-keys",     "destination": "/api/admin/generate-vapid-keys" },
+    { "source": "/api/admin/test-notification",       "destination": "/api/admin/test-notification" },
+    { "source": "/api/push-subscriptions",            "destination": "/api/push-subscriptions" },
+    { "source": "/api/category-subscriptions",        "destination": "/api/category-subscriptions" },
+    { "source": "/api/issue-gl-mappings",             "destination": "/api/issue-gl-mappings" },
+    { "source": "/api/human-tasks",                   "destination": "/api/human-tasks" },
     { "source": "/api/cron/process-tasks",            "destination": "/api/cron/process-tasks" },
+    { "source": "/api/cron/appfolio-reconcile",       "destination": "/api/cron/appfolio-reconcile" },
     { "source": "/api/(.*)",                          "destination": "/api/rentmanager" }
   ],
   "functions": {
     "api/rentmanager.js":                     { "maxDuration": 30 },
-    "api/chat.js":                            { "maxDuration": 45 },
+    "api/chat.js":                            { "maxDuration": 120 },
     "api/cliq.js":                            { "maxDuration": 45 },
     "api/notify.js":                          { "maxDuration": 15 },
+    "api/upload.js":                          { "maxDuration": 30 },
+    "api/notifications.js":                   { "maxDuration": 15 },
+    "api/follows.js":                         { "maxDuration": 15 },
+    "api/data.js":                            { "maxDuration": 60 },
+    "api/webhooks/appfolio.js":               { "maxDuration": 30 },
     "api/tts.js":                             { "maxDuration": 30 },
     "api/stt.js":                             { "maxDuration": 30 },
     "api/vapi-webhook.js":                    { "maxDuration": 30 },
@@ -48,12 +66,24 @@
     "api/admin/grid-import.js":               { "maxDuration": 60 },
     "api/admin/backfill-unit-ids.js":         { "maxDuration": 60 },
     "api/admin/zoho-mcp-ping.js":             { "maxDuration": 15 },
-    "api/cron/process-tasks.js":              { "maxDuration": 60 }
+    "api/admin/appfolio-sync.js":             { "maxDuration": 300 },
+    "api/admin/generate-vapid-keys.js":       { "maxDuration": 10 },
+    "api/admin/test-notification.js":         { "maxDuration": 15 },
+    "api/push-subscriptions.js":              { "maxDuration": 15 },
+    "api/category-subscriptions.js":          { "maxDuration": 15 },
+    "api/issue-gl-mappings.js":               { "maxDuration": 15 },
+    "api/human-tasks.js":                     { "maxDuration": 15 },
+    "api/cron/process-tasks.js":              { "maxDuration": 60 },
+    "api/cron/appfolio-reconcile.js":         { "maxDuration": 300 }
   },
   "crons": [
     {
       "path": "/api/cron/process-tasks",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/appfolio-reconcile",
+      "schedule": "0 * * * *"
     }
   ]
 }

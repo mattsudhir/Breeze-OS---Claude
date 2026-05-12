@@ -2,32 +2,15 @@ import { useState, useRef, useEffect } from 'react';
 import {
   Mic, MicOff, Send, Paperclip, FileText, Home, DollarSign,
   Wrench, User, Bot, ChevronDown, Building2, Loader2,
-  Volume2, VolumeX, ArrowRight, Database,
+  Volume2, VolumeX, ArrowRight, X, Square,
 } from 'lucide-react';
-
-// Backend toggle options shown under "Data source". Keep in sync with
-// lib/backends/index.js — the value field must match a registered
-// backend name.
-const DATA_SOURCES = [
-  {
-    value: 'appfolio',
-    label: 'AppFolio',
-    hint: 'Breeze Property Group production data',
-  },
-  {
-    value: 'rm-demo',
-    label: 'Rent Manager',
-    hint: 'Rent Manager sample15 sandbox',
-  },
-];
-
-const DATA_SOURCE_STORAGE_KEY = 'breezeChatBackend';
-const DEFAULT_DATA_SOURCE = 'appfolio';
+import { upload as blobUpload } from '@vercel/blob/client';
 import {
   startListening, stopListening, speak, cancelSpeech,
   isListeningSupported, isSpeakingSupported,
 } from '../lib/voice';
 import { notifyCliq } from '../lib/notify';
+import { useDataSource } from '../contexts/DataSourceContext.jsx';
 
 const WELCOME_MESSAGE = {
   id: 1,
@@ -98,20 +81,18 @@ export default function ChatHome({ onNavigate }) {
   const [isRecording, setIsRecording] = useState(false);
   const [showQuickActions, setShowQuickActions] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
-  const [ttsEnabled, setTtsEnabled] = useState(false);
-  const [dataSource, setDataSource] = useState(() => {
-    if (typeof window === 'undefined') return DEFAULT_DATA_SOURCE;
-    try {
-      const stored = window.localStorage.getItem(DATA_SOURCE_STORAGE_KEY);
-      if (stored && DATA_SOURCES.some((d) => d.value === stored)) return stored;
-    } catch {
-      // localStorage blocked (private mode / iframe) — fall back to default
-    }
-    return DEFAULT_DATA_SOURCE;
-  });
-  const [showDataSourceMenu, setShowDataSourceMenu] = useState(false);
+  const [ttsEnabled, setTtsEnabled] = useState(true);
+  const { dataSource, sources: DATA_SOURCES } = useDataSource();
+  // Pending attachment for the next message. Shape:
+  // { url, filename, contentType, isUploading: boolean } | null
+  const [attachment, setAttachment] = useState(null);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const fileInputRef = useRef(null);
+  // AbortController for the in-flight /api/chat request, so the user
+  // can stop a slow response (often after a voice-transcription error)
+  // without waiting for it to come back.
+  const abortControllerRef = useRef(null);
 
   // Conversation history sent to the LLM (role/content only, no UI fields)
   const llmHistoryRef = useRef([]);
@@ -121,11 +102,14 @@ export default function ChatHome({ onNavigate }) {
   const voiceListenSupported = isListeningSupported();
   const voiceSpeakSupported = isSpeakingSupported();
 
-  // Cancel any in-progress speech when the component unmounts
+  // Cancel any in-progress speech, voice input, or chat fetch when
+  // the component unmounts (user navigated away).
   useEffect(() => {
     return () => {
       cancelSpeech();
       stopListening();
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
     };
   }, []);
 
@@ -133,26 +117,20 @@ export default function ChatHome({ onNavigate }) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Persist the data source choice and announce switches in-chat so
-  // the user sees when they've changed backends mid-conversation.
-  const handleDataSourceChange = (newValue) => {
-    if (newValue === dataSource) {
-      setShowDataSourceMenu(false);
-      return;
-    }
-    try {
-      window.localStorage.setItem(DATA_SOURCE_STORAGE_KEY, newValue);
-    } catch {
-      /* ignore */
-    }
-    setDataSource(newValue);
-    setShowDataSourceMenu(false);
+  const now = () => new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
-    // Reset the conversation history so the new backend doesn't see
-    // tool calls for tools it doesn't have.
+  // The data source is now app-wide (TopBar drives it). When it
+  // changes from somewhere else, reset the LLM history so the new
+  // backend doesn't see tool calls for tools it doesn't have, and
+  // announce the switch in-chat so the user knows the context was
+  // cleared. The ref skips the first render — no spurious "switched
+  // to AppFolio" line on initial load.
+  const prevDataSourceRef = useRef(dataSource);
+  useEffect(() => {
+    if (prevDataSourceRef.current === dataSource) return;
+    prevDataSourceRef.current = dataSource;
     llmHistoryRef.current = [];
-
-    const label = DATA_SOURCES.find((d) => d.value === newValue)?.label || newValue;
+    const label = DATA_SOURCES.find((d) => d.value === dataSource)?.label || dataSource;
     setMessages((prev) => [
       ...prev,
       {
@@ -164,9 +142,7 @@ export default function ChatHome({ onNavigate }) {
         time: now(),
       },
     ]);
-  };
-
-  const now = () => new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }, [dataSource, DATA_SOURCES]);
 
   const addMessage = (msg) => {
     setMessages((prev) => [...prev, { id: Date.now() + Math.random(), time: now(), ...msg }]);
@@ -189,6 +165,16 @@ export default function ChatHome({ onNavigate }) {
       { role: 'user', content: userText },
     ];
 
+    // New AbortController for this request. The user can hit Stop
+    // while the agent is thinking — typically after a voice transcript
+    // came through wrong — and we abort the fetch on the client side.
+    // Note: the server function keeps running to completion (Vercel
+    // serverless has no upstream cancellation), so the LLM tokens are
+    // still spent — but the user gets their input back instantly and
+    // we never render the abandoned response.
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setIsThinking(true);
     try {
       const res = await fetch('/api/chat', {
@@ -198,9 +184,14 @@ export default function ChatHome({ onNavigate }) {
           messages: llmHistoryRef.current,
           dataSource,
         }),
+        signal: controller.signal,
       });
 
+      if (controller.signal.aborted) return;
+
       const data = await res.json();
+      if (controller.signal.aborted) return;
+
       if (!res.ok || !data.ok) {
         addMessage({
           type: 'system',
@@ -235,6 +226,9 @@ export default function ChatHome({ onNavigate }) {
         speak(displayText);
       }
     } catch (err) {
+      // User-initiated cancel — silently drop, the stop handler
+      // already added a "Stopped." note.
+      if (err.name === 'AbortError') return;
       addMessage({
         type: 'system',
         sender: 'Breeze AI',
@@ -242,21 +236,118 @@ export default function ChatHome({ onNavigate }) {
         text: `Network error: ${err.message}`,
       });
     } finally {
-      setIsThinking(false);
+      // Only clear refs/state if we're still the current request — a
+      // newer one may have replaced us by the time we get here.
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+        setIsThinking(false);
+      }
     }
   };
 
+  // User clicks Stop while the agent is thinking. Aborts the fetch,
+  // resets the spinner, kills any in-progress speech, and drops a
+  // small "Stopped." note in chat so the user knows what happened.
+  const handleStopThinking = () => {
+    const controller = abortControllerRef.current;
+    if (!controller) return;
+    abortControllerRef.current = null;
+    controller.abort();
+    setIsThinking(false);
+    cancelSpeech();
+    addMessage({
+      type: 'system',
+      sender: 'Breeze AI',
+      avatar: 'bot',
+      text: '_Stopped._',
+    });
+  };
+
+  // ── Attachment upload ───────────────────────────────────────────
+  // Paperclip → file picker → @vercel/blob/client direct upload.
+  // Bytes go browser-direct to Blob storage with a one-shot signed
+  // token from /api/upload, so we're not bound by the 4.5MB function
+  // request body cap. The resulting public URL is stashed in
+  // `attachment` and inlined into the next user message as
+  // "[Attachment: <url>]" so the agent (and charge_tenant in
+  // particular) can pick it up.
+
+  const handleAttachClick = () => {
+    if (attachment?.isUploading || isThinking) return;
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelected = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // reset so picking the same file twice still fires onChange
+    if (!file) return;
+
+    setAttachment({
+      url: null,
+      filename: file.name,
+      contentType: file.type,
+      isUploading: true,
+    });
+
+    try {
+      const blob = await blobUpload(file.name, file, {
+        access: 'public',
+        handleUploadUrl: '/api/upload',
+        contentType: file.type,
+      });
+      setAttachment({
+        url: blob.url,
+        filename: file.name,
+        contentType: file.type,
+        isUploading: false,
+      });
+    } catch (err) {
+      console.warn('Attachment upload failed:', err);
+      setAttachment(null);
+      addMessage({
+        type: 'system',
+        sender: 'Breeze AI',
+        avatar: 'bot',
+        text: `Attachment upload failed: ${err.message || 'unknown error'}`,
+      });
+    }
+  };
+
+  const removeAttachment = () => {
+    if (attachment?.isUploading) return;
+    setAttachment(null);
+  };
+
   const handleSend = () => {
-    if (!input.trim() || isThinking) return;
+    if (isThinking) return;
+    if (!input.trim() && !attachment?.url) return;
+    if (attachment?.isUploading) return;
+
     const userText = input.trim();
+    // Inline the attachment URL into the prompt the LLM sees so
+    // charge_tenant (and any future tools that take an URL) can pick
+    // it up. The chat bubble itself renders the file separately, so
+    // the user doesn't see the raw URL in their own message.
+    const llmText = attachment?.url
+      ? `${userText}${userText ? '\n\n' : ''}[Attachment: ${attachment.url}]`
+      : userText;
+
     addMessage({
       type: 'user',
       sender: 'You',
       avatar: 'user',
       text: userText,
+      attachment: attachment?.url
+        ? {
+            name: attachment.filename,
+            url: attachment.url,
+            contentType: attachment.contentType,
+          }
+        : null,
     });
     setInput('');
-    sendToLLM(userText);
+    setAttachment(null);
+    sendToLLM(llmText);
   };
 
   const handleQuickAction = (action) => {
@@ -329,14 +420,27 @@ export default function ChatHome({ onNavigate }) {
   };
 
   const sendFromVoice = (text) => {
+    if (attachment?.isUploading) return;
+    const llmText = attachment?.url
+      ? `${text}${text ? '\n\n' : ''}[Attachment: ${attachment.url}]`
+      : text;
+
     addMessage({
       type: 'user',
       sender: 'You',
       avatar: 'user',
       text,
+      attachment: attachment?.url
+        ? {
+            name: attachment.filename,
+            url: attachment.url,
+            contentType: attachment.contentType,
+          }
+        : null,
     });
     setInput('');
-    sendToLLM(text);
+    setAttachment(null);
+    sendToLLM(llmText);
   };
 
   const toggleTts = () => {
@@ -371,82 +475,6 @@ export default function ChatHome({ onNavigate }) {
           </button>
         )}
 
-        <div className="data-source-toggle-wrapper" style={{ position: 'relative' }}>
-          <button
-            className="data-source-toggle"
-            onClick={() => setShowDataSourceMenu((v) => !v)}
-            title="Choose which data source the chat queries"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '6px 10px',
-              border: '1px solid #D0D7DE',
-              background: '#FFF',
-              borderRadius: 6,
-              cursor: 'pointer',
-              fontSize: 13,
-            }}
-          >
-            <Database size={14} />
-            <span>
-              {DATA_SOURCES.find((d) => d.value === dataSource)?.label || dataSource}
-            </span>
-            <ChevronDown
-              size={12}
-              style={{
-                transform: showDataSourceMenu ? 'rotate(180deg)' : 'rotate(0)',
-                transition: 'transform 0.2s',
-              }}
-            />
-          </button>
-          {showDataSourceMenu && (
-            <div
-              className="data-source-menu"
-              style={{
-                position: 'absolute',
-                top: 'calc(100% + 4px)',
-                right: 0,
-                minWidth: 240,
-                background: '#FFF',
-                border: '1px solid #D0D7DE',
-                borderRadius: 6,
-                boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                zIndex: 100,
-                overflow: 'hidden',
-              }}
-            >
-              {DATA_SOURCES.map((option) => (
-                <button
-                  key={option.value}
-                  onClick={() => handleDataSourceChange(option.value)}
-                  style={{
-                    display: 'block',
-                    width: '100%',
-                    textAlign: 'left',
-                    padding: '10px 12px',
-                    border: 'none',
-                    background: option.value === dataSource ? '#F2F6FA' : 'transparent',
-                    cursor: 'pointer',
-                    borderBottom: '1px solid #EEF0F2',
-                  }}
-                >
-                  <div style={{ fontWeight: 600, fontSize: 13, color: '#1A1A1A' }}>
-                    {option.label}
-                    {option.value === dataSource && (
-                      <span style={{ marginLeft: 6, color: '#1565C0', fontSize: 11 }}>
-                        • active
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ fontSize: 11, color: '#6A737D', marginTop: 2 }}>
-                    {option.hint}
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
         {showQuickActions && (
           <div className="quick-actions-grid">
             {QUICK_ACTIONS.map((action, i) => (
@@ -486,12 +514,36 @@ export default function ChatHome({ onNavigate }) {
                 <p style={{ whiteSpace: 'pre-wrap' }}>{msg.text}</p>
                 {msg.attachment && (
                   <div className="chat-attachment">
-                    <FileText size={20} />
+                    {msg.attachment.contentType?.startsWith('image/') ? (
+                      <img
+                        src={msg.attachment.url}
+                        alt={msg.attachment.name}
+                        style={{
+                          maxWidth: 240,
+                          maxHeight: 240,
+                          borderRadius: 6,
+                          objectFit: 'cover',
+                        }}
+                      />
+                    ) : (
+                      <FileText size={20} />
+                    )}
                     <div className="attachment-info">
                       <span className="attachment-name">{msg.attachment.name}</span>
-                      <span className="attachment-size">{msg.attachment.size}</span>
+                      {msg.attachment.size && (
+                        <span className="attachment-size">{msg.attachment.size}</span>
+                      )}
                     </div>
-                    <button className="attachment-download">View</button>
+                    {msg.attachment.url && (
+                      <a
+                        className="attachment-download"
+                        href={msg.attachment.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        View
+                      </a>
+                    )}
                   </div>
                 )}
                 {msg.showMe && onNavigate && (
@@ -526,8 +578,71 @@ export default function ChatHome({ onNavigate }) {
       </div>
 
       <div className="chat-input-area">
+        {attachment && (
+          <div
+            className="chat-pending-attachment"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '6px 8px 6px 6px',
+              margin: '0 0 8px',
+              background: '#F2F6FA',
+              border: '1px solid #D0D7DE',
+              borderRadius: 8,
+              fontSize: 12,
+              color: '#1A1A1A',
+              maxWidth: 320,
+            }}
+          >
+            {attachment.isUploading ? (
+              <Loader2 size={14} className="spin" />
+            ) : attachment.contentType?.startsWith('image/') && attachment.url ? (
+              <img
+                src={attachment.url}
+                alt={attachment.filename}
+                style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: 4 }}
+              />
+            ) : (
+              <FileText size={14} />
+            )}
+            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {attachment.filename}
+              {attachment.isUploading ? ' — uploading…' : ''}
+            </span>
+            <button
+              type="button"
+              onClick={removeAttachment}
+              disabled={attachment.isUploading}
+              title="Remove attachment"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                cursor: attachment.isUploading ? 'default' : 'pointer',
+                color: '#6A737D',
+                padding: 2,
+                display: 'inline-flex',
+                alignItems: 'center',
+              }}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,application/pdf"
+          style={{ display: 'none' }}
+          onChange={handleFileSelected}
+        />
         <div className="chat-input-container">
-          <button className="chat-attach-btn" title="Attach file">
+          <button
+            className="chat-attach-btn"
+            title="Attach photo or PDF"
+            onClick={handleAttachClick}
+            disabled={attachment?.isUploading || isThinking}
+          >
             <Paperclip size={20} />
           </button>
           <textarea
@@ -542,11 +657,15 @@ export default function ChatHome({ onNavigate }) {
           />
           <button
             className="chat-send-btn"
-            onClick={handleSend}
-            disabled={!input.trim() || isThinking}
-            title="Send message"
+            onClick={isThinking ? handleStopThinking : handleSend}
+            disabled={
+              isThinking
+                ? false
+                : attachment?.isUploading || (!input.trim() && !attachment?.url)
+            }
+            title={isThinking ? 'Stop' : 'Send message'}
           >
-            <Send size={20} />
+            {isThinking ? <Square size={18} /> : <Send size={20} />}
           </button>
         </div>
 
