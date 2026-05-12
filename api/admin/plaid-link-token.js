@@ -51,7 +51,9 @@ export default withAdminHandler(async (req, res) => {
       env_check: {
         PLAID_ENV: process.env.PLAID_ENV || '(unset)',
         PLAID_CLIENT_ID_present: Boolean(process.env.PLAID_CLIENT_ID),
+        PLAID_CLIENT_ID_length: process.env.PLAID_CLIENT_ID?.length ?? 0,
         PLAID_SECRET_present: Boolean(process.env.PLAID_SECRET),
+        PLAID_SECRET_length: process.env.PLAID_SECRET?.length ?? 0,
       },
     });
   }
