@@ -743,6 +743,13 @@ function BankAccountsTab({ token, onTokenInvalid }) {
                     {b.institution_name && <> · {b.institution_name}</>}
                     {b.account_last4 && <> · <code>****{b.account_last4}</code></>}
                   </div>
+                  <BankBillComEditor
+                    bankAccountId={b.id}
+                    currentValue={b.bill_com_bank_account_id}
+                    token={token}
+                    onTokenInvalid={onTokenInvalid}
+                    onSaved={load}
+                  />
                 </div>
                 <div className="ba-cell-balance ba-balance">
                   {formatCents(b.current_balance_cents)}
@@ -3141,6 +3148,7 @@ function VendorEditor({ vendor, glAccounts, token, onSaved, onCancel, onTokenInv
   const [is1099, setIs1099] = useState(vendor?.is_1099_eligible || false);
   const [paymentTermsDays, setPaymentTermsDays] = useState(vendor?.payment_terms_days ?? 30);
   const [defaultGlAccountId, setDefaultGlAccountId] = useState(vendor?.default_gl_account_id || '');
+  const [billComVendorId, setBillComVendorId] = useState(vendor?.bill_com_vendor_id || '');
   const [isActive, setIsActive] = useState(vendor?.is_active ?? true);
   const [notes, setNotes] = useState(vendor?.notes || '');
   const [saving, setSaving] = useState(false);
@@ -3172,6 +3180,7 @@ function VendorEditor({ vendor, glAccounts, token, onSaved, onCancel, onTokenInv
         is_1099_eligible: is1099,
         payment_terms_days: Number(paymentTermsDays),
         default_gl_account_id: defaultGlAccountId || null,
+        bill_com_vendor_id: billComVendorId.trim() || null,
         is_active: isActive,
         notes: notes.trim() || null,
       };
@@ -3260,6 +3269,16 @@ function VendorEditor({ vendor, glAccounts, token, onSaved, onCancel, onTokenInv
             {isActive ? 'Active' : 'Inactive'}
           </label>
         </VendField>
+        <div style={{ gridColumn: 'span 2' }}>
+          <VendField label="Bill.com vendor id (paste from Bill.com dashboard — required for Bill.com payments)">
+            <input
+              value={billComVendorId}
+              onChange={(e) => setBillComVendorId(e.target.value)}
+              placeholder="e.g. 0vc01..."
+              style={{ ...vendInput, fontFamily: 'monospace', fontSize: 12 }}
+            />
+          </VendField>
+        </div>
         <div style={{ gridColumn: 'span 2' }}>
           <VendField label="Notes">
             <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} style={{ ...vendInput, fontFamily: 'inherit' }} />
@@ -4104,6 +4123,84 @@ function BuildDepositForm({ token, onTokenInvalid, onSaved, onCancel }) {
           {saving ? 'Posting…' : 'Build deposit'}
         </button>
       </div>
+    </div>
+  );
+}
+
+// ── Inline bill.com id editor for a bank account ────────────────
+
+function BankBillComEditor({ bankAccountId, currentValue, token, onTokenInvalid, onSaved }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(currentValue || '');
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const url = new URL('/api/admin/set-bank-bill-com-id', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bank_account_id: bankAccountId,
+          bill_com_bank_account_id: value.trim() || null,
+        }),
+      });
+      if (res.status === 401) { onTokenInvalid(); return; }
+      const json = await res.json();
+      if (!json.ok) { alert(`Save failed: ${json.error}`); return; }
+      setEditing(false);
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <div style={{ fontSize: 11, color: '#999', marginTop: 4 }}>
+        Bill.com: {currentValue ? (
+          <code style={{ fontSize: 10 }}>{currentValue}</code>
+        ) : (
+          <span style={{ fontStyle: 'italic' }}>not set</span>
+        )}
+        <button
+          type="button"
+          onClick={() => { setValue(currentValue || ''); setEditing(true); }}
+          style={{
+            marginLeft: 6, padding: '0 4px', background: 'none', border: 'none',
+            color: '#1565C0', cursor: 'pointer', fontSize: 11, textDecoration: 'underline',
+          }}
+        >
+          {currentValue ? 'edit' : 'set'}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
+      <input
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="Bill.com bank id"
+        style={{ padding: '3px 6px', fontSize: 11, border: '1px solid #BBB', borderRadius: 4, width: 180, fontFamily: 'monospace' }}
+        autoFocus
+        onKeyDown={(e) => e.key === 'Enter' && save()}
+      />
+      <button
+        type="button" onClick={save} disabled={saving}
+        style={{ padding: '2px 8px', fontSize: 11, background: '#2E7D32', color: 'white', border: 'none', borderRadius: 3, cursor: 'pointer' }}
+      >
+        {saving ? '…' : 'Save'}
+      </button>
+      <button
+        type="button" onClick={() => setEditing(false)} disabled={saving}
+        style={{ padding: '2px 8px', fontSize: 11, background: 'none', border: '1px solid #BBB', borderRadius: 3, cursor: 'pointer' }}
+      >
+        Cancel
+      </button>
     </div>
   );
 }
