@@ -2439,6 +2439,7 @@ function ReceiptsTab({ token, onTokenInvalid }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [filter, setFilter] = useState('all');
+  const [showNew, setShowNew] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -2500,6 +2501,17 @@ function ReceiptsTab({ token, onTokenInvalid }) {
         >
           <RefreshCw size={14} /> Refresh
         </button>
+        <button
+          type="button"
+          onClick={() => setShowNew(true)}
+          style={{
+            padding: '6px 14px', background: '#E65100', color: 'white', border: 'none',
+            borderRadius: 6, fontWeight: 600, fontSize: 13, cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+          }}
+        >
+          <Plus size={14} /> Record receipt
+        </button>
         <select
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
@@ -2513,6 +2525,15 @@ function ReceiptsTab({ token, onTokenInvalid }) {
           {receipts.length} receipt{receipts.length === 1 ? '' : 's'}
         </span>
       </div>
+
+      {showNew && (
+        <RecordReceiptForm
+          token={token}
+          onTokenInvalid={onTokenInvalid}
+          onSaved={() => { setShowNew(false); load(); }}
+          onCancel={() => setShowNew(false)}
+        />
+      )}
 
       {receipts.length === 0 ? (
         <div className="dashboard-card" style={{ padding: 24, textAlign: 'center', color: '#666' }}>
@@ -2576,6 +2597,7 @@ function DepositsTab({ token, onTokenInvalid }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [showBuild, setShowBuild] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -2634,10 +2656,30 @@ function DepositsTab({ token, onTokenInvalid }) {
         >
           <RefreshCw size={14} /> Refresh
         </button>
+        <button
+          type="button"
+          onClick={() => setShowBuild(true)}
+          style={{
+            padding: '6px 14px', background: '#2E7D32', color: 'white', border: 'none',
+            borderRadius: 6, fontWeight: 600, fontSize: 13, cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+          }}
+        >
+          <Plus size={14} /> Build deposit
+        </button>
         <span style={{ fontSize: 13, color: '#666' }}>
           {deposits.length} deposit{deposits.length === 1 ? '' : 's'}
         </span>
       </div>
+
+      {showBuild && (
+        <BuildDepositForm
+          token={token}
+          onTokenInvalid={onTokenInvalid}
+          onSaved={() => { setShowBuild(false); load(); }}
+          onCancel={() => setShowBuild(false)}
+        />
+      )}
 
       {deposits.length === 0 ? (
         <div className="dashboard-card" style={{ padding: 24, textAlign: 'center', color: '#666' }}>
@@ -3797,6 +3839,269 @@ function PayBillForm({ bill, banks, token, onPaid, onCancel, onTokenInvalid }) {
           style={{ padding: '7px 16px', background: saving ? '#BBB' : '#2E7D32', color: 'white', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: 13 }}
         >
           {saving ? 'Posting…' : 'Record payment'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Record receipt form ─────────────────────────────────────────
+
+function RecordReceiptForm({ token, onTokenInvalid, onSaved, onCancel }) {
+  const [tenantId, setTenantId] = useState('');
+  const [receivedDate, setReceivedDate] = useState(new Date().toISOString().slice(0, 10));
+  const [amount, setAmount] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('check');
+  const [externalRef, setExternalRef] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const save = async () => {
+    if (!Number(amount) || Number(amount) <= 0) { setErr('Amount required'); return; }
+    setSaving(true);
+    setErr(null);
+    try {
+      const url = new URL('/api/admin/record-receipt', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId.trim() || null,
+          received_date: receivedDate,
+          amount_cents: Math.round(Number(amount) * 100),
+          payment_method: paymentMethod,
+          external_reference: externalRef.trim() || null,
+        }),
+      });
+      if (res.status === 401) { onTokenInvalid(); return; }
+      const json = await res.json();
+      if (!json.ok) { setErr(json.error || 'save failed'); return; }
+      onSaved();
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="dashboard-card" style={{ padding: 16, marginBottom: 12, border: '2px solid #E65100' }}>
+      <div style={{ fontWeight: 700, color: '#E65100', marginBottom: 12 }}>Record receipt</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+        <VendField label="Tenant id (optional — paste from Tenants page)">
+          <input value={tenantId} onChange={(e) => setTenantId(e.target.value)} style={vendInput} />
+        </VendField>
+        <VendField label="Received date">
+          <input type="date" value={receivedDate} onChange={(e) => setReceivedDate(e.target.value)} style={vendInput} />
+        </VendField>
+        <VendField label="Amount">
+          <input
+            type="number" step="0.01" min="0.01"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="0.00"
+            style={{ ...vendInput, fontFamily: 'monospace' }}
+          />
+        </VendField>
+        <VendField label="Method">
+          <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} style={vendInput}>
+            <option value="check">Check</option>
+            <option value="cash">Cash</option>
+            <option value="ach">ACH</option>
+            <option value="card">Card</option>
+            <option value="wire">Wire</option>
+            <option value="other">Other</option>
+          </select>
+        </VendField>
+        <VendField label="Reference (check #, ACH trace)">
+          <input value={externalRef} onChange={(e) => setExternalRef(e.target.value)} style={vendInput} />
+        </VendField>
+      </div>
+      <div style={{ fontSize: 11, color: '#666', marginTop: 8 }}>
+        Posts to Undeposited Funds (1110). Unallocated amount lands in Tenant Credit (2210)
+        until you allocate against open charges. Allocations UI is a follow-up.
+      </div>
+      {err && <div style={{ color: '#C62828', fontSize: 12, marginTop: 6 }}>Error: {err}</div>}
+      <div style={{ marginTop: 12, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <button
+          type="button" onClick={onCancel} disabled={saving}
+          style={{ padding: '7px 14px', border: '1px solid #999', background: 'white', color: '#444', borderRadius: 6, fontSize: 13 }}
+        >
+          Cancel
+        </button>
+        <button
+          type="button" onClick={save} disabled={saving}
+          style={{ padding: '7px 16px', background: saving ? '#BBB' : '#E65100', color: 'white', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: 13 }}
+        >
+          {saving ? 'Posting…' : 'Record receipt'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Build deposit form ──────────────────────────────────────────
+
+function BuildDepositForm({ token, onTokenInvalid, onSaved, onCancel }) {
+  const [undeposited, setUndeposited] = useState([]);
+  const [banks, setBanks] = useState([]);
+  const [bankId, setBankId] = useState('');
+  const [depositDate, setDepositDate] = useState(new Date().toISOString().slice(0, 10));
+  const [depositType, setDepositType] = useState('cash_drawer');
+  const [externalRef, setExternalRef] = useState('');
+  const [selected, setSelected] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const u = (path) => {
+          const url = new URL(path, window.location.origin);
+          url.searchParams.set('secret', token);
+          return url;
+        };
+        const ru = u('/api/admin/list-receipts');
+        ru.searchParams.set('deposit_status', 'undeposited');
+        const [rRes, bRes] = await Promise.all([
+          fetch(ru.toString()),
+          fetch(u('/api/admin/list-bank-accounts').toString()),
+        ]);
+        if (rRes.status === 401 || bRes.status === 401) { onTokenInvalid(); return; }
+        const rJson = await rRes.json();
+        const bJson = await bRes.json();
+        setUndeposited(rJson.receipts || []);
+        const linked = (bJson.bank_accounts || []).filter((b) => b.gl_account_id);
+        setBanks(linked);
+        if (linked.length > 0) setBankId(linked[0].id);
+      } catch { /* fine */ }
+    })();
+  }, [token, onTokenInvalid]);
+
+  const toggle = (id) => setSelected({ ...selected, [id]: !selected[id] });
+  const selectedIds = Object.entries(selected).filter(([, v]) => v).map(([k]) => k);
+  const selectedTotal = undeposited
+    .filter((r) => selected[r.id])
+    .reduce((s, r) => s + r.amount_cents, 0);
+
+  const save = async () => {
+    if (!bankId) { setErr('Bank required'); return; }
+    if (selectedIds.length === 0) { setErr('Select at least one receipt'); return; }
+    setSaving(true);
+    setErr(null);
+    try {
+      const url = new URL('/api/admin/build-deposit', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bank_account_id: bankId,
+          deposit_date: depositDate,
+          deposit_type: depositType,
+          receipt_ids: selectedIds,
+          external_reference: externalRef.trim() || null,
+        }),
+      });
+      if (res.status === 401) { onTokenInvalid(); return; }
+      const json = await res.json();
+      if (!json.ok) { setErr(json.error || 'save failed'); return; }
+      onSaved();
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="dashboard-card" style={{ padding: 16, marginBottom: 12, border: '2px solid #2E7D32' }}>
+      <div style={{ fontWeight: 700, color: '#2E7D32', marginBottom: 12 }}>Build deposit</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10, marginBottom: 12 }}>
+        <VendField label="Bank account">
+          <select value={bankId} onChange={(e) => setBankId(e.target.value)} style={vendInput}>
+            {banks.length === 0 && <option value="">No linked banks</option>}
+            {banks.map((b) => <option key={b.id} value={b.id}>{b.display_name}</option>)}
+          </select>
+        </VendField>
+        <VendField label="Deposit date">
+          <input type="date" value={depositDate} onChange={(e) => setDepositDate(e.target.value)} style={vendInput} />
+        </VendField>
+        <VendField label="Type">
+          <select value={depositType} onChange={(e) => setDepositType(e.target.value)} style={vendInput}>
+            <option value="cash_drawer">Cash drawer</option>
+            <option value="lockbox">Lockbox</option>
+            <option value="electronic">Electronic</option>
+            <option value="transfer">Transfer</option>
+            <option value="other">Other</option>
+          </select>
+        </VendField>
+        <VendField label="Reference (slip #)">
+          <input value={externalRef} onChange={(e) => setExternalRef(e.target.value)} style={vendInput} />
+        </VendField>
+      </div>
+
+      <div style={{ fontSize: 12, color: '#444', fontWeight: 600, marginBottom: 4 }}>
+        Undeposited receipts ({undeposited.length})
+      </div>
+      {undeposited.length === 0 ? (
+        <div style={{ padding: 12, color: '#999', fontSize: 12, background: '#FAFAFA', borderRadius: 5 }}>
+          No undeposited receipts. Record some on the Receipts tab first.
+        </div>
+      ) : (
+        <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid #EEE', borderRadius: 5 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: '#FAFAFA', borderBottom: '1px solid #E0E0E0' }}>
+                <th style={{ ...th, padding: '6px 8px' }}></th>
+                <th style={{ ...th, padding: '6px 8px' }}>Date</th>
+                <th style={{ ...th, padding: '6px 8px' }}>Tenant</th>
+                <th style={{ ...th, padding: '6px 8px' }}>Method</th>
+                <th style={{ ...th, padding: '6px 8px', textAlign: 'right' }}>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {undeposited.map((r) => (
+                <tr key={r.id} style={{ borderBottom: '1px solid #F5F5F5' }}>
+                  <td style={{ padding: '6px 8px' }}>
+                    <input type="checkbox" checked={!!selected[r.id]} onChange={() => toggle(r.id)} />
+                  </td>
+                  <td style={{ padding: '6px 8px' }}>{r.received_date}</td>
+                  <td style={{ padding: '6px 8px' }}>{r.tenant_display || '—'}</td>
+                  <td style={{ padding: '6px 8px' }}>{r.payment_method}</td>
+                  <td style={{ padding: '6px 8px', textAlign: 'right', fontFamily: 'monospace' }}>
+                    {formatCents(r.amount_cents)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div style={{ marginTop: 10, fontSize: 14, fontWeight: 700 }}>
+        Selected: {selectedIds.length} receipt{selectedIds.length === 1 ? '' : 's'}
+        {' = '}<span style={{ fontFamily: 'monospace' }}>{formatCents(selectedTotal)}</span>
+      </div>
+      {err && <div style={{ color: '#C62828', fontSize: 12, marginTop: 6 }}>Error: {err}</div>}
+      <div style={{ marginTop: 12, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <button
+          type="button" onClick={onCancel} disabled={saving}
+          style={{ padding: '7px 14px', border: '1px solid #999', background: 'white', color: '#444', borderRadius: 6, fontSize: 13 }}
+        >
+          Cancel
+        </button>
+        <button
+          type="button" onClick={save} disabled={saving || selectedIds.length === 0}
+          style={{
+            padding: '7px 16px',
+            background: saving || selectedIds.length === 0 ? '#BBB' : '#2E7D32',
+            color: 'white', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: 13,
+            cursor: saving || selectedIds.length === 0 ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {saving ? 'Posting…' : 'Build deposit'}
         </button>
       </div>
     </div>
