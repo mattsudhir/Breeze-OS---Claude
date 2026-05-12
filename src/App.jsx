@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { SignedIn, SignedOut, SignIn } from '@clerk/clerk-react';
 import Sidebar from './components/Sidebar';
 import TopBar from './components/TopBar';
 import ChatHome from './components/ChatHome';
@@ -17,6 +18,8 @@ import PropertiesDrilldown from './components/PropertiesDrilldown';
 import PropertyDirectoryPage from './components/PropertyDirectoryPage';
 import MoveEventsPage from './components/MoveEventsPage';
 import './App.css';
+
+const CLERK_ENABLED = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
 
 function App() {
   const [activeView, setActiveView] = useState('chat');
@@ -78,7 +81,7 @@ function App() {
 
   const showToggle = activeView === 'chat' || activeView === 'dashboard';
 
-  return (
+  const shell = (
     <div className={`app-layout ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
       {mobileMenuOpen && (
         <div className="mobile-overlay" onClick={() => setMobileMenuOpen(false)} />
@@ -104,6 +107,34 @@ function App() {
         </main>
       </div>
     </div>
+  );
+
+  // When Clerk is not configured (no publishable key in env), render
+  // the app as-is — admin endpoints stay gated by BREEZE_ADMIN_TOKEN.
+  // Once VITE_CLERK_PUBLISHABLE_KEY is set, the same shell is shown
+  // only to authenticated users; unauthenticated visitors see the
+  // hosted Clerk sign-in.
+  if (!CLERK_ENABLED) return shell;
+
+  return (
+    <>
+      <SignedIn>{shell}</SignedIn>
+      <SignedOut>
+        <div style={{
+          minHeight: '100vh', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', padding: '24px',
+          background: 'linear-gradient(135deg, #E3F2FD 0%, #E8EAF6 100%)',
+        }}>
+          <div style={{ textAlign: 'center' }}>
+            <h1 style={{ marginBottom: 8, color: '#1A1A1A' }}>Breeze OS</h1>
+            <p style={{ marginTop: 0, marginBottom: 24, color: '#555' }}>
+              Sign in to access your property accounting workspace.
+            </p>
+            <SignIn routing="hash" />
+          </div>
+        </div>
+      </SignedOut>
+    </>
   );
 }
 
