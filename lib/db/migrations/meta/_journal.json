@@ -155,6 +155,13 @@
       "when": 1779177600000,
       "tag": "0021_onboarding_state",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1779264000000,
+      "tag": "0022_messaging",
+      "breakpoints": true
     }
   ]
 }
