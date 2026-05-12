@@ -148,14 +148,33 @@ transaction:
   the same key so this is usually pre-set.
 - `RECON_LLM_MODEL` — optional model override.
 
+## Posting on confirm
+
+`confirmMatchCandidate` posts a balanced two-line journal entry in
+the same transaction that flips the candidate to `confirmed`:
+
+- **Outflow** (Plaid amount > 0, money OUT of bank) → entry type
+  `disbursement`. Debit the rule's `target.gl_account_code`
+  (expense increases), credit the bank account's GL (asset
+  decreases).
+- **Inflow** (Plaid amount < 0, money IN to bank) → entry type
+  `receipt`. Debit the bank GL, credit the target GL.
+
+The memo template is substituted with `{merchant}` / `{amount}` /
+`{date}` placeholders. Attribution from `target.attribute_to`
+(property/unit/tenant/vendor) lands on the non-cash leg.
+`source_table='bank_transactions'`, `source_id=<bank_transaction.id>`
+so the entry can be traced back to its original transaction. The
+new `journal_entries.id` is written back to
+`match_candidates.journal_entry_id`.
+
+The DB trigger validates balance + non-zero at the moment of
+posting, so a malformed rule (e.g. missing target code) rolls back
+the whole confirm — the candidate stays pending and the user sees
+the error.
+
 ## What's still missing (next iteration)
 
-- The `confirmMatchCandidate` service is a no-op for journal-entry
-  creation (TODO Stage 4). Confirming a candidate today only
-  bumps the rule stats; it doesn't yet generate a `journal_entries`
-  row that posts the bank transaction against the target GL
-  account. That's the next milestone — it makes rules
-  *actually post entries*, not just suggest them.
 - Auto-match worker on Plaid sync. Currently rules are only applied
   to (a) the originating transaction at rule-creation time and (b)
   any future explicit `applyRuleToTransaction` calls. The worker
