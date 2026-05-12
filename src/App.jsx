@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { SignedIn, SignedOut, SignIn } from '@clerk/clerk-react';
 import Sidebar from './components/Sidebar';
 import TopBar from './components/TopBar';
 import ChatHome from './components/ChatHome';
+import SetupWizard from './components/SetupWizard';
 import ClassicDashboard from './components/ClassicDashboard';
 import PropertiesPage from './components/PropertiesPage';
 import TenantsPage from './components/TenantsPage';
@@ -27,9 +28,36 @@ function App() {
   const [showClassic, setShowClassic] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
   // Filters to seed a page with when navigating from a chat Show Me link.
   // Keyed by view id (e.g. 'maintenance') → plain object of filter values.
   const [pendingFilters, setPendingFilters] = useState({});
+
+  // On first mount, auto-open the setup wizard if onboarding state is
+  // null or not marked complete. We gate this behind a per-session
+  // 'dismissed' flag so closing the wizard doesn't re-pop it for the
+  // rest of the session.
+  useEffect(() => {
+    if (sessionStorage.getItem('breeze.wizard.dismissed') === 'true') return;
+    (async () => {
+      try {
+        const url = new URL('/api/admin/onboarding-state', window.location.origin);
+        const tok = sessionStorage.getItem('breeze.admin.token');
+        if (tok) url.searchParams.set('secret', tok);
+        else if (CLERK_ENABLED) url.searchParams.set('secret', 'clerk');
+        const res = await fetch(url.toString());
+        if (!res.ok) return;
+        const json = await res.json();
+        const state = json.onboarding_state;
+        if (!state || !state.completed_at) setWizardOpen(true);
+      } catch { /* network blip — don't pester the user */ }
+    })();
+  }, []);
+
+  const closeWizard = () => {
+    sessionStorage.setItem('breeze.wizard.dismissed', 'true');
+    setWizardOpen(false);
+  };
 
   const handleNavigate = (viewId, filters) => {
     setActiveView(viewId);
@@ -115,6 +143,9 @@ function App() {
           {renderContent()}
         </main>
       </div>
+      {wizardOpen && (
+        <SetupWizard onClose={closeWizard} onNavigate={handleNavigate} />
+      )}
     </div>
   );
 
