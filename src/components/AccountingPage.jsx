@@ -104,12 +104,12 @@ export default function AccountingPage() {
             {activeTab === 'entities' && <EntitiesTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'journal' && <JournalEntriesTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'ar' && <ReceivablesTab token={token} onTokenInvalid={() => setToken('')} />}
-            {activeTab === 'receipts' && <PlaceholderTab label="Receipts" hint="Recent receipts + record-receipt form. Backed by /api/admin/ar-happy-path or a focused record endpoint." />}
-            {activeTab === 'deposits' && <PlaceholderTab label="Deposits" hint="Undeposited Funds queue + build-deposit form." />}
+            {activeTab === 'receipts' && <ReceiptsTab token={token} onTokenInvalid={() => setToken('')} />}
+            {activeTab === 'deposits' && <DepositsTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'banks' && <BankAccountsTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'recon' && <ReconciliationTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'rules' && <RulesTab token={token} onTokenInvalid={() => setToken('')} />}
-            {activeTab === 'reports' && <PlaceholderTab label="Reports" hint="P&L, rent roll, owner statements (Stage 7)." />}
+            {activeTab === 'reports' && <ReportsTab token={token} onTokenInvalid={() => setToken('')} />}
           </div>
         </>
       )}
@@ -2426,3 +2426,435 @@ function EntityField({ label, children }) {
     </label>
   );
 }
+
+// ── Receipts tab ────────────────────────────────────────────────
+
+function ReceiptsTab({ token, onTokenInvalid }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [filter, setFilter] = useState('all');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const url = new URL('/api/admin/list-receipts', window.location.origin);
+      url.searchParams.set('secret', token);
+      if (filter !== 'all') url.searchParams.set('deposit_status', filter);
+      const res = await fetch(url.toString());
+      if (res.status === 401) { onTokenInvalid(); return; }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setData(await res.json());
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [token, onTokenInvalid, filter]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <div style={{ padding: 24, color: '#666' }}>Loading…</div>;
+  if (error) {
+    return (
+      <div className="dashboard-card" style={{ padding: 16, background: '#FFEBEE', color: '#C62828' }}>
+        <strong>Failed to load:</strong> {error}
+      </div>
+    );
+  }
+
+  const receipts = data?.receipts || [];
+
+  return (
+    <div>
+      <div style={{
+        padding: '14px 16px', marginBottom: 12,
+        background: 'linear-gradient(135deg, #FFF3E0 0%, #FFE0B2 100%)',
+        borderLeft: '3px solid #E65100', borderRadius: 8,
+      }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: '#E65100', marginBottom: 4 }}>
+          <DollarSign size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />
+          Receipts
+        </div>
+        <div style={{ fontSize: 12, color: '#555' }}>
+          Money-in events. Receipts post to Undeposited Funds (1110) until you group them
+          into a Deposit on the Deposits tab — that's when cash actually hits the bank GL.
+          {' '}
+          <strong>Currently undeposited:</strong> {formatCents(data?.undeposited_total_cents || 0)}
+          {' '}across {data?.undeposited_count || 0} receipt{data?.undeposited_count === 1 ? '' : 's'}.
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+        <button
+          type="button"
+          onClick={load}
+          className="btn-secondary"
+          style={{ padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+        >
+          <RefreshCw size={14} /> Refresh
+        </button>
+        <select
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          style={{ padding: '6px 10px', border: '1px solid #CCC', borderRadius: 6, fontSize: 13 }}
+        >
+          <option value="all">All</option>
+          <option value="undeposited">Undeposited only</option>
+          <option value="deposited">Deposited only</option>
+        </select>
+        <span style={{ fontSize: 13, color: '#666' }}>
+          {receipts.length} receipt{receipts.length === 1 ? '' : 's'}
+        </span>
+      </div>
+
+      {receipts.length === 0 ? (
+        <div className="dashboard-card" style={{ padding: 24, textAlign: 'center', color: '#666' }}>
+          No receipts yet. Receipts are created by the AR happy-path flow or by an
+          inbound payment from Plaid / PayNearMe / Modern Treasury when those rails
+          land in Stage 4.
+        </div>
+      ) : (
+        <div className="dashboard-card" style={{ padding: 0, overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: '#FAFAFA', borderBottom: '1px solid #E0E0E0' }}>
+                <th style={th}>Date</th>
+                <th style={th}>Tenant</th>
+                <th style={th}>Lease</th>
+                <th style={th}>Method</th>
+                <th style={th}>Reference</th>
+                <th style={{ ...th, textAlign: 'right' }}>Amount</th>
+                <th style={th}>Deposit</th>
+              </tr>
+            </thead>
+            <tbody>
+              {receipts.map((r) => (
+                <tr key={r.id} style={{ borderBottom: '1px solid #F0F0F0' }}>
+                  <td style={td}>{r.received_date}</td>
+                  <td style={td}>{r.tenant_display || '—'}</td>
+                  <td style={td}>{r.lease_number || '—'}</td>
+                  <td style={td}>{r.payment_method}</td>
+                  <td style={{ ...td, fontFamily: 'monospace', fontSize: 11 }}>
+                    {r.external_reference || '—'}
+                  </td>
+                  <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>
+                    {formatCents(r.amount_cents)}
+                  </td>
+                  <td style={td}>
+                    {r.deposit_id ? (
+                      <span style={{
+                        padding: '1px 8px', borderRadius: 10, fontSize: 10,
+                        fontWeight: 600, background: '#E8F5E9', color: '#2E7D32',
+                      }}>deposited</span>
+                    ) : (
+                      <span style={{
+                        padding: '1px 8px', borderRadius: 10, fontSize: 10,
+                        fontWeight: 600, background: '#FFF3E0', color: '#E65100',
+                      }}>undeposited</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Deposits tab ────────────────────────────────────────────────
+
+function DepositsTab({ token, onTokenInvalid }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const url = new URL('/api/admin/list-deposits', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString());
+      if (res.status === 401) { onTokenInvalid(); return; }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setData(await res.json());
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [token, onTokenInvalid]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <div style={{ padding: 24, color: '#666' }}>Loading…</div>;
+  if (error) {
+    return (
+      <div className="dashboard-card" style={{ padding: 16, background: '#FFEBEE', color: '#C62828' }}>
+        <strong>Failed to load:</strong> {error}
+      </div>
+    );
+  }
+
+  const deposits = data?.deposits || [];
+
+  return (
+    <div>
+      <div style={{
+        padding: '14px 16px', marginBottom: 12,
+        background: 'linear-gradient(135deg, #E8F5E9 0%, #C8E6C9 100%)',
+        borderLeft: '3px solid #2E7D32', borderRadius: 8,
+      }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: '#2E7D32', marginBottom: 4 }}>
+          <Landmark size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />
+          Deposits
+        </div>
+        <div style={{ fontSize: 12, color: '#555' }}>
+          Groups of receipts that hit a bank account on a specific date. Deposits move
+          money out of Undeposited Funds and into the bank's GL — matching what shows
+          up on the bank statement.
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+        <button
+          type="button"
+          onClick={load}
+          className="btn-secondary"
+          style={{ padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+        >
+          <RefreshCw size={14} /> Refresh
+        </button>
+        <span style={{ fontSize: 13, color: '#666' }}>
+          {deposits.length} deposit{deposits.length === 1 ? '' : 's'}
+        </span>
+      </div>
+
+      {deposits.length === 0 ? (
+        <div className="dashboard-card" style={{ padding: 24, textAlign: 'center', color: '#666' }}>
+          No deposits yet. Once you have receipts in Undeposited Funds, build a deposit
+          by selecting them + assigning a bank account. (Build-deposit form lands in
+          the next iteration.)
+        </div>
+      ) : (
+        <div className="dashboard-card" style={{ padding: 0, overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: '#FAFAFA', borderBottom: '1px solid #E0E0E0' }}>
+                <th style={th}>Date</th>
+                <th style={th}>Bank</th>
+                <th style={th}>Type</th>
+                <th style={th}>Reference</th>
+                <th style={th}>Receipts</th>
+                <th style={th}>Status</th>
+                <th style={{ ...th, textAlign: 'right' }}>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {deposits.map((d) => (
+                <tr key={d.id} style={{ borderBottom: '1px solid #F0F0F0' }}>
+                  <td style={td}>{d.deposit_date}</td>
+                  <td style={td}>{d.bank_account_display || '—'}</td>
+                  <td style={td}>{d.deposit_type}</td>
+                  <td style={{ ...td, fontFamily: 'monospace', fontSize: 11 }}>
+                    {d.external_reference || '—'}
+                  </td>
+                  <td style={{ ...td, textAlign: 'center' }}>{d.receipt_count}</td>
+                  <td style={td}>{d.status}</td>
+                  <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>
+                    {formatCents(d.amount_cents)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Reports tab ─────────────────────────────────────────────────
+
+function ReportsTab({ token, onTokenInvalid }) {
+  const [entities, setEntities] = useState([]);
+  const [selectedEntity, setSelectedEntity] = useState('');
+  const [asOf, setAsOf] = useState(new Date().toISOString().slice(0, 10));
+  const [report, setReport] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const url = new URL('/api/admin/list-entities', window.location.origin);
+        url.searchParams.set('secret', token);
+        const res = await fetch(url.toString());
+        if (res.status === 401) { onTokenInvalid(); return; }
+        const json = await res.json();
+        setEntities(json.entities || []);
+      } catch { /* fine */ }
+    })();
+  }, [token, onTokenInvalid]);
+
+  const runReport = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setReport(null);
+    try {
+      const url = new URL('/api/admin/entity-trial-balance', window.location.origin);
+      url.searchParams.set('secret', token);
+      if (selectedEntity) url.searchParams.set('entity_id', selectedEntity);
+      if (asOf) url.searchParams.set('as_of', asOf);
+      const res = await fetch(url.toString());
+      if (res.status === 401) { onTokenInvalid(); return; }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setReport(await res.json());
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [token, onTokenInvalid, selectedEntity, asOf]);
+
+  const byType = (type) => (report?.accounts || []).filter((a) => a.account_type === type);
+  const sumByType = (type) => byType(type).reduce((s, a) => s + a.net_cents, 0);
+
+  return (
+    <div>
+      <div style={{
+        padding: '14px 16px', marginBottom: 12,
+        background: 'linear-gradient(135deg, #E3F2FD 0%, #E1F5FE 100%)',
+        borderLeft: '3px solid #1565C0', borderRadius: 8,
+      }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: '#1565C0', marginBottom: 4 }}>
+          <BarChart3 size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />
+          Reports
+        </div>
+        <div style={{ fontSize: 12, color: '#555' }}>
+          Trial balance + P&amp;L grouped by account type. Filter by entity to produce
+          per-entity statements; leave blank for the consolidated view.
+        </div>
+      </div>
+
+      <div className="dashboard-card" style={{ padding: '14px 16px', marginBottom: 12 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12, color: '#444', gap: 3 }}>
+            <span style={{ fontWeight: 600 }}>Entity</span>
+            <select
+              value={selectedEntity}
+              onChange={(e) => setSelectedEntity(e.target.value)}
+              style={{ padding: '7px 10px', border: '1px solid #CCC', borderRadius: 6, fontSize: 13, minWidth: 240 }}
+            >
+              <option value="">All (consolidated)</option>
+              {entities.map((e) => (
+                <option key={e.id} value={e.id}>{e.name}</option>
+              ))}
+            </select>
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12, color: '#444', gap: 3 }}>
+            <span style={{ fontWeight: 600 }}>As of</span>
+            <input
+              type="date"
+              value={asOf}
+              onChange={(e) => setAsOf(e.target.value)}
+              style={{ padding: '7px 10px', border: '1px solid #CCC', borderRadius: 6, fontSize: 13 }}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={runReport}
+            disabled={loading}
+            style={{
+              padding: '8px 16px', background: loading ? '#BBB' : '#1565C0',
+              color: 'white', border: 'none', borderRadius: 6, fontWeight: 600,
+              fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {loading ? 'Running…' : 'Run report'}
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="dashboard-card" style={{ padding: 12, background: '#FFEBEE', color: '#C62828', fontSize: 13 }}>
+          {error}
+        </div>
+      )}
+
+      {report && (
+        <>
+          <div className="dashboard-card" style={{ padding: '12px 16px', marginBottom: 8, display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+            <SummaryStat label="Total debits"  value={formatCents(report.total_debit_cents)} />
+            <SummaryStat label="Total credits" value={formatCents(report.total_credit_cents)} />
+            <SummaryStat label="In balance?"   value={report.in_balance ? '✓ yes' : '✗ no'} color={report.in_balance ? '#2E7D32' : '#C62828'} />
+            <SummaryStat label="As of"         value={report.as_of || 'all-time'} />
+          </div>
+
+          {(['asset', 'liability', 'equity', 'income', 'expense']).map((type) => {
+            const accounts = byType(type);
+            if (accounts.length === 0) return null;
+            const total = sumByType(type);
+            return (
+              <div key={type} className="dashboard-card" style={{ marginBottom: 8, padding: 0, overflow: 'hidden' }}>
+                <div style={{
+                  padding: '10px 14px', background: ACCOUNT_TYPE_COLORS[type]?.bg || '#EEE',
+                  color: ACCOUNT_TYPE_COLORS[type]?.fg || '#444', fontWeight: 700, fontSize: 13,
+                  textTransform: 'capitalize',
+                }}>
+                  {type} <span style={{ fontWeight: 400, opacity: 0.7 }}>({accounts.length})</span>
+                  <span style={{ float: 'right', fontFamily: 'monospace' }}>{formatCents(total)}</span>
+                </div>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <tbody>
+                    {accounts.map((a) => (
+                      <tr key={a.gl_account_id} style={{ borderBottom: '1px solid #F0F0F0' }}>
+                        <td style={{ ...td, fontFamily: 'monospace', color: '#666', width: 80 }}>{a.code}</td>
+                        <td style={td}>{a.name}</td>
+                        <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace' }}>
+                          {a.debit_cents > 0 ? formatCents(a.debit_cents) : ''}
+                        </td>
+                        <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace' }}>
+                          {a.credit_cents > 0 ? formatCents(a.credit_cents) : ''}
+                        </td>
+                        <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>
+                          {formatCents(a.net_cents)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })}
+
+          {/* Net income line at the bottom — revenue minus expenses */}
+          {(byType('income').length > 0 || byType('expense').length > 0) && (
+            <div className="dashboard-card" style={{ padding: '12px 16px', background: '#FAFAFA', fontWeight: 700, display: 'flex', justifyContent: 'space-between' }}>
+              <span>Net income (revenue − expenses)</span>
+              <span style={{ fontFamily: 'monospace' }}>
+                {formatCents(sumByType('income') - sumByType('expense'))}
+              </span>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function SummaryStat({ label, value, color }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</div>
+      <div style={{ fontSize: 14, fontWeight: 700, color: color || '#1A1A1A', fontFamily: 'monospace' }}>{value}</div>
+    </div>
+  );
+}
+
+const th = { padding: '10px 12px', textAlign: 'left', fontWeight: 600, color: '#555', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 };
+const td = { padding: '10px 12px', color: '#222' };
