@@ -268,6 +268,73 @@ calendar months to reach a system worth cutting over to (through stage
 8). Going faster than that is possible but optimistic — most of the
 slack is in real-world integration testing, not in writing code.
 
+## AppFolio anti-patterns explicitly avoided
+
+These are AppFolio behaviors we deliberately do not replicate. Listed
+here so the principles survive future feature work — anyone proposing
+a UI or schema change that would re-introduce one of these should be
+challenged.
+
+### 1. A receipt is not an "invoice that was paid"
+
+In AppFolio, receipts and the charges they pay against blur together
+in the UI ("mark this receipt as paid"). That's nonsense — a receipt
+**is** the payment. The thing that gets paid is the *charge*.
+
+In Breeze OS this is structural, not stylistic:
+
+- `posted_charges.status` enum has `paid` (charges can be paid).
+- `receipts.status` enum is `pending | cleared | nsf_returned | voided`
+  — the lifecycle of the *receipt clearing the bank*, not whether the
+  receipt itself is paid. There is no `paid` value.
+- Allocation (`receipt_allocations`) is the only relationship between
+  the two. A receipt allocates an amount against one or more charges;
+  the charges' balances decrement and their status transitions.
+
+The Receipts UI must never show a "mark as paid" action on a receipt
+row. If a receipt was issued in error, void it (`status='voided'`)
+which auto-reverses the JE. If a check bounces, mark it `nsf_returned`
+which cascades a reversal of the receipt and its allocations.
+
+### 2. Reference numbers are not required
+
+AppFolio forces a reference number on every payment. For cash, that's
+fabricated garbage data; for ACH it should be auto-populated from the
+Plaid transaction id; for checks it's the check number.
+
+In Breeze OS:
+
+- `receipts.external_reference: text` — **nullable.**
+- `deposits.external_reference: text` — **nullable.**
+- The `recordReceipt()` service helper defaults `externalReference =
+  null`.
+- The Receipts UI form must NOT mark the reference field as required.
+  Suggested labeling per `payment_method`:
+    * `cash`         — leave blank
+    * `check`        — "Check #" required-by-convention but not enforced
+    * `ach`          — auto-populated from the matched bank_transaction
+                       once Plaid recon runs
+    * `credit_card`  — auto-populated from the processor's txn id
+    * `paynearme`    — receipt id from PayNearMe
+    * `section_8`    — HUD batch / voucher id
+
+### 3. Bank accounts are not GL accounts
+
+(Already covered in commitment #2 above; restated here as the
+canonical anti-pattern reference.)
+
+### 4. One classification per account
+
+(Already covered in `docs/accounting/multi-dimensional-tagging.md`;
+multi-dimensional tagging at the journal-line level is how we avoid
+this trap.)
+
+### 5. Rigid period close (monthly only)
+
+(Already covered in `docs/accounting/data-model.md`'s "Settled design
+decisions" section. `accounting_periods` supports any range, default
+monthly, aspirational daily/3-day-trailing for AI-driven recon.)
+
 ## Open decisions
 
 These are deferred until they become blocking.
