@@ -120,6 +120,8 @@ function HubPage({ onNavigate }) {
 
       <AutonomySettings defaultLevel={data.default_autonomy_level} onChanged={load} />
 
+      <LiveCallsPanel />
+
       <div style={{
         marginTop: 20,
         display: 'grid',
@@ -137,6 +139,143 @@ function HubPage({ onNavigate }) {
           />
         ))}
       </div>
+    </div>
+  );
+}
+
+function LiveCallsPanel() {
+  const [calls, setCalls] = useState([]);
+  const [busyId, setBusyId] = useState(null);
+  const [steering, setSteering] = useState(null);
+  const [transferTo, setTransferTo] = useState({});
+  const [directiveText, setDirectiveText] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const json = await fetchJson('/api/admin/list-active-calls');
+      setCalls(json.active_calls || []);
+    } catch { /* fine */ }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const t = setInterval(load, 4000);
+    return () => clearInterval(t);
+  }, [load]);
+
+  const doTransfer = async (voiceCallId) => {
+    const dest = transferTo[voiceCallId];
+    if (!dest) return;
+    setBusyId(voiceCallId);
+    try {
+      await fetchJson('/api/voice/transfer-call', {
+        method: 'POST',
+        body: { voice_call_id: voiceCallId, destination_phone: dest },
+      });
+      load();
+    } finally {
+      setBusyId(null);
+    }
+  };
+  const doSteer = async (voiceCallId) => {
+    if (!directiveText.trim()) return;
+    setBusyId(voiceCallId);
+    try {
+      await fetchJson('/api/voice/steer-call', {
+        method: 'POST',
+        body: { voice_call_id: voiceCallId, directive_text: directiveText.trim() },
+      });
+      setDirectiveText('');
+      setSteering(null);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (calls.length === 0) return null;
+
+  return (
+    <div style={{
+      marginTop: 16,
+      padding: '12px 16px',
+      background: '#FFF8E1',
+      borderLeft: '3px solid #F57F17',
+      borderRadius: 8,
+    }}>
+      <div style={{ fontSize: 14, fontWeight: 700, color: '#F57F17', marginBottom: 8 }}>
+        <PhoneOutgoing size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />
+        Live calls ({calls.length})
+      </div>
+      {calls.map((c) => (
+        <div key={c.voice_call_id} style={{ padding: '10px 0', borderTop: '1px solid #F0E5C0' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 13 }}>
+                {c.workflow_name || 'Voice call'} → {c.to_address}
+              </div>
+              <div style={{ fontSize: 11, color: '#666' }}>
+                vapi_id {c.vapi_call_id?.slice(0, 12)}… · started {new Date(c.started_at).toLocaleTimeString()}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <input
+                type="text"
+                placeholder="+1..."
+                value={transferTo[c.voice_call_id] || ''}
+                onChange={(e) => setTransferTo({ ...transferTo, [c.voice_call_id]: e.target.value })}
+                style={{ padding: '5px 8px', border: '1px solid #BBB', borderRadius: 5, fontSize: 12, width: 130 }}
+              />
+              <button
+                type="button"
+                onClick={() => doTransfer(c.voice_call_id)}
+                disabled={busyId === c.voice_call_id || !transferTo[c.voice_call_id]}
+                style={{
+                  padding: '5px 10px', fontSize: 12, borderRadius: 5,
+                  background: '#1565C0', color: 'white', border: 'none', fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Transfer
+              </button>
+              <button
+                type="button"
+                onClick={() => setSteering(steering === c.voice_call_id ? null : c.voice_call_id)}
+                style={{
+                  padding: '5px 10px', fontSize: 12, borderRadius: 5,
+                  background: 'white', color: '#6A1B9A', border: '1px solid #6A1B9A', fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Steer AI
+              </button>
+            </div>
+          </div>
+          {steering === c.voice_call_id && (
+            <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
+              <input
+                type="text"
+                value={directiveText}
+                onChange={(e) => setDirectiveText(e.target.value)}
+                placeholder="e.g. offer 14-day extension if requested"
+                style={{ flex: 1, padding: '6px 10px', border: '1px solid #BBB', borderRadius: 5, fontSize: 12 }}
+                onKeyDown={(e) => e.key === 'Enter' && doSteer(c.voice_call_id)}
+              />
+              <button
+                type="button"
+                onClick={() => doSteer(c.voice_call_id)}
+                disabled={busyId === c.voice_call_id || !directiveText.trim()}
+                style={{
+                  padding: '6px 14px', fontSize: 12, borderRadius: 5,
+                  background: '#6A1B9A', color: 'white', border: 'none', fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Send directive
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
