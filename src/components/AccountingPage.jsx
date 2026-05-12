@@ -18,12 +18,13 @@ import { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   DollarSign, Receipt, CreditCard, Landmark, FileSpreadsheet,
   BookOpen, BarChart3, AlertCircle, RefreshCw, Search, Tag, Eye, EyeOff,
-  Link2, Download, Sparkles, Check, X, Settings, Trash2, Power,
+  Link2, Download, Sparkles, Check, X, Settings, Trash2, Power, Building2, Plus,
 } from 'lucide-react';
 import { usePlaidLink } from 'react-plaid-link';
 
 const TABS = [
   { id: 'coa',       label: 'Chart of Accounts', icon: BookOpen },
+  { id: 'entities',  label: 'Entities',          icon: Building2 },
   { id: 'journal',   label: 'Journal Entries',   icon: FileSpreadsheet },
   { id: 'ar',        label: 'Receivables',       icon: Receipt },
   { id: 'receipts',  label: 'Receipts',          icon: DollarSign },
@@ -91,6 +92,7 @@ export default function AccountingPage() {
           <TabBar activeTab={activeTab} onChange={setActiveTab} />
           <div style={{ marginTop: '16px' }}>
             {activeTab === 'coa' && <ChartOfAccountsTab token={token} onTokenInvalid={() => setToken('')} />}
+            {activeTab === 'entities' && <EntitiesTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'journal' && <JournalEntriesTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'ar' && <ReceivablesTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'receipts' && <PlaceholderTab label="Receipts" hint="Recent receipts + record-receipt form. Backed by /api/admin/ar-happy-path or a focused record endpoint." />}
@@ -1893,5 +1895,425 @@ function RuleRow({ rule, token, onChanged, onTokenInvalid }) {
         </div>
       )}
     </div>
+  );
+}
+
+// ── Entities tab ────────────────────────────────────────────────
+
+const ENTITY_TYPE_LABELS = {
+  llc: 'LLC',
+  corp: 'Corporation',
+  partnership: 'Partnership',
+  sole_prop: 'Sole Proprietorship',
+  trust: 'Trust',
+  individual: 'Individual',
+};
+
+function EntitiesTab({ token, onTokenInvalid }) {
+  const [entities, setEntities] = useState([]);
+  const [properties, setProperties] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [editing, setEditing] = useState(null);
+  const [showInactive, setShowInactive] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const eUrl = new URL('/api/admin/list-entities', window.location.origin);
+      eUrl.searchParams.set('secret', token);
+      if (showInactive) eUrl.searchParams.set('include_inactive', 'true');
+      const pUrl = new URL('/api/admin/list-properties-with-entity', window.location.origin);
+      pUrl.searchParams.set('secret', token);
+      const [eRes, pRes] = await Promise.all([
+        fetch(eUrl.toString()),
+        fetch(pUrl.toString()),
+      ]);
+      if (eRes.status === 401 || pRes.status === 401) { onTokenInvalid(); return; }
+      if (!eRes.ok) throw new Error(`list-entities HTTP ${eRes.status}`);
+      if (!pRes.ok) throw new Error(`list-properties-with-entity HTTP ${pRes.status}`);
+      const eJson = await eRes.json();
+      const pJson = await pRes.json();
+      setEntities(eJson.entities || []);
+      setProperties(pJson.properties || []);
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [token, onTokenInvalid, showInactive]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <div style={{ padding: '24px', color: '#666' }}>Loading...</div>;
+  if (error) {
+    return (
+      <div className="dashboard-card" style={{ padding: '16px', background: '#FFEBEE', color: '#C62828' }}>
+        <strong>Failed to load:</strong> {error}
+      </div>
+    );
+  }
+
+  const unassigned = properties.filter((p) => !p.entity_id);
+
+  return (
+    <div>
+      <div className="dashboard-card" style={{ padding: '14px 16px', background: 'linear-gradient(135deg, #E3F2FD 0%, #E8EAF6 100%)', borderLeft: '3px solid #1565C0' }}>
+        <div style={{ fontSize: '14px', fontWeight: 600, color: '#1565C0', marginBottom: '4px' }}>
+          <Building2 size={14} style={{ verticalAlign: '-2px', marginRight: '4px' }} />
+          Legal entities
+        </div>
+        <div style={{ fontSize: '12px', color: '#555' }}>
+          Each LLC, partnership, or other legal entity that owns one or more properties.
+          Journal lines tag the entity_id (resolved from the property automatically) so
+          P&amp;L and tax statements can be produced per-entity. Consolidated reports sum
+          across entities.
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '12px 0 8px' }}>
+        <button
+          type="button"
+          onClick={load}
+          className="btn-secondary"
+          style={{ padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+        >
+          <RefreshCw size={14} /> Refresh
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditing('new')}
+          style={{
+            padding: '6px 14px', background: '#1565C0', color: 'white',
+            border: 'none', borderRadius: '6px', fontWeight: 600, fontSize: '13px',
+            cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px',
+          }}
+        >
+          <Plus size={14} /> New entity
+        </button>
+        <span style={{ fontSize: '13px', color: '#666' }}>
+          {entities.length} entit{entities.length === 1 ? 'y' : 'ies'}
+        </span>
+        <label style={{ marginLeft: 'auto', fontSize: '13px', color: '#555', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+          <input
+            type="checkbox"
+            checked={showInactive}
+            onChange={(e) => setShowInactive(e.target.checked)}
+          />
+          Show inactive
+        </label>
+      </div>
+
+      {editing && (
+        <EntityEditor
+          entity={editing === 'new' ? null : editing}
+          token={token}
+          onSaved={() => { setEditing(null); load(); }}
+          onCancel={() => setEditing(null)}
+          onTokenInvalid={onTokenInvalid}
+        />
+      )}
+
+      {entities.length === 0 ? (
+        <div className="dashboard-card" style={{ padding: '24px', textAlign: 'center', color: '#666' }}>
+          No entities yet. Click <strong>New entity</strong> to create your first one
+          (typically your operating LLC or the entity that holds the property).
+        </div>
+      ) : (
+        <div className="dashboard-card" style={{ padding: 0, overflow: 'hidden' }}>
+          {entities.map((e) => (
+            <EntityRow
+              key={e.id}
+              entity={e}
+              properties={properties.filter((p) => p.entity_id === e.id)}
+              unassignedProperties={unassigned}
+              token={token}
+              onChanged={load}
+              onTokenInvalid={onTokenInvalid}
+              onEdit={() => setEditing(e)}
+            />
+          ))}
+        </div>
+      )}
+
+      {unassigned.length > 0 && (
+        <div className="dashboard-card" style={{ marginTop: '12px', padding: '12px 14px' }}>
+          <div style={{ fontWeight: 600, fontSize: '13px', color: '#E65100', marginBottom: '6px' }}>
+            <AlertCircle size={13} style={{ verticalAlign: '-2px', marginRight: '4px' }} />
+            Properties with no entity ({unassigned.length})
+          </div>
+          <div style={{ fontSize: '12px', color: '#666' }}>
+            Until each property is assigned to an entity, its postings carry a null
+            entity_id and don't appear in per-entity reports.
+          </div>
+          <ul style={{ margin: '8px 0 0', paddingLeft: '20px', fontSize: '12px', color: '#444' }}>
+            {unassigned.slice(0, 10).map((p) => (
+              <li key={p.id}>{p.display_name} <span style={{ color: '#888' }}>({p.service_city}, {p.service_state})</span></li>
+            ))}
+            {unassigned.length > 10 && (
+              <li style={{ color: '#888' }}>...and {unassigned.length - 10} more</li>
+            )}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EntityRow({ entity, properties, unassignedProperties, token, onChanged, onTokenInvalid, onEdit }) {
+  const [addPropOpen, setAddPropOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const assign = async (propertyId, entityId) => {
+    setBusy(true);
+    try {
+      const url = new URL('/api/admin/assign-property-entity', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ property_id: propertyId, entity_id: entityId }),
+      });
+      if (res.status === 401) { onTokenInvalid(); return; }
+      onChanged();
+      setAddPropOpen(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ padding: '14px 16px', borderBottom: '1px solid #F0F0F0', opacity: entity.is_active ? 1 : 0.55 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: '200px' }}>
+          <div style={{ fontWeight: 600, fontSize: '15px', color: '#1A1A1A' }}>
+            {entity.name}
+            <span style={{
+              marginLeft: '8px', padding: '1px 8px', borderRadius: '10px',
+              fontSize: '10px', fontWeight: 600,
+              background: '#E3F2FD', color: '#1565C0', verticalAlign: '2px',
+            }}>
+              {ENTITY_TYPE_LABELS[entity.entity_type] || entity.entity_type}
+            </span>
+            {!entity.is_active && (
+              <span style={{
+                marginLeft: '6px', padding: '1px 8px', borderRadius: '10px',
+                fontSize: '10px', fontWeight: 600,
+                background: '#EEE', color: '#757575', verticalAlign: '2px',
+              }}>inactive</span>
+            )}
+          </div>
+          {entity.legal_name && entity.legal_name !== entity.name && (
+            <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>{entity.legal_name}</div>
+          )}
+          <div style={{ fontSize: '12px', color: '#555', marginTop: '4px' }}>
+            {entity.tax_id_last4 && <><strong>EIN:</strong> ***-**-{entity.tax_id_last4} · </>}
+            {entity.formation_state && <><strong>State:</strong> {entity.formation_state} · </>}
+            <strong>FYE month:</strong> {entity.fiscal_year_end_month}
+            {' · '}
+            <strong>Properties:</strong> {entity.property_count}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onEdit}
+          style={{
+            padding: '6px 12px', fontSize: '12px', borderRadius: '6px',
+            border: '1px solid #999', background: 'white', color: '#444',
+            cursor: 'pointer',
+          }}
+        >
+          Edit
+        </button>
+      </div>
+
+      {properties.length > 0 && (
+        <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px dashed #EEE' }}>
+          <div style={{ fontSize: '11px', color: '#888', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '4px' }}>
+            Properties
+          </div>
+          {properties.map((p) => (
+            <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', fontSize: '13px' }}>
+              <span>
+                {p.display_name} <span style={{ color: '#888' }}>({p.service_city}, {p.service_state})</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => assign(p.id, null)}
+                disabled={busy}
+                title="Unassign"
+                style={{ background: 'none', border: 'none', color: '#888', cursor: busy ? 'not-allowed' : 'pointer', fontSize: '11px' }}
+              >
+                unassign
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {entity.is_active && unassignedProperties.length > 0 && (
+        <div style={{ marginTop: '8px' }}>
+          {!addPropOpen ? (
+            <button
+              type="button"
+              onClick={() => setAddPropOpen(true)}
+              style={{ background: 'none', border: 'none', color: '#1565C0', fontSize: '12px', cursor: 'pointer', padding: 0 }}
+            >
+              + Assign a property to this entity
+            </button>
+          ) : (
+            <select
+              onChange={(e) => e.target.value && assign(e.target.value, entity.id)}
+              disabled={busy}
+              defaultValue=""
+              style={{ padding: '5px 8px', fontSize: '12px', borderRadius: '4px', border: '1px solid #BBB' }}
+            >
+              <option value="" disabled>Choose a property…</option>
+              {unassignedProperties.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.display_name} ({p.service_city}, {p.service_state})
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EntityEditor({ entity, token, onSaved, onCancel, onTokenInvalid }) {
+  const [name, setName] = useState(entity?.name || '');
+  const [legalName, setLegalName] = useState(entity?.legal_name || '');
+  const [entityType, setEntityType] = useState(entity?.entity_type || 'llc');
+  const [taxId, setTaxId] = useState('');
+  const [formationState, setFormationState] = useState(entity?.formation_state || '');
+  const [formationDate, setFormationDate] = useState(entity?.formation_date || '');
+  const [fye, setFye] = useState(entity?.fiscal_year_end_month ?? 12);
+  const [isActive, setIsActive] = useState(entity?.is_active ?? true);
+  const [notes, setNotes] = useState(entity?.notes || '');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const save = async () => {
+    if (!name.trim()) { setErr('Name is required'); return; }
+    setSaving(true);
+    setErr(null);
+    try {
+      const body = {
+        id: entity?.id,
+        name: name.trim(),
+        legal_name: legalName.trim() || null,
+        entity_type: entityType,
+        formation_state: formationState.trim() || null,
+        formation_date: formationDate || null,
+        fiscal_year_end_month: Number(fye),
+        is_active: isActive,
+        notes: notes.trim() || null,
+      };
+      if (taxId.trim()) body.tax_id = taxId.trim();
+
+      const url = new URL('/api/admin/upsert-entity', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (res.status === 401) { onTokenInvalid(); return; }
+      const json = await res.json();
+      if (!json.ok) { setErr(json.error || 'save failed'); return; }
+      onSaved();
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="dashboard-card" style={{ padding: '16px', marginBottom: '12px', border: '2px solid #1565C0' }}>
+      <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '12px', color: '#1565C0' }}>
+        {entity ? `Edit ${entity.name}` : 'New entity'}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+        <EntityField label="Display name *">
+          <input type="text" value={name} onChange={(e) => setName(e.target.value)} style={entityInputStyle} />
+        </EntityField>
+        <EntityField label="Legal name (if different)">
+          <input type="text" value={legalName} onChange={(e) => setLegalName(e.target.value)} style={entityInputStyle} />
+        </EntityField>
+        <EntityField label="Entity type *">
+          <select value={entityType} onChange={(e) => setEntityType(e.target.value)} style={entityInputStyle}>
+            {Object.entries(ENTITY_TYPE_LABELS).map(([k, v]) => (
+              <option key={k} value={k}>{v}</option>
+            ))}
+          </select>
+        </EntityField>
+        <EntityField label={`EIN / Tax ID ${entity?.tax_id_last4 ? `(currently ending ${entity.tax_id_last4})` : ''}`}>
+          <input
+            type="text"
+            value={taxId}
+            onChange={(e) => setTaxId(e.target.value)}
+            placeholder={entity?.tax_id_last4 ? 'Leave blank to keep existing' : '12-3456789'}
+            style={entityInputStyle}
+          />
+        </EntityField>
+        <EntityField label="Formation state">
+          <input type="text" value={formationState} onChange={(e) => setFormationState(e.target.value)} placeholder="DE" maxLength={2} style={entityInputStyle} />
+        </EntityField>
+        <EntityField label="Formation date">
+          <input type="date" value={formationDate} onChange={(e) => setFormationDate(e.target.value)} style={entityInputStyle} />
+        </EntityField>
+        <EntityField label="Fiscal year-end month">
+          <input type="number" min="1" max="12" value={fye} onChange={(e) => setFye(e.target.value)} style={entityInputStyle} />
+        </EntityField>
+        <EntityField label="Active">
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', paddingTop: '6px' }}>
+            <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
+            {isActive ? 'Active' : 'Inactive'}
+          </label>
+        </EntityField>
+        <div style={{ gridColumn: 'span 2' }}>
+          <EntityField label="Notes">
+            <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} style={{ ...entityInputStyle, fontFamily: 'inherit' }} />
+          </EntityField>
+        </div>
+      </div>
+      {err && <div style={{ marginTop: '8px', color: '#C62828', fontSize: '12px' }}>Error: {err}</div>}
+      <div style={{ marginTop: '12px', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          style={{ padding: '7px 14px', border: '1px solid #999', background: 'white', color: '#444', borderRadius: '6px', fontSize: '13px', cursor: saving ? 'not-allowed' : 'pointer' }}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving}
+          style={{ padding: '7px 16px', background: saving ? '#BBB' : '#1565C0', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 600, fontSize: '13px', cursor: saving ? 'not-allowed' : 'pointer' }}
+        >
+          {saving ? 'Saving…' : (entity ? 'Save changes' : 'Create entity')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const entityInputStyle = {
+  padding: '7px 10px', border: '1px solid #CCC', borderRadius: '5px',
+  fontSize: '13px', width: '100%', boxSizing: 'border-box',
+};
+
+function EntityField({ label, children }) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', fontSize: '12px', color: '#444', gap: '3px' }}>
+      <span style={{ fontWeight: 600 }}>{label}</span>
+      {children}
+    </label>
   );
 }
