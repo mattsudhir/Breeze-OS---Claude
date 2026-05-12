@@ -38,19 +38,29 @@
 
 import { eq } from 'drizzle-orm';
 import { getDb, schema } from '../../lib/db/index.js';
+import { verifyPlaidWebhook } from '../../lib/backends/plaid.js';
 
-// Read raw body from a Node request stream (Vercel sometimes hands
-// us a parsed body, sometimes the raw stream; handle both).
-async function readBody(req) {
-  if (req.body && typeof req.body === 'object') return req.body;
-  if (typeof req.body === 'string') {
-    try { return JSON.parse(req.body); } catch { return {}; }
-  }
+// Vercel auto-parses application/json bodies before our handler
+// runs, which throws away the raw bytes we need to compute the
+// signature hash. Disable that so we can read the request as a
+// stream and verify the signature against the exact bytes Plaid sent.
+export const config = {
+  api: { bodyParser: false },
+};
+
+// Read the request as a Buffer + UTF-8 string. Plaid hashes the raw
+// bytes; we need both the bytes (for the hash) and a parsed JSON
+// (for the handler logic).
+async function readRawAndParsed(req) {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
-  const raw = Buffer.concat(chunks).toString('utf8');
-  if (!raw) return {};
-  try { return JSON.parse(raw); } catch { return {}; }
+  const raw = Buffer.concat(chunks);
+  const text = raw.toString('utf8');
+  let parsed = {};
+  if (text) {
+    try { parsed = JSON.parse(text); } catch { parsed = {}; }
+  }
+  return { raw, text, parsed };
 }
 
 async function logAudit(db, organizationId, subjectId, eventType, payload) {
@@ -76,16 +86,52 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, error: 'POST only' });
   }
 
-  if (!req.headers['plaid-verification']) {
-    console.warn('plaid webhook: missing Plaid-Verification header (signature check pending)');
-  }
-
+  // Read raw body first — needed for signature verification.
+  let raw;
   let body;
   try {
-    body = await readBody(req);
+    const parsed = await readRawAndParsed(req);
+    raw = parsed.text;
+    body = parsed.parsed;
   } catch (err) {
-    console.error('plaid webhook: body parse failed', err);
-    return res.status(200).json({ ok: true, ignored: 'parse_failed' });
+    console.error('plaid webhook: body read failed', err);
+    return res.status(200).json({ ok: true, ignored: 'body_read_failed' });
+  }
+
+  // Verify signature. In production this MUST pass; in sandbox we
+  // accept unsigned payloads (Plaid's sandbox doesn't always sign).
+  // Mode controlled by PLAID_WEBHOOK_VERIFY_REQUIRED env var:
+  //   true (default for production)  → reject unsigned/invalid
+  //   false                          → log warning + continue
+  const plaidVerificationHeader = req.headers['plaid-verification'];
+  const verifyRequired =
+    process.env.PLAID_WEBHOOK_VERIFY_REQUIRED === 'true' ||
+    process.env.PLAID_ENV === 'production';
+
+  if (plaidVerificationHeader) {
+    const verifyResult = await verifyPlaidWebhook({
+      jwtHeader: plaidVerificationHeader,
+      rawBody: raw,
+    });
+    if (!verifyResult.valid) {
+      if (verifyRequired) {
+        console.error(`plaid webhook: signature INVALID (${verifyResult.reason}) — rejecting`);
+        return res.status(200).json({
+          ok: true,
+          ignored: 'signature_invalid',
+          reason: verifyResult.reason,
+        });
+      }
+      console.warn(`plaid webhook: signature invalid in non-required mode (${verifyResult.reason}) — continuing`);
+    }
+  } else if (verifyRequired) {
+    console.error('plaid webhook: missing Plaid-Verification header in required mode — rejecting');
+    return res.status(200).json({
+      ok: true,
+      ignored: 'missing_signature_header',
+    });
+  } else {
+    console.warn('plaid webhook: missing Plaid-Verification header (sandbox mode — continuing)');
   }
 
   const { webhook_type, webhook_code, item_id } = body || {};

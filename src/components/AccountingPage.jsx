@@ -754,6 +754,14 @@ function BankAccountsTab({ token, onTokenInvalid }) {
                   {b.plaid_status === 'linked' && (
                     <SyncTransactionsButton token={token} bankAccountId={b.id} onTokenInvalid={onTokenInvalid} />
                   )}
+                  {b.plaid_status === 're_auth_required' && (
+                    <PlaidRelinkButton
+                      token={token}
+                      bankAccountId={b.id}
+                      onRelinked={load}
+                      onTokenInvalid={onTokenInvalid}
+                    />
+                  )}
                 </div>
               </div>
             ))}
@@ -1176,6 +1184,98 @@ function PlaidLinkButton({ token, onLinked, onTokenInvalid }) {
         </span>
       )}
     </div>
+  );
+}
+
+// ── Per-row re-link button (re_auth_required → linked) ─────────
+
+function PlaidRelinkButton({ token, bankAccountId, onRelinked, onTokenInvalid }) {
+  const [linkToken, setLinkToken] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const fetchUpdateToken = useCallback(async () => {
+    setError(null);
+    const url = new URL('/api/admin/plaid-link-token', window.location.origin);
+    url.searchParams.set('secret', token);
+    try {
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bank_account_id: bankAccountId }),
+      });
+      if (res.status === 401) { onTokenInvalid(); return null; }
+      const json = await res.json();
+      if (!json.ok) {
+        setError(json.error || 'failed to get update-mode link token');
+        return null;
+      }
+      setLinkToken(json.link_token);
+      return json.link_token;
+    } catch (err) {
+      setError(err.message || String(err));
+      return null;
+    }
+  }, [token, bankAccountId, onTokenInvalid]);
+
+  const onSuccess = useCallback(async () => {
+    setBusy(true);
+    try {
+      const url = new URL('/api/admin/plaid-relink-complete', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bank_account_id: bankAccountId }),
+      });
+      if (res.status === 401) { onTokenInvalid(); return; }
+      const json = await res.json();
+      if (!json.ok) {
+        setError(json.error || 'relink-complete failed');
+        return;
+      }
+      onRelinked();
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setBusy(false);
+      setLinkToken(null);
+    }
+  }, [token, bankAccountId, onRelinked, onTokenInvalid]);
+
+  const { open, ready } = usePlaidLink({
+    token: linkToken,
+    onSuccess,
+    onExit: () => setLinkToken(null),
+  });
+
+  useEffect(() => {
+    if (linkToken && ready) open();
+  }, [linkToken, ready, open]);
+
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+      <button
+        type="button"
+        onClick={fetchUpdateToken}
+        disabled={busy}
+        title="Plaid lost authentication for this bank. Re-link to resume syncing."
+        style={{
+          padding: '4px 10px', fontSize: '12px', borderRadius: '6px',
+          border: '1px solid #E65100', background: '#FFF3E0', color: '#E65100',
+          cursor: busy ? 'not-allowed' : 'pointer', fontWeight: 600,
+          display: 'inline-flex', alignItems: 'center', gap: '4px',
+        }}
+      >
+        <Link2 size={12} />
+        {busy ? 'Re-linking…' : 'Re-link'}
+      </button>
+      {error && (
+        <span style={{ color: '#C62828', fontSize: '11px' }} title={error}>
+          ⚠ failed
+        </span>
+      )}
+    </span>
   );
 }
 
