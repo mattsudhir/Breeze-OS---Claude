@@ -13,6 +13,7 @@ import WorkflowsPage from './components/WorkflowsPage';
 import LeasingPage from './components/LeasingPage';
 import AccountingPage from './components/AccountingPage';
 import MailSlapperPage from './components/MailSlapperPage';
+import AiAgentsPage from './components/AiAgentsPage';
 import ReportsPage from './components/ReportsPage';
 import SettingsPage from './components/SettingsPage';
 import HelpPage from './components/HelpPage';
@@ -100,6 +101,13 @@ function App() {
       activeView === 'mail-email'
     ) {
       return <MailSlapperPage activeView={activeView} onNavigate={handleNavigate} />;
+    }
+    if (
+      activeView === 'ai-agents' ||
+      activeView === 'ai-switch-utilities' ||
+      activeView === 'ai-payment-plan-followup'
+    ) {
+      return <AiAgentsPage activeView={activeView} onNavigate={handleNavigate} />;
     }
     if (activeView === 'reports') return <ReportsPage />;
     if (activeView === 'property-directory') return <PropertyDirectoryPage />;

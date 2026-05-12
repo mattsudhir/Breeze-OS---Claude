@@ -3,7 +3,7 @@ import {
   MessageSquare, LayoutDashboard, Building2, Users, FileText,
   DollarSign, Wrench, BarChart3, Settings, HelpCircle, LogOut,
   ChevronLeft, ChevronRight, ChevronDown, CheckSquare, Workflow, Database,
-  Calendar, Mail, Stamp, Scale, AtSign,
+  Calendar, Mail, Stamp, Scale, AtSign, Bot, PhoneOutgoing,
 } from 'lucide-react';
 import BreezeLogo from './BreezeLogo';
 
@@ -23,6 +23,9 @@ const NAV_ITEMS = [
   { id: 'mail-snail', icon: Stamp, label: 'Snail Mail', section: 'manage', child: true, parentId: 'mail-slapper' },
   { id: 'mail-registered-agent', icon: Scale, label: 'Registered Agent', section: 'manage', child: true, parentId: 'mail-slapper' },
   { id: 'mail-email', icon: AtSign, label: 'Email', section: 'manage', child: true, parentId: 'mail-slapper' },
+  { id: 'ai-agents', icon: Bot, label: 'AI Agents', section: 'manage', expandable: true, badge: 'AI' },
+  { id: 'ai-switch-utilities', icon: PhoneOutgoing, label: 'Switch Utilities', section: 'manage', child: true, parentId: 'ai-agents' },
+  { id: 'ai-payment-plan-followup', icon: PhoneOutgoing, label: 'Payment Plan Followup', section: 'manage', child: true, parentId: 'ai-agents' },
   { id: 'reports', icon: BarChart3, label: 'Reports', section: 'manage' },
   { id: 'property-directory', icon: Database, label: 'Property Directory', section: 'manage' },
   { id: 'divider2', type: 'divider' },
@@ -106,6 +109,9 @@ export default function Sidebar({ activeView, onNavigate, collapsed, onToggleCol
               {!collapsed && <span>{item.label}</span>}
               {item.id === 'chat' && !collapsed && (
                 <span className="nav-badge">AI</span>
+              )}
+              {item.badge && !collapsed && (
+                <span className="nav-badge">{item.badge}</span>
               )}
               {isExpandable && (
                 <ChevronDown

@@ -1,0 +1,526 @@
+// AI Agents — surfaces every named AI workflow as its own menu item.
+//
+// Sub-views (activeView IDs):
+//   ai-agents                hub showing every workflow
+//   ai-switch-utilities      Switch Utilities (outbound voice)
+//   ai-payment-plan-followup Payment Plan Followup (outbound voice)
+//
+// Each sub-view fetches the matching ai_workflows row (by slug) and
+// shows:
+//   - description
+//   - autonomy level (with edit dropdown)
+//   - VAPI assistant id (with paste-and-save)
+//   - "Place a test call" form
+//   - Recent calls for this workflow
+
+import { useCallback, useEffect, useState } from 'react';
+import {
+  Bot, PhoneOutgoing, Sparkles, ShieldAlert, ArrowRight, Settings, Power,
+  Phone, RefreshCw,
+} from 'lucide-react';
+
+const CLERK_ENABLED = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
+const ADMIN_TOKEN_KEY = 'breeze.admin.token';
+const getToken = () => {
+  if (CLERK_ENABLED) return 'clerk';
+  try { return sessionStorage.getItem(ADMIN_TOKEN_KEY) || ''; } catch { return ''; }
+};
+
+const SLUG_TO_VIEW = {
+  switch_utilities:        'ai-switch-utilities',
+  payment_plan_followup:   'ai-payment-plan-followup',
+};
+const VIEW_TO_SLUG = Object.fromEntries(Object.entries(SLUG_TO_VIEW).map(([k, v]) => [v, k]));
+
+const AUTONOMY_LABELS = {
+  draft_only:             'Draft only — staff sends manually',
+  approve_before_contact: 'Approve before contact — staff approves before dialing',
+  approve_before_action:  'Approve before action — AI runs the call, high-risk tools require approval',
+  notify_only:            'Notify only — AI does everything, sends a summary',
+  full:                   'Full — AI does everything without notifying',
+};
+
+async function fetchJson(path, opts = {}) {
+  const url = new URL(path, window.location.origin);
+  url.searchParams.set('secret', getToken());
+  const res = await fetch(url.toString(), {
+    method: opts.method || 'GET',
+    headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    throw new Error(`HTTP ${res.status}: ${t.slice(0, 200)}`);
+  }
+  return res.json();
+}
+
+export default function AiAgentsPage({ activeView, onNavigate }) {
+  const slug = VIEW_TO_SLUG[activeView] || null;
+  if (slug) return <WorkflowPage slug={slug} />;
+  return <HubPage onNavigate={onNavigate} />;
+}
+
+// ── Hub ─────────────────────────────────────────────────────────
+
+function HubPage({ onNavigate }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const json = await fetchJson('/api/admin/list-ai-workflows');
+      setData(json);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <div style={{ padding: 24, color: '#666' }}>Loading…</div>;
+  if (error) {
+    return (
+      <div style={{ padding: 24 }}>
+        <div className="dashboard-card" style={{ padding: 16, background: '#FFEBEE', color: '#C62828' }}>
+          <strong>Failed to load:</strong> {error}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: '24px', maxWidth: '1100px', margin: '0 auto' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px', paddingBottom: '12px', borderBottom: '1px solid #EEE' }}>
+        <div style={{
+          width: 52, height: 52, borderRadius: 12,
+          background: '#6A1B9A15', color: '#6A1B9A',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <Bot size={28} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <h2 style={{ margin: 0 }}>AI Agents</h2>
+          <p style={{ color: '#666', marginTop: 6, marginBottom: 0, fontSize: 14 }}>
+            Voice and messaging agents that automate the comms work a property manager
+            would otherwise do. Each agent has an autonomy level controlling how much it
+            does without staff review.
+          </p>
+        </div>
+      </div>
+
+      <AutonomySettings defaultLevel={data.default_autonomy_level} onChanged={load} />
+
+      <div style={{
+        marginTop: 20,
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+        gap: 14,
+      }}>
+        {data.workflows.map((w) => (
+          <WorkflowCard
+            key={w.id}
+            workflow={w}
+            onClick={() => {
+              const viewId = SLUG_TO_VIEW[w.slug];
+              if (viewId) onNavigate(viewId);
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AutonomySettings({ defaultLevel, onChanged }) {
+  const [value, setValue] = useState(defaultLevel);
+  const [saving, setSaving] = useState(false);
+  const [savedHint, setSavedHint] = useState(false);
+
+  useEffect(() => { setValue(defaultLevel); }, [defaultLevel]);
+
+  const save = async (next) => {
+    setSaving(true);
+    setSavedHint(false);
+    try {
+      await fetchJson('/api/admin/ai-settings', {
+        method: 'POST',
+        body: { default_autonomy_level: next },
+      });
+      setValue(next);
+      setSavedHint(true);
+      onChanged();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{
+      marginTop: 16,
+      padding: '14px 16px',
+      background: 'linear-gradient(135deg, #F3E5F5 0%, #E8EAF6 100%)',
+      borderLeft: '3px solid #6A1B9A',
+      borderRadius: 8,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        <ShieldAlert size={14} style={{ color: '#6A1B9A' }} />
+        <strong style={{ color: '#6A1B9A', fontSize: 14 }}>Default human-in-the-loop threshold</strong>
+      </div>
+      <div style={{ fontSize: 12, color: '#555', marginBottom: 10 }}>
+        Every AI workflow inherits this unless it sets its own override. Sets how much the
+        agent does autonomously vs. how much queues for staff review.
+      </div>
+      <select
+        value={value || 'approve_before_action'}
+        onChange={(e) => save(e.target.value)}
+        disabled={saving}
+        style={{
+          padding: '7px 10px', border: '1px solid #BBB', borderRadius: 6,
+          fontSize: 13, width: '100%', maxWidth: 500, background: 'white',
+        }}
+      >
+        {Object.entries(AUTONOMY_LABELS).map(([k, v]) => (
+          <option key={k} value={k}>{v}</option>
+        ))}
+      </select>
+      {savedHint && <span style={{ marginLeft: 10, color: '#2E7D32', fontSize: 12 }}>Saved</span>}
+    </div>
+  );
+}
+
+function WorkflowCard({ workflow, onClick }) {
+  const Icon = workflow.channel === 'voice' ? PhoneOutgoing : Sparkles;
+  const colors = {
+    voice: { bg: '#1565C015', fg: '#1565C0' },
+    sms:   { bg: '#2E7D3215', fg: '#2E7D32' },
+    email: { bg: '#E6510015', fg: '#E65100' },
+  };
+  const c = colors[workflow.channel] || { bg: '#9E9E9E15', fg: '#616161' };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        textAlign: 'left',
+        padding: '18px',
+        borderRadius: 10,
+        border: '1px solid #E0E0E0',
+        background: 'white',
+        cursor: 'pointer',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10,
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.borderColor = c.fg; }}
+      onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#E0E0E0'; }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{
+          width: 36, height: 36, borderRadius: 8,
+          background: c.bg, color: c.fg,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <Icon size={20} />
+        </div>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 15, color: '#1A1A1A' }}>
+            {workflow.name}
+            {!workflow.is_active && (
+              <span style={{
+                marginLeft: 8, padding: '1px 8px', borderRadius: 10, fontSize: 10,
+                fontWeight: 600, background: '#EEE', color: '#888',
+              }}>
+                inactive
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: 12, color: c.fg, fontWeight: 600, textTransform: 'capitalize' }}>
+            {workflow.direction} {workflow.channel}
+          </div>
+        </div>
+      </div>
+      <p style={{ margin: 0, fontSize: 12, color: '#555', lineHeight: 1.5 }}>
+        {workflow.description}
+      </p>
+      <div style={{ fontSize: 11, color: '#888', borderTop: '1px dashed #EEE', paddingTop: 8 }}>
+        <strong>Autonomy:</strong> {AUTONOMY_LABELS[workflow.effective_autonomy_level]?.split('—')[0]?.trim() || workflow.effective_autonomy_level}
+        {workflow.autonomy_level ? '' : ' (inherited)'}
+        {' · '}
+        <strong>Assistant:</strong> {workflow.vapi_assistant_id ? '✓ configured' : 'not set'}
+      </div>
+      <div style={{ marginTop: 'auto', color: c.fg, fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+        Open <ArrowRight size={14} />
+      </div>
+    </button>
+  );
+}
+
+// ── Per-workflow page ───────────────────────────────────────────
+
+function WorkflowPage({ slug }) {
+  const [workflow, setWorkflow] = useState(null);
+  const [defaultLevel, setDefaultLevel] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const json = await fetchJson('/api/admin/list-ai-workflows');
+      setDefaultLevel(json.default_autonomy_level);
+      const w = json.workflows.find((x) => x.slug === slug);
+      if (!w) throw new Error(`Workflow ${slug} not found`);
+      setWorkflow(w);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [slug]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <div style={{ padding: 24, color: '#666' }}>Loading…</div>;
+  if (error) {
+    return (
+      <div style={{ padding: 24 }}>
+        <div className="dashboard-card" style={{ padding: 16, background: '#FFEBEE', color: '#C62828' }}>
+          <strong>Failed to load:</strong> {error}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: '24px', maxWidth: '900px', margin: '0 auto' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px', paddingBottom: '12px', borderBottom: '1px solid #EEE' }}>
+        <div style={{
+          width: 52, height: 52, borderRadius: 12,
+          background: '#1565C015', color: '#1565C0',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <PhoneOutgoing size={28} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <h2 style={{ margin: 0 }}>{workflow.name}</h2>
+          <p style={{ color: '#666', marginTop: 6, marginBottom: 0, fontSize: 14, lineHeight: 1.5 }}>
+            {workflow.description}
+          </p>
+        </div>
+      </div>
+
+      <WorkflowConfigCard workflow={workflow} defaultLevel={defaultLevel} onChanged={load} />
+      <PlaceCallCard workflow={workflow} />
+    </div>
+  );
+}
+
+function WorkflowConfigCard({ workflow, defaultLevel, onChanged }) {
+  const [assistantId, setAssistantId] = useState(workflow.vapi_assistant_id || '');
+  const [autonomy, setAutonomy] = useState(workflow.autonomy_level || '');
+  const [isActive, setIsActive] = useState(workflow.is_active);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+  const [savedHint, setSavedHint] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    setErr(null);
+    setSavedHint(false);
+    try {
+      await fetchJson('/api/admin/upsert-ai-workflow', {
+        method: 'POST',
+        body: {
+          id: workflow.id,
+          vapi_assistant_id: assistantId.trim() || null,
+          autonomy_level: autonomy || null,
+          is_active: isActive,
+        },
+      });
+      setSavedHint(true);
+      onChanged();
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="dashboard-card" style={{ marginTop: 20, padding: '16px 18px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <Settings size={16} style={{ color: '#444' }} />
+        <h3 style={{ margin: 0, fontSize: 14 }}>Configuration</h3>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12, color: '#444', gap: 4 }}>
+          <span style={{ fontWeight: 600 }}>VAPI assistant id</span>
+          <input
+            type="text"
+            value={assistantId}
+            onChange={(e) => setAssistantId(e.target.value)}
+            placeholder="asst_..."
+            style={{ padding: '7px 10px', border: '1px solid #CCC', borderRadius: 6, fontSize: 13 }}
+          />
+          <span style={{ color: '#888', fontSize: 11 }}>
+            Created in Vapi dashboard. The assistant defines the system prompt, voice,
+            and the functions the agent is allowed to call.
+          </span>
+        </label>
+
+        <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12, color: '#444', gap: 4 }}>
+          <span style={{ fontWeight: 600 }}>Autonomy level</span>
+          <select
+            value={autonomy}
+            onChange={(e) => setAutonomy(e.target.value)}
+            style={{ padding: '7px 10px', border: '1px solid #CCC', borderRadius: 6, fontSize: 13, background: 'white' }}
+          >
+            <option value="">Inherit org default ({defaultLevel?.replace(/_/g, ' ')})</option>
+            {Object.entries(AUTONOMY_LABELS).map(([k, v]) => (
+              <option key={k} value={k}>{v}</option>
+            ))}
+          </select>
+          <span style={{ color: '#888', fontSize: 11 }}>
+            Overrides the org default just for this workflow.
+          </span>
+        </label>
+      </div>
+
+      <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 14 }}>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+          <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
+          <Power size={12} /> Active
+        </label>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          {err && <span style={{ color: '#C62828', fontSize: 12 }}>{err}</span>}
+          {savedHint && <span style={{ color: '#2E7D32', fontSize: 12 }}>Saved</span>}
+          <button
+            type="button"
+            onClick={save}
+            disabled={saving}
+            style={{
+              padding: '7px 16px', background: saving ? '#BBB' : '#6A1B9A',
+              color: 'white', border: 'none', borderRadius: 6, fontWeight: 600,
+              fontSize: 13, cursor: saving ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlaceCallCard({ workflow }) {
+  const [phone, setPhone] = useState('');
+  const [customerName, setCustomerName] = useState('');
+  const [placing, setPlacing] = useState(false);
+  const [result, setResult] = useState(null);
+  const [err, setErr] = useState(null);
+
+  const place = async () => {
+    if (!phone.trim()) { setErr('Phone number required (E.164, e.g. +14155551234)'); return; }
+    setPlacing(true);
+    setErr(null);
+    setResult(null);
+    try {
+      const json = await fetchJson('/api/voice/place-call', {
+        method: 'POST',
+        body: {
+          workflow_slug: workflow.slug,
+          phone_number: phone.trim(),
+          customer_name: customerName.trim() || undefined,
+        },
+      });
+      setResult(json);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setPlacing(false);
+    }
+  };
+
+  return (
+    <div className="dashboard-card" style={{ marginTop: 16, padding: '16px 18px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <Phone size={16} style={{ color: '#1565C0' }} />
+        <h3 style={{ margin: 0, fontSize: 14 }}>Place a test call</h3>
+      </div>
+      <p style={{ margin: '0 0 12px', fontSize: 12, color: '#666' }}>
+        Dial any number with this workflow's assistant. If autonomy is set to
+        <em> draft only</em> or <em>approve before contact</em>, the call queues for
+        review instead of dialing immediately.
+      </p>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12, color: '#444', gap: 3 }}>
+          <span style={{ fontWeight: 600 }}>Phone (E.164)</span>
+          <input
+            type="text"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="+14155551234"
+            style={{ padding: '7px 10px', border: '1px solid #CCC', borderRadius: 6, fontSize: 13 }}
+          />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12, color: '#444', gap: 3 }}>
+          <span style={{ fontWeight: 600 }}>Customer name (optional)</span>
+          <input
+            type="text"
+            value={customerName}
+            onChange={(e) => setCustomerName(e.target.value)}
+            placeholder="e.g. Jane Smith"
+            style={{ padding: '7px 10px', border: '1px solid #CCC', borderRadius: 6, fontSize: 13 }}
+          />
+        </label>
+      </div>
+      <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button
+          type="button"
+          onClick={place}
+          disabled={placing}
+          style={{
+            padding: '8px 18px',
+            background: placing ? '#BBB' : '#1565C0', color: 'white',
+            border: 'none', borderRadius: 6, fontWeight: 600, fontSize: 13,
+            cursor: placing ? 'not-allowed' : 'pointer',
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+          }}
+        >
+          <PhoneOutgoing size={14} /> {placing ? 'Placing…' : 'Place call'}
+        </button>
+        <button
+          type="button"
+          onClick={() => { setResult(null); setErr(null); }}
+          style={{
+            padding: '8px 12px', background: 'white', color: '#444',
+            border: '1px solid #BBB', borderRadius: 6, fontSize: 12, cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+          }}
+        >
+          <RefreshCw size={12} /> Clear
+        </button>
+      </div>
+      {err && (
+        <div style={{ marginTop: 10, padding: '8px 10px', background: '#FFEBEE', color: '#C62828', borderRadius: 6, fontSize: 12 }}>
+          {err}
+        </div>
+      )}
+      {result && (
+        <div style={{ marginTop: 10, padding: '8px 10px', background: '#E8F5E9', color: '#2E7D32', borderRadius: 6, fontSize: 12 }}>
+          <strong>{result.status === 'queued' ? 'Queued' : 'Dialed'}.</strong>
+          {result.vapi_call_id && <> Vapi call id: <code>{result.vapi_call_id}</code>.</>}
+          {result.note && <> {result.note}</>}
+        </div>
+      )}
+    </div>
+  );
+}
