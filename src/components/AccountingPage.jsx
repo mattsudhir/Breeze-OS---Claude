@@ -45,7 +45,15 @@ const ACCOUNT_TYPE_COLORS = {
 
 const ADMIN_TOKEN_KEY = 'breeze.admin.token';
 
+// When Clerk is configured, the Clerk session cookie alone auths
+// every /api/admin/* call (verified server-side in lib/adminHelpers).
+// In that mode we skip the legacy "enter your admin token" prompt
+// and pass an empty token; the URL search param remains harmless
+// because the server prefers Clerk over the shared-secret fallback.
+const CLERK_ENABLED = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
+
 function readToken() {
+  if (CLERK_ENABLED) return 'clerk';
   try {
     return sessionStorage.getItem(ADMIN_TOKEN_KEY) || '';
   } catch {
@@ -53,6 +61,7 @@ function readToken() {
   }
 }
 function writeToken(v) {
+  if (CLERK_ENABLED) return;
   try {
     if (v) sessionStorage.setItem(ADMIN_TOKEN_KEY, v);
     else sessionStorage.removeItem(ADMIN_TOKEN_KEY);

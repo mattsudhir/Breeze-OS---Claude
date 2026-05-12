@@ -1,5 +1,8 @@
 import { Menu, MessageSquare, LayoutDashboard } from 'lucide-react';
+import { UserButton } from '@clerk/clerk-react';
 import NotificationsBell from './NotificationsBell.jsx';
+
+const CLERK_ENABLED = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
 
 const TITLES = {
   chat: 'Chat Home',
@@ -56,8 +59,9 @@ export default function TopBar({
         )}
       </div>
 
-      <div className="topbar-right">
+      <div className="topbar-right" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
         <NotificationsBell onNavigate={onNavigate} />
+        {CLERK_ENABLED && <UserButton afterSignOutUrl="/" />}
       </div>
     </header>
   );
