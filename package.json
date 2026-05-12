@@ -17,9 +17,11 @@
     "@anthropic-ai/sdk": "^0.88.0",
     "drizzle-orm": "^0.36.4",
     "lucide-react": "^1.8.0",
+    "plaid": "^28.0.0",
     "postgres": "^3.4.5",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "react-plaid-link": "^4.0.1",
     "zod": "^4.3.6"
   },
   "devDependencies": {

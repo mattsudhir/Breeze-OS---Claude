@@ -14,11 +14,13 @@
 // localStorage — short-lived for safety), and reuses it for every
 // subsequent fetch. Clearing the browser tab clears the token.
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   DollarSign, Receipt, CreditCard, Landmark, FileSpreadsheet,
   BookOpen, BarChart3, AlertCircle, RefreshCw, Search, Tag, Eye, EyeOff,
+  Link2, Download,
 } from 'lucide-react';
+import { usePlaidLink } from 'react-plaid-link';
 
 const TABS = [
   { id: 'coa',       label: 'Chart of Accounts', icon: BookOpen },
@@ -551,6 +553,8 @@ function BankAccountsTab({ token, onTokenInvalid }) {
 
   return (
     <div>
+      <PlaidLinkButton token={token} onLinked={load} onTokenInvalid={onTokenInvalid} />
+
       {parked && parked.still_unlinked > 0 && (
         <div className="dashboard-card" style={{
           padding: '16px', marginBottom: '12px',
@@ -667,6 +671,9 @@ function BankAccountsTab({ token, onTokenInvalid }) {
                     }}>
                       {b.plaid_status}
                     </span>
+                    {b.plaid_status === 'linked' && (
+                      <SyncTransactionsButton token={token} bankAccountId={b.id} onTokenInvalid={onTokenInvalid} />
+                    )}
                   </td>
                 </tr>
               ))}
@@ -675,5 +682,177 @@ function BankAccountsTab({ token, onTokenInvalid }) {
         </div>
       )}
     </div>
+  );
+}
+
+// ── Plaid link button ────────────────────────────────────────────
+
+function PlaidLinkButton({ token, onLinked, onTokenInvalid }) {
+  const [linkToken, setLinkToken] = useState(null);
+  const [error, setError] = useState(null);
+  const [linking, setLinking] = useState(false);
+  const [plaidUnavailable, setPlaidUnavailable] = useState(false);
+
+  // Fetch a Plaid Link token on demand.
+  const fetchLinkToken = useCallback(async () => {
+    try {
+      const url = new URL('/api/admin/plaid-link-token', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString());
+      if (res.status === 401) { onTokenInvalid(); return null; }
+      const json = await res.json();
+      if (!json.ok) {
+        if (json.error?.includes('not configured')) {
+          setPlaidUnavailable(true);
+        } else {
+          setError(json.error || 'failed to get link token');
+        }
+        return null;
+      }
+      setLinkToken(json.link_token);
+      return json.link_token;
+    } catch (err) {
+      setError(err.message || String(err));
+      return null;
+    }
+  }, [token, onTokenInvalid]);
+
+  const onPlaidSuccess = useCallback(async (public_token, metadata) => {
+    setLinking(true);
+    setError(null);
+    try {
+      const url = new URL('/api/admin/plaid-exchange-public-token', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ public_token, metadata }),
+      });
+      if (res.status === 401) { onTokenInvalid(); return; }
+      const json = await res.json();
+      if (!json.ok) {
+        setError(json.error || 'exchange failed');
+        return;
+      }
+      onLinked();
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setLinking(false);
+      setLinkToken(null);
+    }
+  }, [token, onLinked, onTokenInvalid]);
+
+  const { open, ready } = usePlaidLink({
+    token: linkToken,
+    onSuccess: onPlaidSuccess,
+    onExit: () => setLinkToken(null),
+  });
+
+  // Auto-open Plaid Link as soon as we receive a token.
+  useEffect(() => {
+    if (linkToken && ready) open();
+  }, [linkToken, ready, open]);
+
+  const onClick = async () => {
+    setError(null);
+    if (linkToken) { open(); return; }
+    await fetchLinkToken();
+  };
+
+  if (plaidUnavailable) {
+    return (
+      <div className="dashboard-card" style={{
+        padding: '12px', marginBottom: '12px',
+        background: '#FFF8E1', borderLeft: '4px solid #E65100',
+        fontSize: '13px', color: '#555',
+      }}>
+        <strong>Plaid not configured.</strong> Set <code>PLAID_CLIENT_ID</code>, <code>PLAID_SECRET</code>, <code>PLAID_ENV</code>, and <code>BREEZE_ENCRYPTION_KEY</code> in Vercel env vars to enable linking. Sandbox mode is fine for testing.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginBottom: '12px' }}>
+      <button
+        type="button"
+        className="btn-primary"
+        onClick={onClick}
+        disabled={linking}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: '6px',
+          padding: '8px 14px',
+        }}
+      >
+        <Link2 size={14} />
+        {linking ? 'Saving…' : 'Link a bank with Plaid'}
+      </button>
+      {error && (
+        <span style={{ marginLeft: '12px', color: '#C62828', fontSize: '12px' }}>
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ── Per-row sync button ──────────────────────────────────────────
+
+function SyncTransactionsButton({ token, bankAccountId, onTokenInvalid }) {
+  const [syncing, setSyncing] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const onClick = async () => {
+    setSyncing(true);
+    setResult(null);
+    try {
+      const url = new URL('/api/admin/plaid-sync-transactions', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bank_account_id: bankAccountId }),
+      });
+      if (res.status === 401) { onTokenInvalid(); return; }
+      const json = await res.json();
+      if (!json.ok) {
+        setResult({ error: json.error });
+        return;
+      }
+      const summary = json.synced?.[0];
+      setResult({
+        added: summary?.added ?? 0,
+        inserted: summary?.inserted_count ?? 0,
+      });
+    } catch (err) {
+      setResult({ error: err.message || String(err) });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  return (
+    <span style={{ marginLeft: '6px' }}>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={syncing}
+        title="Pull latest transactions from Plaid"
+        style={{
+          padding: '2px 8px', fontSize: '10px',
+          border: '1px solid #ddd', borderRadius: '8px',
+          background: 'white', cursor: 'pointer',
+          display: 'inline-flex', alignItems: 'center', gap: '2px',
+        }}
+      >
+        <Download size={9} />
+        {syncing ? 'syncing…' : 'sync'}
+      </button>
+      {result && (
+        <span style={{ marginLeft: '4px', fontSize: '10px', color: result.error ? '#C62828' : '#666' }}>
+          {result.error || `+${result.inserted}`}
+        </span>
+      )}
+    </span>
   );
 }
