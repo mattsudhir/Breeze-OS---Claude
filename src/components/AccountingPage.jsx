@@ -1,50 +1,73 @@
-import { DollarSign, TrendingUp, TrendingDown, Receipt, CreditCard, AlertCircle, CheckCircle2, Plus } from 'lucide-react';
+// Accounting workspace. Tabbed view over the Stage 1-3 backend.
+//
+// Tabs:
+//   Chart of Accounts  — live, reads /api/admin/list-gl-accounts
+//   Journal Entries    — placeholder (next iteration)
+//   Receivables        — placeholder
+//   Receipts           — placeholder
+//   Deposits           — placeholder
+//   Bank Accounts      — placeholder
+//   Reports            — placeholder (Stage 7)
+//
+// The admin endpoint is gated by BREEZE_ADMIN_TOKEN. The page asks
+// for the token on first load, stashes it in sessionStorage (NOT
+// localStorage — short-lived for safety), and reuses it for every
+// subsequent fetch. Clearing the browser tab clears the token.
 
-// Placeholder accounting data — swap for real Rent Manager GL pulls later.
-const KPIS = [
-  { id: 'income', label: 'Income (MTD)', value: '$184,320.00', delta: '+8.2%', up: true, icon: TrendingUp, color: '#2E7D32' },
-  { id: 'expenses', label: 'Expenses (MTD)', value: '$62,115.47', delta: '+3.1%', up: false, icon: TrendingDown, color: '#C62828' },
-  { id: 'noi', label: 'Net Operating Income', value: '$122,204.53', delta: '+11.4%', up: true, icon: DollarSign, color: '#1565C0' },
-  { id: 'outstanding', label: 'Outstanding AR', value: '$14,782.00', delta: '-2.6%', up: true, icon: Receipt, color: '#E65100' },
+import { useEffect, useState, useMemo, useCallback } from 'react';
+import {
+  DollarSign, Receipt, CreditCard, Landmark, FileSpreadsheet,
+  BookOpen, BarChart3, AlertCircle, RefreshCw, Search, Tag, Eye, EyeOff,
+  Link2, Download,
+} from 'lucide-react';
+import { usePlaidLink } from 'react-plaid-link';
+
+const TABS = [
+  { id: 'coa',       label: 'Chart of Accounts', icon: BookOpen },
+  { id: 'journal',   label: 'Journal Entries',   icon: FileSpreadsheet },
+  { id: 'ar',        label: 'Receivables',       icon: Receipt },
+  { id: 'receipts',  label: 'Receipts',          icon: DollarSign },
+  { id: 'deposits',  label: 'Deposits',          icon: Landmark },
+  { id: 'banks',     label: 'Bank Accounts',     icon: CreditCard },
+  { id: 'reports',   label: 'Reports',           icon: BarChart3 },
 ];
 
-const RECENT_TRANSACTIONS = [
-  { id: 'txn-1042', date: 'Apr 11, 2026', description: 'Rent payment — Marcia Clark (Unit 204)', account: 'Income · Rent', amount: 2150.00, type: 'credit' },
-  { id: 'txn-1041', date: 'Apr 11, 2026', description: 'Plumbing repair — Oakwood #12', account: 'Expense · Maintenance', amount: -487.50, type: 'debit' },
-  { id: 'txn-1040', date: 'Apr 10, 2026', description: 'Rent payment — Daniel Kim (Unit 8B)', account: 'Income · Rent', amount: 1895.00, type: 'credit' },
-  { id: 'txn-1039', date: 'Apr 10, 2026', description: 'Electric utility — Birchwood Commons', account: 'Expense · Utilities', amount: -2340.18, type: 'debit' },
-  { id: 'txn-1038', date: 'Apr 9, 2026', description: 'Late fee — Unit 14C', account: 'Income · Fees', amount: 75.00, type: 'credit' },
-  { id: 'txn-1037', date: 'Apr 9, 2026', description: 'Landscaping contract — Q2', account: 'Expense · Grounds', amount: -1800.00, type: 'debit' },
-  { id: 'txn-1036', date: 'Apr 8, 2026', description: 'Security deposit — new lease (Unit 3A)', account: 'Liability · Deposits', amount: 2400.00, type: 'credit' },
-];
+const ACCOUNT_TYPE_COLORS = {
+  asset:     { bg: '#E3F2FD', fg: '#1565C0' },
+  liability: { bg: '#FFF3E0', fg: '#E65100' },
+  equity:    { bg: '#F3E5F5', fg: '#6A1B9A' },
+  income:    { bg: '#E8F5E9', fg: '#2E7D32' },
+  expense:   { bg: '#FFEBEE', fg: '#C62828' },
+};
 
-const OUTSTANDING_INVOICES = [
-  { id: 'INV-3391', tenant: 'Robert Hayes', unit: 'Unit 14C · Birchwood', amount: 2100.00, daysLate: 12, status: 'overdue' },
-  { id: 'INV-3388', tenant: 'Lena Park', unit: 'Unit 7 · Oakwood', amount: 1875.00, daysLate: 5, status: 'overdue' },
-  { id: 'INV-3385', tenant: 'Sam Patel', unit: 'Unit 22 · Maple Grove', amount: 945.00, daysLate: 2, status: 'due' },
-  { id: 'INV-3384', tenant: 'Jenna Wong', unit: 'Unit 11B · Birchwood', amount: 1650.00, daysLate: 0, status: 'due' },
-];
+const ADMIN_TOKEN_KEY = 'breeze.admin.token';
 
-function formatCurrency(n) {
-  const abs = Math.abs(n);
-  const sign = n < 0 ? '-' : '';
-  return `${sign}$${abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+function readToken() {
+  try {
+    return sessionStorage.getItem(ADMIN_TOKEN_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+function writeToken(v) {
+  try {
+    if (v) sessionStorage.setItem(ADMIN_TOKEN_KEY, v);
+    else sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+  } catch {
+    /* private mode — ignore */
+  }
 }
 
 export default function AccountingPage() {
-  const totalOutstanding = OUTSTANDING_INVOICES.reduce((s, i) => s + i.amount, 0);
+  const [activeTab, setActiveTab] = useState('coa');
+  const [token, setToken] = useState(readToken());
+
+  useEffect(() => {
+    writeToken(token);
+  }, [token]);
 
   return (
     <div className="properties-page">
-      <div className="data-source-banner" style={{
-        display: 'flex', alignItems: 'center', gap: '8px',
-        padding: '8px 14px', marginBottom: '16px', borderRadius: '8px',
-        fontSize: '12px', fontWeight: 600,
-        background: '#FFF3E0', color: '#E65100', border: '1px solid #FFE0B2',
-      }}>
-        <DollarSign size={14} /> Preview — sample accounting data while GL integration is wired up
-      </div>
-
       <div className="tenant-detail-topbar">
         <div className="property-detail-header" style={{ flex: 1 }}>
           <div className="wo-detail-icon" style={{ background: '#2E7D3215', color: '#2E7D32' }}>
@@ -53,104 +76,1087 @@ export default function AccountingPage() {
           <div style={{ flex: 1 }}>
             <h2>Accounting</h2>
             <p className="property-detail-address">
-              April 2026 · {OUTSTANDING_INVOICES.length} outstanding invoices · {formatCurrency(totalOutstanding)} due
+              Breeze OS general ledger, receivables, banking, and reports.
             </p>
           </div>
         </div>
-        <button className="btn-primary tenant-edit-btn">
-          <Plus size={14} /> New Transaction
+      </div>
+
+      {!token ? (
+        <AdminTokenPrompt onSave={setToken} />
+      ) : (
+        <>
+          <TabBar activeTab={activeTab} onChange={setActiveTab} />
+          <div style={{ marginTop: '16px' }}>
+            {activeTab === 'coa' && <ChartOfAccountsTab token={token} onTokenInvalid={() => setToken('')} />}
+            {activeTab === 'journal' && <JournalEntriesTab token={token} onTokenInvalid={() => setToken('')} />}
+            {activeTab === 'ar' && <ReceivablesTab token={token} onTokenInvalid={() => setToken('')} />}
+            {activeTab === 'receipts' && <PlaceholderTab label="Receipts" hint="Recent receipts + record-receipt form. Backed by /api/admin/ar-happy-path or a focused record endpoint." />}
+            {activeTab === 'deposits' && <PlaceholderTab label="Deposits" hint="Undeposited Funds queue + build-deposit form." />}
+            {activeTab === 'banks' && <BankAccountsTab token={token} onTokenInvalid={() => setToken('')} />}
+            {activeTab === 'reports' && <PlaceholderTab label="Reports" hint="P&L, rent roll, owner statements (Stage 7)." />}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Token prompt ─────────────────────────────────────────────────
+
+function AdminTokenPrompt({ onSave }) {
+  const [draft, setDraft] = useState('');
+  const [reveal, setReveal] = useState(false);
+  return (
+    <div className="dashboard-card" style={{ padding: '24px', maxWidth: '520px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+        <AlertCircle size={18} color="#E65100" />
+        <strong>Admin token required</strong>
+      </div>
+      <p style={{ color: '#555', fontSize: '13px', margin: '0 0 12px' }}>
+        Paste the value of <code>BREEZE_ADMIN_TOKEN</code> from your Vercel
+        environment variables to access live accounting data. The token
+        is held in <code>sessionStorage</code> for this browser tab only
+        and is cleared when you close the tab.
+      </p>
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <input
+          type={reveal ? 'text' : 'password'}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="BREEZE_ADMIN_TOKEN value"
+          autoComplete="off"
+          style={{
+            flex: 1, padding: '8px 12px', border: '1px solid #ddd',
+            borderRadius: '6px', fontSize: '14px', fontFamily: 'monospace',
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => setReveal((r) => !r)}
+          className="btn-secondary"
+          title={reveal ? 'Hide' : 'Reveal'}
+          style={{ padding: '6px 10px' }}
+        >
+          {reveal ? <EyeOff size={14} /> : <Eye size={14} />}
+        </button>
+        <button
+          type="button"
+          onClick={() => draft.trim() && onSave(draft.trim())}
+          className="btn-primary"
+          disabled={!draft.trim()}
+        >
+          Continue
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Tab bar ──────────────────────────────────────────────────────
+
+function TabBar({ activeTab, onChange }) {
+  return (
+    <div style={{
+      display: 'flex', flexWrap: 'wrap', gap: '4px',
+      borderBottom: '1px solid #e0e0e0', paddingBottom: '8px',
+    }}>
+      {TABS.map((t) => {
+        const Icon = t.icon;
+        const active = t.id === activeTab;
+        return (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => onChange(t.id)}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: '6px',
+              padding: '8px 14px', borderRadius: '6px 6px 0 0',
+              border: 'none',
+              background: active ? '#2E7D3210' : 'transparent',
+              color: active ? '#2E7D32' : '#555',
+              fontWeight: active ? 600 : 500,
+              borderBottom: active ? '2px solid #2E7D32' : '2px solid transparent',
+              cursor: 'pointer',
+              fontSize: '13px',
+            }}
+          >
+            <Icon size={14} />
+            {t.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Placeholder tab ──────────────────────────────────────────────
+
+function PlaceholderTab({ label, hint }) {
+  return (
+    <div className="dashboard-card" style={{ padding: '24px' }}>
+      <h3 style={{ marginTop: 0 }}>{label}</h3>
+      <p style={{ color: '#666', fontSize: '14px' }}>{hint}</p>
+      <p style={{ color: '#999', fontSize: '12px', marginTop: '16px' }}>
+        Tab not yet implemented — schema and service layer ready in the
+        backend; UI lands in a follow-up.
+      </p>
+    </div>
+  );
+}
+
+// ── Chart of Accounts tab ───────────────────────────────────────
+
+function ChartOfAccountsTab({ token, onTokenInvalid }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [search, setSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');
+  const [showInactive, setShowInactive] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const url = new URL('/api/admin/list-gl-accounts', window.location.origin);
+      url.searchParams.set('secret', token);
+      if (showInactive) url.searchParams.set('include_inactive', 'true');
+      if (typeFilter) url.searchParams.set('account_type', typeFilter);
+      const res = await fetch(url.toString());
+      if (res.status === 401) {
+        onTokenInvalid();
+        return;
+      }
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+      }
+      const json = await res.json();
+      setData(json);
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showInactive, typeFilter]);
+
+  const filtered = useMemo(() => {
+    if (!data?.accounts) return [];
+    const q = search.trim().toLowerCase();
+    if (!q) return data.accounts;
+    return data.accounts.filter((a) =>
+      (a.code || '').toLowerCase().includes(q) ||
+      (a.name || '').toLowerCase().includes(q) ||
+      (a.account_subtype || '').toLowerCase().includes(q),
+    );
+  }, [data, search]);
+
+  const summary = useMemo(() => {
+    if (!data?.accounts) return null;
+    const byType = {};
+    let withTags = 0;
+    for (const a of data.accounts) {
+      byType[a.account_type] = (byType[a.account_type] || 0) + 1;
+      if (Object.keys(a.tags || {}).length > 0) withTags += 1;
+    }
+    return {
+      total: data.accounts.length,
+      withTags,
+      byType,
+    };
+  }, [data]);
+
+  return (
+    <div>
+      {/* Filters */}
+      <div style={{
+        display: 'flex', flexWrap: 'wrap', gap: '8px',
+        marginBottom: '12px', alignItems: 'center',
+      }}>
+        <div style={{ position: 'relative', flex: 1, minWidth: '220px' }}>
+          <Search size={14} style={{
+            position: 'absolute', top: '10px', left: '10px', color: '#999',
+          }} />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search code, name, subtype..."
+            style={{
+              width: '100%', padding: '8px 12px 8px 32px',
+              border: '1px solid #ddd', borderRadius: '6px', fontSize: '13px',
+            }}
+          />
+        </div>
+        <select
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+          style={{
+            padding: '8px 10px', border: '1px solid #ddd',
+            borderRadius: '6px', fontSize: '13px', background: 'white',
+          }}
+        >
+          <option value="">All types</option>
+          <option value="asset">Asset</option>
+          <option value="liability">Liability</option>
+          <option value="equity">Equity</option>
+          <option value="income">Income</option>
+          <option value="expense">Expense</option>
+        </select>
+        <label style={{
+          display: 'inline-flex', alignItems: 'center', gap: '4px',
+          fontSize: '13px', color: '#555', cursor: 'pointer',
+        }}>
+          <input
+            type="checkbox"
+            checked={showInactive}
+            onChange={(e) => setShowInactive(e.target.checked)}
+          />
+          Show inactive
+        </label>
+        <button
+          type="button"
+          onClick={load}
+          className="btn-secondary"
+          style={{ padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+        >
+          <RefreshCw size={14} />
+          Refresh
         </button>
       </div>
 
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-        gap: '12px',
-        marginBottom: '16px',
-      }}>
-        {KPIS.map((k) => {
-          const Icon = k.icon;
-          return (
-            <div key={k.id} className="dashboard-card" style={{ padding: '16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-                <div className="tenant-avatar" style={{ background: `${k.color}15`, color: k.color, width: 36, height: 36 }}>
-                  <Icon size={18} />
-                </div>
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>{k.label}</span>
-              </div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: '#1a1a1a' }}>{k.value}</div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: k.up ? '#2E7D32' : '#C62828', marginTop: 4 }}>
-                {k.delta} vs last month
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="dashboard-card">
-        <div className="card-header">
-          <h3><Receipt size={18} /> Recent Transactions</h3>
+      {/* Summary */}
+      {summary && (
+        <div style={{
+          display: 'flex', flexWrap: 'wrap', gap: '8px',
+          marginBottom: '12px',
+        }}>
+          <Pill label="Total" value={summary.total} />
+          <Pill label="With tags" value={summary.withTags} />
+          {Object.entries(summary.byType).map(([type, count]) => (
+            <Pill
+              key={type}
+              label={type}
+              value={count}
+              bg={ACCOUNT_TYPE_COLORS[type]?.bg}
+              fg={ACCOUNT_TYPE_COLORS[type]?.fg}
+            />
+          ))}
+          {data?.count !== filtered.length && (
+            <Pill label="Filtered" value={filtered.length} bg="#E0E0E0" fg="#222" />
+          )}
         </div>
-        <table className="properties-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Description</th>
-              <th>Account</th>
-              <th style={{ textAlign: 'right' }}>Amount</th>
-            </tr>
-          </thead>
-          <tbody>
-            {RECENT_TRANSACTIONS.map((t) => (
-              <tr key={t.id}>
-                <td>{t.date}</td>
-                <td>{t.description}</td>
-                <td style={{ color: '#666', fontSize: 12 }}>{t.account}</td>
-                <td style={{
-                  textAlign: 'right',
-                  fontWeight: 600,
-                  color: t.type === 'credit' ? '#2E7D32' : '#C62828',
-                }}>
-                  {formatCurrency(t.amount)}
-                </td>
+      )}
+
+      {/* Body */}
+      {loading && <div style={{ padding: '24px', color: '#666' }}>Loading...</div>}
+      {error && (
+        <div className="dashboard-card" style={{ padding: '16px', background: '#FFEBEE', color: '#C62828' }}>
+          <strong>Failed to load:</strong> {error}
+        </div>
+      )}
+
+      {!loading && !error && filtered.length === 0 && (
+        <div className="dashboard-card" style={{ padding: '24px', textAlign: 'center', color: '#666' }}>
+          No accounts found. Run <code>/api/admin/import-appfolio-coa?dry_run=false</code> or <code>/api/admin/seed-chart-of-accounts</code>.
+        </div>
+      )}
+
+      {!loading && !error && filtered.length > 0 && (
+        <div className="dashboard-card" style={{ padding: 0, overflow: 'hidden' }}>
+          <table className="properties-table" style={{ width: '100%' }}>
+            <thead>
+              <tr>
+                <th style={{ width: '70px' }}>Code</th>
+                <th>Name</th>
+                <th style={{ width: '100px' }}>Type</th>
+                <th style={{ width: '120px' }}>Subtype</th>
+                <th style={{ width: '80px', textAlign: 'right' }}>Postings</th>
+                <th>Tags</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {filtered.map((a) => (
+                <AccountRow key={a.id} account={a} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AccountRow({ account }) {
+  const tone = ACCOUNT_TYPE_COLORS[account.account_type] || { bg: '#eee', fg: '#333' };
+  const indent = account.parent_code ? '20px' : '0';
+  return (
+    <tr style={{ opacity: account.is_active ? 1 : 0.55 }}>
+      <td style={{ fontFamily: 'monospace', fontWeight: 600, paddingLeft: indent }}>
+        {account.code}
+      </td>
+      <td>
+        {account.name}
+        {account.is_system && (
+          <span style={{
+            marginLeft: '6px', fontSize: '10px', color: '#666',
+            background: '#f0f0f0', padding: '1px 6px', borderRadius: '8px',
+          }}>system</span>
+        )}
+        {account.is_bank && (
+          <span style={{
+            marginLeft: '6px', fontSize: '10px', color: '#fff',
+            background: '#1565C0', padding: '1px 6px', borderRadius: '8px',
+          }}>bank</span>
+        )}
+        {!account.is_active && (
+          <span style={{
+            marginLeft: '6px', fontSize: '10px', color: '#fff',
+            background: '#999', padding: '1px 6px', borderRadius: '8px',
+          }}>inactive</span>
+        )}
+      </td>
+      <td>
+        <span style={{
+          display: 'inline-block', padding: '2px 8px', borderRadius: '10px',
+          background: tone.bg, color: tone.fg, fontSize: '11px', fontWeight: 600,
+        }}>
+          {account.account_type}
+        </span>
+      </td>
+      <td style={{ fontSize: '12px', color: '#666' }}>
+        {account.account_subtype || '—'}
+      </td>
+      <td style={{ textAlign: 'right', color: account.posting_count > 0 ? '#222' : '#aaa' }}>
+        {account.posting_count}
+      </td>
+      <td>
+        {Object.keys(account.tags || {}).length === 0 ? (
+          <span style={{ color: '#bbb', fontSize: '12px' }}>—</span>
+        ) : (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+            {Object.entries(account.tags).flatMap(([ns, values]) =>
+              values.map((v) => (
+                <span
+                  key={`${ns}:${v}`}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '3px',
+                    padding: '1px 6px', borderRadius: '8px',
+                    background: '#F5F5F5', color: '#444',
+                    fontSize: '10px', fontFamily: 'monospace',
+                  }}
+                  title={`${ns}=${v}`}
+                >
+                  <Tag size={9} />
+                  {ns}:{v}
+                </span>
+              )),
+            )}
+          </div>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+function Pill({ label, value, bg = '#E0E0E0', fg = '#333' }) {
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: '4px',
+      padding: '3px 10px', borderRadius: '12px', background: bg, color: fg,
+      fontSize: '12px', fontWeight: 600,
+    }}>
+      <span style={{ textTransform: 'capitalize' }}>{label}</span>
+      <span style={{ fontWeight: 700 }}>{value}</span>
+    </span>
+  );
+}
+
+function formatCents(cents) {
+  if (cents === null || cents === undefined) return '—';
+  const n = Number(cents) / 100;
+  const abs = Math.abs(n);
+  const sign = n < 0 ? '-' : '';
+  return `${sign}$${abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// ── Bank Accounts tab ───────────────────────────────────────────
+
+function BankAccountsTab({ token, onTokenInvalid }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [converting, setConverting] = useState(false);
+  const [convertResult, setConvertResult] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const url = new URL('/api/admin/list-bank-accounts', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString());
+      if (res.status === 401) { onTokenInvalid(); return; }
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+      }
+      setData(await res.json());
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); /* eslint-disable-line react-hooks/exhaustive-deps */ }, []);
+
+  const runConvert = async (dryRun) => {
+    setConverting(true);
+    setConvertResult(null);
+    try {
+      const url = new URL('/api/admin/convert-parked-bank-accounts', window.location.origin);
+      url.searchParams.set('secret', token);
+      url.searchParams.set('dry_run', String(dryRun));
+      const res = await fetch(url.toString(), { method: 'POST' });
+      if (res.status === 401) { onTokenInvalid(); return; }
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+      }
+      setConvertResult(await res.json());
+      if (!dryRun) await load();
+    } catch (err) {
+      setConvertResult({ ok: false, error: err.message || String(err) });
+    } finally {
+      setConverting(false);
+    }
+  };
+
+  if (loading) return <div style={{ padding: '24px', color: '#666' }}>Loading...</div>;
+  if (error) {
+    return (
+      <div className="dashboard-card" style={{ padding: '16px', background: '#FFEBEE', color: '#C62828' }}>
+        <strong>Failed to load:</strong> {error}
+      </div>
+    );
+  }
+
+  const parked = data?.parked_summary;
+  const accounts = data?.bank_accounts || [];
+
+  return (
+    <div>
+      <PlaidLinkButton token={token} onLinked={load} onTokenInvalid={onTokenInvalid} />
+
+      {parked && parked.still_unlinked > 0 && (
+        <div className="dashboard-card" style={{
+          padding: '16px', marginBottom: '12px',
+          borderLeft: '4px solid #E65100', background: '#FFF8E1',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+            <AlertCircle size={18} color="#E65100" />
+            <strong>{parked.still_unlinked} parked GL accounts not yet linked as bank_accounts</strong>
+          </div>
+          <p style={{ color: '#555', fontSize: '13px', margin: '0 0 12px' }}>
+            The AppFolio COA importer parked {parked.bank} bank GLs and {parked.credit_card} credit-card GLs
+            as inactive placeholders. Click below to create a <code>bank_account</code> row for each,
+            wired 1:1 to its GL (credit-card GLs are also reclassified asset → liability).
+          </p>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => runConvert(true)}
+              disabled={converting}
+              style={{ padding: '6px 14px' }}
+            >
+              {converting ? 'Running...' : 'Dry-run preview'}
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => runConvert(false)}
+              disabled={converting}
+              style={{ padding: '6px 14px' }}
+            >
+              {converting ? 'Converting...' : `Convert all ${parked.still_unlinked}`}
+            </button>
+          </div>
+          {convertResult && (
+            <div style={{
+              marginTop: '10px', padding: '8px', borderRadius: '6px',
+              background: convertResult.ok === false ? '#FFEBEE' : '#E8F5E9',
+              fontSize: '12px',
+            }}>
+              {convertResult.ok === false ? (
+                <span style={{ color: '#C62828' }}>{convertResult.error}</span>
+              ) : (
+                <>
+                  <strong>{convertResult.dry_run ? 'Dry run' : 'Conversion'}:</strong>{' '}
+                  processed {convertResult.summary?.processed}, created{' '}
+                  {convertResult.summary?.created_count}, skipped{' '}
+                  {convertResult.summary?.skipped_count}, errors{' '}
+                  {convertResult.summary?.error_count}.
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {accounts.length === 0 ? (
+        <div className="dashboard-card" style={{ padding: '24px', textAlign: 'center', color: '#666' }}>
+          No bank accounts yet. {parked && parked.still_unlinked > 0 && 'Use the converter above to create them from the parked AppFolio GLs.'}
+        </div>
+      ) : (
+        <div className="dashboard-card" style={{ padding: 0, overflow: 'hidden' }}>
+          <table className="properties-table" style={{ width: '100%' }}>
+            <thead>
+              <tr>
+                <th style={{ width: '70px' }}>Code</th>
+                <th>Display Name</th>
+                <th>Institution</th>
+                <th style={{ width: '100px' }}>Type</th>
+                <th style={{ width: '120px', textAlign: 'right' }}>Balance</th>
+                <th style={{ width: '110px' }}>Plaid</th>
+              </tr>
+            </thead>
+            <tbody>
+              {accounts.map((b) => (
+                <tr key={b.id}>
+                  <td style={{ fontFamily: 'monospace', fontWeight: 600 }}>{b.gl_code}</td>
+                  <td>
+                    {b.display_name}
+                    {b.is_trust && (
+                      <span style={{
+                        marginLeft: '6px', fontSize: '10px', color: '#fff',
+                        background: '#6A1B9A', padding: '1px 6px', borderRadius: '8px',
+                      }}>trust</span>
+                    )}
+                  </td>
+                  <td style={{ fontSize: '12px', color: '#666' }}>
+                    {b.institution_name || '—'}
+                    {b.account_last4 && <span style={{ fontFamily: 'monospace', marginLeft: '4px' }}>****{b.account_last4}</span>}
+                  </td>
+                  <td>
+                    <span style={{
+                      display: 'inline-block', padding: '2px 8px', borderRadius: '10px',
+                      background: b.account_type === 'credit_card' ? '#FFEBEE' : '#E3F2FD',
+                      color: b.account_type === 'credit_card' ? '#C62828' : '#1565C0',
+                      fontSize: '11px', fontWeight: 600,
+                    }}>
+                      {b.account_type}
+                    </span>
+                  </td>
+                  <td style={{ textAlign: 'right', fontFamily: 'monospace' }}>
+                    {formatCents(b.current_balance_cents)}
+                  </td>
+                  <td>
+                    <span style={{
+                      display: 'inline-block', padding: '2px 8px', borderRadius: '10px',
+                      background: b.plaid_status === 'linked' ? '#E8F5E9' :
+                                  b.plaid_status === 're_auth_required' ? '#FFF3E0' :
+                                  b.plaid_status === 'disconnected' ? '#FFEBEE' : '#F5F5F5',
+                      color: b.plaid_status === 'linked' ? '#2E7D32' :
+                             b.plaid_status === 're_auth_required' ? '#E65100' :
+                             b.plaid_status === 'disconnected' ? '#C62828' : '#666',
+                      fontSize: '11px', fontWeight: 600,
+                    }}>
+                      {b.plaid_status}
+                    </span>
+                    {b.plaid_status === 'linked' && (
+                      <SyncTransactionsButton token={token} bankAccountId={b.id} onTokenInvalid={onTokenInvalid} />
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Receivables tab ──────────────────────────────────────────────
+
+function ReceivablesTab({ token, onTokenInvalid }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [statusFilter, setStatusFilter] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const url = new URL('/api/admin/list-posted-charges', window.location.origin);
+      url.searchParams.set('secret', token);
+      if (statusFilter) url.searchParams.set('status', statusFilter);
+      const res = await fetch(url.toString());
+      if (res.status === 401) { onTokenInvalid(); return; }
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+      }
+      setData(await res.json());
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [token, statusFilter, onTokenInvalid]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <div style={{ padding: '24px', color: '#666' }}>Loading...</div>;
+  if (error) {
+    return (
+      <div className="dashboard-card" style={{ padding: '16px', background: '#FFEBEE', color: '#C62828' }}>
+        <strong>Failed to load:</strong> {error}
+      </div>
+    );
+  }
+  const charges = data?.charges || [];
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          style={{
+            padding: '8px 10px', border: '1px solid #ddd',
+            borderRadius: '6px', fontSize: '13px', background: 'white',
+          }}
+        >
+          <option value="">All non-voided</option>
+          <option value="open">Open</option>
+          <option value="partially_paid">Partially paid</option>
+          <option value="paid">Paid</option>
+          <option value="voided">Voided</option>
+        </select>
+        <button
+          type="button"
+          onClick={load}
+          className="btn-secondary"
+          style={{ padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+        >
+          <RefreshCw size={14} />
+          Refresh
+        </button>
       </div>
 
-      <div className="dashboard-card">
-        <div className="card-header">
-          <h3><CreditCard size={18} /> Outstanding Invoices</h3>
-        </div>
-        <div className="tenants-list">
-          {OUTSTANDING_INVOICES.map((inv) => (
-            <div key={inv.id} className="tenant-row" style={{ cursor: 'default' }}>
-              <div className="tenant-avatar" style={{
-                background: inv.status === 'overdue' ? '#C6282815' : '#E6510015',
-                color: inv.status === 'overdue' ? '#C62828' : '#E65100',
-              }}>
-                {inv.status === 'overdue' ? <AlertCircle size={22} /> : <CheckCircle2 size={22} />}
-              </div>
-              <div className="tenant-info">
-                <span className="tenant-name">{inv.tenant} · {inv.id}</span>
-                <div className="tenant-contact">
-                  <span className="tenant-contact-item">{inv.unit}</span>
-                  <span className="tenant-contact-item">
-                    {inv.daysLate > 0 ? `${inv.daysLate} days late` : 'Due today'}
-                  </span>
-                </div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontWeight: 700, color: '#1a1a1a' }}>{formatCurrency(inv.amount)}</div>
-                <span className={`unit-status ${inv.status === 'overdue' ? 'unit-vacant' : 'status-in_progress'}`}>
-                  {inv.status === 'overdue' ? 'Overdue' : 'Due'}
-                </span>
-              </div>
-            </div>
+      {data?.summary_by_status && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
+          {data.summary_by_status.map((s) => (
+            <Pill
+              key={s.status}
+              label={s.status}
+              value={`${s.count} (${formatCents(s.total_balance_cents)} owed)`}
+              bg={s.status === 'paid' ? '#E8F5E9' : s.status === 'voided' ? '#F5F5F5' : '#FFF3E0'}
+              fg={s.status === 'paid' ? '#2E7D32' : s.status === 'voided' ? '#888' : '#E65100'}
+            />
           ))}
         </div>
-      </div>
+      )}
+
+      {charges.length === 0 ? (
+        <div className="dashboard-card" style={{ padding: '24px', textAlign: 'center', color: '#666' }}>
+          No posted charges yet. Hit <code>/api/admin/ar-happy-path</code> to fire the smoke-test scheduled charge.
+        </div>
+      ) : (
+        <div className="dashboard-card" style={{ padding: 0, overflow: 'hidden' }}>
+          <table className="properties-table" style={{ width: '100%' }}>
+            <thead>
+              <tr>
+                <th>Due</th>
+                <th>Tenant</th>
+                <th>Lease</th>
+                <th>Type</th>
+                <th>Description</th>
+                <th style={{ textAlign: 'right' }}>Amount</th>
+                <th style={{ textAlign: 'right' }}>Balance</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {charges.map((c) => (
+                <tr key={c.id}>
+                  <td style={{ fontFamily: 'monospace', fontSize: '12px' }}>{c.due_date}</td>
+                  <td>{c.tenant_display || <span style={{ color: '#bbb' }}>—</span>}</td>
+                  <td style={{ fontFamily: 'monospace', fontSize: '12px' }}>{c.lease_number || '—'}</td>
+                  <td>{c.charge_type}</td>
+                  <td style={{ color: '#555', fontSize: '13px' }}>{c.description}</td>
+                  <td style={{ textAlign: 'right', fontFamily: 'monospace' }}>{formatCents(c.amount_cents)}</td>
+                  <td style={{
+                    textAlign: 'right', fontFamily: 'monospace',
+                    color: c.balance_cents === 0 ? '#999' : '#222',
+                  }}>
+                    {formatCents(c.balance_cents)}
+                  </td>
+                  <td>
+                    <span style={{
+                      display: 'inline-block', padding: '2px 8px', borderRadius: '10px',
+                      background: c.status === 'paid' ? '#E8F5E9' :
+                                  c.status === 'voided' ? '#F5F5F5' :
+                                  c.status === 'partially_paid' ? '#FFF3E0' : '#E3F2FD',
+                      color: c.status === 'paid' ? '#2E7D32' :
+                             c.status === 'voided' ? '#888' :
+                             c.status === 'partially_paid' ? '#E65100' : '#1565C0',
+                      fontSize: '11px', fontWeight: 600,
+                    }}>
+                      {c.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
+  );
+}
+
+// ── Journal Entries tab ──────────────────────────────────────────
+
+function JournalEntriesTab({ token, onTokenInvalid }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [expanded, setExpanded] = useState(new Set());
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const url = new URL('/api/admin/list-journal-entries', window.location.origin);
+      url.searchParams.set('secret', token);
+      url.searchParams.set('include_lines', 'true');
+      url.searchParams.set('limit', '100');
+      const res = await fetch(url.toString());
+      if (res.status === 401) { onTokenInvalid(); return; }
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+      }
+      setData(await res.json());
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [token, onTokenInvalid]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const toggle = (id) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  if (loading) return <div style={{ padding: '24px', color: '#666' }}>Loading...</div>;
+  if (error) {
+    return (
+      <div className="dashboard-card" style={{ padding: '16px', background: '#FFEBEE', color: '#C62828' }}>
+        <strong>Failed to load:</strong> {error}
+      </div>
+    );
+  }
+  const entries = data?.entries || [];
+
+  return (
+    <div>
+      <div style={{ marginBottom: '12px' }}>
+        <button
+          type="button"
+          onClick={load}
+          className="btn-secondary"
+          style={{ padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+        >
+          <RefreshCw size={14} />
+          Refresh
+        </button>
+        <span style={{ marginLeft: '8px', fontSize: '13px', color: '#666' }}>
+          {entries.length} most recent {entries.length === 100 ? '(limited)' : ''}
+        </span>
+      </div>
+
+      {entries.length === 0 ? (
+        <div className="dashboard-card" style={{ padding: '24px', textAlign: 'center', color: '#666' }}>
+          No journal entries yet.
+        </div>
+      ) : (
+        <div className="dashboard-card" style={{ padding: 0, overflow: 'hidden' }}>
+          <table className="properties-table" style={{ width: '100%' }}>
+            <thead>
+              <tr>
+                <th style={{ width: '50px' }}>#</th>
+                <th>Date</th>
+                <th>Type</th>
+                <th>Memo</th>
+                <th style={{ textAlign: 'right' }}>Total</th>
+                <th>Status</th>
+                <th>Lines</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((e) => {
+                const isExpanded = expanded.has(e.id);
+                return (
+                  <>
+                    <tr
+                      key={e.id}
+                      onClick={() => toggle(e.id)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <td style={{ fontFamily: 'monospace', fontWeight: 600 }}>{e.entry_number}</td>
+                      <td style={{ fontFamily: 'monospace', fontSize: '12px' }}>{e.entry_date}</td>
+                      <td style={{ fontSize: '12px' }}>{e.entry_type}</td>
+                      <td style={{ color: '#555', fontSize: '13px' }}>{e.memo || '—'}</td>
+                      <td style={{ textAlign: 'right', fontFamily: 'monospace' }}>
+                        {formatCents(e.total_debit_cents)}
+                      </td>
+                      <td>
+                        <span style={{
+                          display: 'inline-block', padding: '2px 8px', borderRadius: '10px',
+                          background: e.status === 'posted' ? '#E8F5E9' :
+                                      e.status === 'reversed' ? '#FFF3E0' : '#F5F5F5',
+                          color: e.status === 'posted' ? '#2E7D32' :
+                                 e.status === 'reversed' ? '#E65100' : '#888',
+                          fontSize: '11px', fontWeight: 600,
+                        }}>
+                          {e.status}
+                        </span>
+                      </td>
+                      <td style={{ fontSize: '12px', color: '#666' }}>
+                        {e.line_count} {isExpanded ? '▾' : '▸'}
+                      </td>
+                    </tr>
+                    {isExpanded && e.lines && (
+                      <tr key={`${e.id}-lines`}>
+                        <td colSpan="7" style={{ background: '#FAFAFA', padding: '0' }}>
+                          <table style={{ width: '100%' }}>
+                            <thead>
+                              <tr style={{ background: '#F0F0F0', fontSize: '11px' }}>
+                                <th style={{ padding: '4px 12px' }}>#</th>
+                                <th style={{ padding: '4px 12px' }}>GL</th>
+                                <th style={{ padding: '4px 12px' }}>Memo</th>
+                                <th style={{ padding: '4px 12px', textAlign: 'right' }}>Debit</th>
+                                <th style={{ padding: '4px 12px', textAlign: 'right' }}>Credit</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {e.lines.map((l) => (
+                                <tr key={l.id} style={{ fontSize: '12px' }}>
+                                  <td style={{ padding: '4px 12px', fontFamily: 'monospace', color: '#888' }}>{l.line_number}</td>
+                                  <td style={{ padding: '4px 12px', fontFamily: 'monospace' }}>
+                                    {l.gl_code} <span style={{ color: '#888' }}>· {l.gl_name}</span>
+                                  </td>
+                                  <td style={{ padding: '4px 12px', color: '#555' }}>{l.memo || '—'}</td>
+                                  <td style={{ padding: '4px 12px', textAlign: 'right', fontFamily: 'monospace' }}>
+                                    {l.debit_cents > 0 ? formatCents(l.debit_cents) : ''}
+                                  </td>
+                                  <td style={{ padding: '4px 12px', textAlign: 'right', fontFamily: 'monospace' }}>
+                                    {l.credit_cents > 0 ? formatCents(l.credit_cents) : ''}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Plaid link button ────────────────────────────────────────────
+
+function PlaidLinkButton({ token, onLinked, onTokenInvalid }) {
+  const [linkToken, setLinkToken] = useState(null);
+  const [error, setError] = useState(null);
+  const [linking, setLinking] = useState(false);
+  const [plaidUnavailable, setPlaidUnavailable] = useState(false);
+
+  // Fetch a Plaid Link token on demand.
+  const fetchLinkToken = useCallback(async () => {
+    try {
+      const url = new URL('/api/admin/plaid-link-token', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString());
+      if (res.status === 401) { onTokenInvalid(); return null; }
+      const json = await res.json();
+      if (!json.ok) {
+        if (json.error?.includes('not configured')) {
+          setPlaidUnavailable(true);
+        } else {
+          setError(json.error || 'failed to get link token');
+        }
+        return null;
+      }
+      setLinkToken(json.link_token);
+      return json.link_token;
+    } catch (err) {
+      setError(err.message || String(err));
+      return null;
+    }
+  }, [token, onTokenInvalid]);
+
+  const onPlaidSuccess = useCallback(async (public_token, metadata) => {
+    setLinking(true);
+    setError(null);
+    try {
+      const url = new URL('/api/admin/plaid-exchange-public-token', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ public_token, metadata }),
+      });
+      if (res.status === 401) { onTokenInvalid(); return; }
+      const json = await res.json();
+      if (!json.ok) {
+        setError(json.error || 'exchange failed');
+        return;
+      }
+      onLinked();
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setLinking(false);
+      setLinkToken(null);
+    }
+  }, [token, onLinked, onTokenInvalid]);
+
+  const { open, ready } = usePlaidLink({
+    token: linkToken,
+    onSuccess: onPlaidSuccess,
+    onExit: () => setLinkToken(null),
+  });
+
+  // Auto-open Plaid Link as soon as we receive a token.
+  useEffect(() => {
+    if (linkToken && ready) open();
+  }, [linkToken, ready, open]);
+
+  const onClick = async () => {
+    setError(null);
+    if (linkToken) { open(); return; }
+    await fetchLinkToken();
+  };
+
+  if (plaidUnavailable) {
+    return (
+      <div className="dashboard-card" style={{
+        padding: '12px', marginBottom: '12px',
+        background: '#FFF8E1', borderLeft: '4px solid #E65100',
+        fontSize: '13px', color: '#555',
+      }}>
+        <strong>Plaid not configured.</strong> Set <code>PLAID_CLIENT_ID</code>, <code>PLAID_SECRET</code>, <code>PLAID_ENV</code>, and <code>BREEZE_ENCRYPTION_KEY</code> in Vercel env vars to enable linking. Sandbox mode is fine for testing.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginBottom: '12px' }}>
+      <button
+        type="button"
+        className="btn-primary"
+        onClick={onClick}
+        disabled={linking}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: '6px',
+          padding: '8px 14px',
+        }}
+      >
+        <Link2 size={14} />
+        {linking ? 'Saving…' : 'Link a bank with Plaid'}
+      </button>
+      {error && (
+        <span style={{ marginLeft: '12px', color: '#C62828', fontSize: '12px' }}>
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ── Per-row sync button ──────────────────────────────────────────
+
+function SyncTransactionsButton({ token, bankAccountId, onTokenInvalid }) {
+  const [syncing, setSyncing] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const onClick = async () => {
+    setSyncing(true);
+    setResult(null);
+    try {
+      const url = new URL('/api/admin/plaid-sync-transactions', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bank_account_id: bankAccountId }),
+      });
+      if (res.status === 401) { onTokenInvalid(); return; }
+      const json = await res.json();
+      if (!json.ok) {
+        setResult({ error: json.error });
+        return;
+      }
+      const summary = json.synced?.[0];
+      setResult({
+        added: summary?.added ?? 0,
+        inserted: summary?.inserted_count ?? 0,
+      });
+    } catch (err) {
+      setResult({ error: err.message || String(err) });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  return (
+    <span style={{ marginLeft: '6px' }}>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={syncing}
+        title="Pull latest transactions from Plaid"
+        style={{
+          padding: '2px 8px', fontSize: '10px',
+          border: '1px solid #ddd', borderRadius: '8px',
+          background: 'white', cursor: 'pointer',
+          display: 'inline-flex', alignItems: 'center', gap: '2px',
+        }}
+      >
+        <Download size={9} />
+        {syncing ? 'syncing…' : 'sync'}
+      </button>
+      {result && (
+        <span style={{ marginLeft: '4px', fontSize: '10px', color: result.error ? '#C62828' : '#666' }}>
+          {result.error || `+${result.inserted}`}
+        </span>
+      )}
+    </span>
   );
 }

@@ -85,6 +85,41 @@
       "when": 1762819200000,
       "tag": "0011_human_tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1762905600000,
+      "tag": "0012_issue_gl_mappings",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1778486400000,
+      "tag": "0013_accounting_gl_core",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1778572800000,
+      "tag": "0014_accounting_ar",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1778659200000,
+      "tag": "0015_accounting_banking",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1778745600000,
+      "tag": "0016_plaid_secrets",
+      "breakpoints": true
     }
   ]
 }

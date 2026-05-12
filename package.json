@@ -19,9 +19,11 @@
     "drizzle-orm": "^0.36.4",
     "jose": "^5.9.6",
     "lucide-react": "^1.8.0",
+    "plaid": "^28.0.0",
     "postgres": "^3.4.5",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "react-plaid-link": "^4.0.1",
     "web-push": "^3.6.7",
     "zod": "^4.3.6"
   },
@@ -39,4 +41,3 @@
     "vite": "^8.0.4"
   }
 }
-
