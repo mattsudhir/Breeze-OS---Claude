@@ -3,7 +3,7 @@ import {
   MessageSquare, LayoutDashboard, Building2, Users, FileText,
   DollarSign, Wrench, BarChart3, Settings, HelpCircle, LogOut,
   ChevronLeft, ChevronRight, ChevronDown, CheckSquare, Workflow, Database,
-  Calendar,
+  Calendar, Mail, Stamp, Scale, AtSign,
 } from 'lucide-react';
 import BreezeLogo from './BreezeLogo';
 
@@ -19,6 +19,10 @@ const NAV_ITEMS = [
   { id: 'maintenance', icon: Wrench, label: 'Maintenance', section: 'manage' },
   { id: 'tasks', icon: CheckSquare, label: 'Tasks', section: 'manage' },
   { id: 'workflows', icon: Workflow, label: 'Workflows', section: 'manage' },
+  { id: 'mail-slapper', icon: Mail, label: 'Mail Slapper', section: 'manage', expandable: true },
+  { id: 'mail-snail', icon: Stamp, label: 'Snail Mail', section: 'manage', child: true, parentId: 'mail-slapper' },
+  { id: 'mail-registered-agent', icon: Scale, label: 'Registered Agent', section: 'manage', child: true, parentId: 'mail-slapper' },
+  { id: 'mail-email', icon: AtSign, label: 'Email', section: 'manage', child: true, parentId: 'mail-slapper' },
   { id: 'reports', icon: BarChart3, label: 'Reports', section: 'manage' },
   { id: 'property-directory', icon: Database, label: 'Property Directory', section: 'manage' },
   { id: 'divider2', type: 'divider' },
