@@ -55,16 +55,25 @@ Two existing tables (Stage 3 migration 0008) plus one column
 
 ```json
 {
-  "merchant_keywords": ["walmart", "wal-mart"],
-  "exclude_keywords":  ["return", "refund"],
-  "amount_range_cents": [1000, 50000],
-  "bank_account_ids":  ["uuid-of-bank-1", "uuid-of-bank-2"]
+  "merchant_keywords":    ["walmart", "wal-mart"],
+  "tenant_name_keywords": ["smith", "doe"],
+  "exclude_keywords":     ["return", "refund"],
+  "amount_range_cents":   [1000, 50000],
+  "bank_account_ids":     ["uuid-of-bank-1", "uuid-of-bank-2"]
 }
 ```
 
-All four fields are optional. Match logic is AND across fields, OR
-within `merchant_keywords` (any one keyword matching qualifies).
-`exclude_keywords` short-circuits to non-match.
+All five fields are optional. Match logic is AND across fields, OR
+within `merchant_keywords` / `tenant_name_keywords` (any one keyword
+across the union qualifies). `exclude_keywords` short-circuits to
+non-match.
+
+`tenant_name_keywords` exists for the shared-bank routing problem: a
+landlord with a pooled operating account receives ACH from many
+tenants. A rule with `tenant_name_keywords: ["smith"]` routes
+"SMITH J ACH PAYMENT" to rent income; other transactions on the same
+bank stay untagged. The rule generator extracts surnames from
+user hints like "rent from John Smith".
 
 `target` jsonb:
 
