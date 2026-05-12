@@ -1,946 +1,792 @@
-import { useState, useEffect } from 'react';
+// Maintenance tickets — native to Breeze OS's own data model.
+//
+// Reads from /api/admin/list-maintenance-tickets and mutates via
+// upsert-maintenance-ticket / add-ticket-comment / list-ticket-comments.
+// Was previously a passthrough to AppFolio / RentManager; now operates
+// on our own tickets table so the page works without any external PMS
+// connection.
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Wrench, Search, CheckCircle2, AlertCircle, Loader2, WifiOff,
-  ChevronLeft, Building2, Home, Clock, Calendar, User as UserIcon,
-  AlertTriangle, Zap, Droplet, Flame, Wind, Lightbulb, Hammer,
-  Edit3, Save, X,
+  Wrench, Search, CheckCircle2, AlertCircle, Loader2,
+  ChevronDown, ChevronRight, Plus, RefreshCw, Building2, Home,
+  Clock, AlertTriangle, MessageSquare, Send, Lock, X,
 } from 'lucide-react';
-// Data fetches (work orders / properties / units) and the edit
-// write (updateWorkOrder) go through the backend-aware
-// services/data.js. Filter metadata (categories / statuses /
-// priorities) and the detail re-fetch (getWorkOrder) are still
-// RM-only — AppFolio has its own enums but we haven't surfaced
-// them as tools, and AppFolio's docs don't expose a per-record
-// /work_orders/{id} GET (filtered list query is the v0 pattern,
-// which we don't need for the form's pre-fill since the row in
-// memory is already current).
-import { getWorkOrders, getProperties, getUnits, updateWorkOrder } from '../services/data';
-import {
-  getWorkOrderCategories, getWorkOrderStatuses, getWorkOrderPriorities,
-  getWorkOrder,
-} from '../services/rentManager';
-import { useDataSource } from '../contexts/DataSourceContext.jsx';
-import FollowButton from './FollowButton.jsx';
+import MigrationFixButton from './MigrationFixButton.jsx';
 
-// ── Helpers ──────────────────────────────────────────────────────
-
-// AppFolio enum values for the edit-form dropdowns (per AppFolio
-// Database API v0 docs). Hardcoded because there's no AppFolio tool
-// equivalent to RM's getWorkOrderStatuses / getWorkOrderPriorities.
-// AppFolio's documented enums are stable; if they grow we update
-// this list.
-const APPFOLIO_WO_STATUSES = [
-  'New',
-  'Assigned',
-  'Scheduled',
-  'Waiting',
-  'Estimate Requested',
-  'Estimated',
-  'Work Completed',
-  'Completed',
-  'Canceled',
-];
-const APPFOLIO_WO_PRIORITIES = ['Urgent', 'Normal', 'Low'];
-
-function normalizeCategory(raw) {
-  const c = (raw || '').toLowerCase();
-  if (!c) return 'other';
-  if (c.includes('hvac') || c.includes('heat') || c.includes('air') || c.includes('cool')) return 'hvac';
-  if (c.includes('plumb') || c.includes('leak') || c.includes('water') || c.includes('pipe') || c.includes('toilet') || c.includes('faucet') || c.includes('drain')) return 'plumbing';
-  if (c.includes('electric') || c.includes('outlet') || c.includes('wiring') || c.includes('light')) return 'electrical';
-  if (c.includes('appliance') || c.includes('refrig') || c.includes('dishwash') || c.includes('dryer') || c.includes('washer') || c.includes('oven') || c.includes('stove')) return 'appliance';
-  if (c.includes('pest') || c.includes('roach') || c.includes('rodent') || c.includes('bug')) return 'pest';
-  if (c.includes('lock') || c.includes('key') || c.includes('door')) return 'locks';
-  if (c.includes('general') || c.includes('maint')) return 'general';
-  return 'other';
-}
-
-const CATEGORY_META = {
-  hvac:       { label: 'HVAC',       icon: Wind,       color: '#1565C0' },
-  plumbing:   { label: 'Plumbing',   icon: Droplet,    color: '#00838F' },
-  electrical: { label: 'Electrical', icon: Zap,        color: '#F9A825' },
-  appliance:  { label: 'Appliance',  icon: Lightbulb,  color: '#6A1B9A' },
-  pest:       { label: 'Pest',       icon: Flame,      color: '#C62828' },
-  locks:      { label: 'Locks',      icon: Hammer,     color: '#546E7A' },
-  general:    { label: 'General',    icon: Wrench,     color: '#2E7D32' },
-  other:      { label: 'Other',      icon: Wrench,     color: '#757575' },
+const CLERK_ENABLED = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
+const ADMIN_TOKEN_KEY = 'breeze.admin.token';
+const getToken = () => {
+  if (CLERK_ENABLED) return 'clerk';
+  try { return sessionStorage.getItem(ADMIN_TOKEN_KEY) || ''; } catch { return ''; }
 };
 
-function priorityRank(p) {
-  const pl = (p || '').toLowerCase();
-  if (pl.includes('emerg') || pl.includes('urgent')) return 4;
-  if (pl.includes('high')) return 3;
-  if (pl.includes('med') || pl.includes('normal')) return 2;
-  if (pl.includes('low')) return 1;
-  return 2;
-}
-
-function priorityMeta(p) {
-  const r = priorityRank(p);
-  if (r === 4) return { label: 'Urgent', className: 'priority-urgent', icon: AlertTriangle };
-  if (r === 3) return { label: 'High',   className: 'priority-high',   icon: AlertCircle };
-  if (r === 2) return { label: 'Medium', className: 'priority-medium', icon: Clock };
-  return { label: 'Low', className: 'priority-low', icon: Clock };
-}
-
-// Resolve a work order's status using RM's source-of-truth fields:
-// - isClosed (boolean on the work order itself)
-// - statusLookup map (from /ServiceManagerStatuses, has each status's
-//   own IsClosed flag and human name)
-// Returns a consistent { label, className, isOpen } shape for the UI.
-function statusMetaFromWo(wo, statusLookup) {
-  const lookupEntry =
-    wo.statusId != null ? statusLookup?.[wo.statusId] : null;
-
-  // RM's IsClosed on the work order is authoritative. Fall back to the
-  // lookup entry's IsClosed flag, then to keyword matching on the name.
-  const isClosed =
-    wo.isClosed === true ||
-    lookupEntry?.isClosed === true ||
-    /complete|closed|resolved/i.test(wo.status || '');
-
-  // Display name: prefer the RM status name verbatim so we never
-  // mis-label a custom status.
-  const label = lookupEntry?.name || wo.status || (isClosed ? 'Closed' : 'Open');
-
-  // Color/tone — three buckets: closed, in-progress-ish, plain open
-  let className = 'status-open';
-  if (isClosed) {
-    className = 'status-completed';
-  } else if (/progress|working|active/i.test(label)) {
-    className = 'status-in_progress';
-  } else if (/assign|scheduled/i.test(label)) {
-    className = 'status-assigned';
-  } else if (/hold|wait/i.test(label)) {
-    className = 'status-onhold';
+async function fetchJson(path, { method = 'GET', body, query } = {}) {
+  const url = new URL(path, window.location.origin);
+  url.searchParams.set('secret', getToken());
+  if (query) for (const [k, v] of Object.entries(query)) {
+    if (v != null && v !== '') url.searchParams.set(k, v);
   }
-
-  return { label, className, isOpen: !isClosed };
+  const init = { method };
+  if (body) {
+    init.headers = { 'Content-Type': 'application/json' };
+    init.body = JSON.stringify(body);
+  }
+  const res = await fetch(url.toString(), init);
+  const text = await res.text();
+  let json;
+  try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }
+  if (!res.ok || json.ok === false) {
+    throw new Error(json.error || `HTTP ${res.status}: ${text.slice(0, 200)}`);
+  }
+  return json;
 }
 
-function formatDate(d) {
+const STATUS_META = {
+  new:              { label: 'New',              color: '#1976D2', bg: '#E3F2FD' },
+  triage:           { label: 'Triage',           color: '#6A1B9A', bg: '#F3E5F5' },
+  assigned:         { label: 'Assigned',         color: '#00838F', bg: '#E0F7FA' },
+  in_progress:      { label: 'In progress',      color: '#F9A825', bg: '#FFF8E1' },
+  awaiting_parts:   { label: 'Awaiting parts',   color: '#EF6C00', bg: '#FFF3E0' },
+  awaiting_tenant:  { label: 'Awaiting tenant',  color: '#EF6C00', bg: '#FFF3E0' },
+  completed:        { label: 'Completed',        color: '#2E7D32', bg: '#E8F5E9' },
+  cancelled:        { label: 'Cancelled',        color: '#757575', bg: '#ECEFF1' },
+};
+
+const PRIORITY_META = {
+  emergency: { label: 'Emergency', color: '#C62828', bg: '#FFEBEE', icon: AlertTriangle, rank: 4 },
+  high:      { label: 'High',      color: '#EF6C00', bg: '#FFF3E0', icon: AlertCircle,   rank: 3 },
+  medium:    { label: 'Medium',    color: '#1565C0', bg: '#E3F2FD', icon: Clock,         rank: 2 },
+  low:       { label: 'Low',       color: '#546E7A', bg: '#ECEFF1', icon: Clock,         rank: 1 },
+};
+
+const STATUS_ORDER = [
+  'new', 'triage', 'assigned', 'in_progress',
+  'awaiting_parts', 'awaiting_tenant', 'completed', 'cancelled',
+];
+const PRIORITY_ORDER = ['emergency', 'high', 'medium', 'low'];
+
+const AUTHOR_TYPE_META = {
+  staff:  { label: 'Staff',  color: '#1565C0' },
+  tenant: { label: 'Tenant', color: '#2E7D32' },
+  vendor: { label: 'Vendor', color: '#6A1B9A' },
+  ai:     { label: 'AI',     color: '#00838F' },
+  system: { label: 'System', color: '#757575' },
+};
+
+function fmtDate(d) {
   if (!d) return '—';
   try {
-    return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-  } catch {
-    return d;
-  }
+    return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch { return d; }
 }
 
-// ── Detail view ──────────────────────────────────────────────────
-
-function WorkOrderDetail({
-  workOrder, categories, statuses, priorities, statusLookup,
-  onBack, onUpdated,
-}) {
-  const { dataSource, sources } = useDataSource();
-  const sourceLabel = sources.find((s) => s.value === dataSource)?.label || dataSource;
-  const catKey = normalizeCategory(workOrder.category);
-  const cat = CATEGORY_META[catKey];
-  const CatIcon = cat.icon;
-  const pri = priorityMeta(workOrder.priority);
-  const PriIcon = pri.icon;
-  const status = statusMetaFromWo(workOrder, statusLookup);
-
-  const [editing, setEditing] = useState(false);
-  const [editLoading, setEditLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState(null);
-  const [saveOk, setSaveOk] = useState(false);
-  const [form, setForm] = useState({});
-
-  const startEdit = async () => {
-    setSaveError(null);
-    setSaveOk(false);
-    setEditing(true);
-    setEditLoading(true);
-
-    // Seed from the list-view record first for an instant UI. Both
-    // backend shapes are populated; the form's render and save use
-    // whichever pair the active backend cares about (priorityId/
-    // statusId for RM, priority/status string enums for AppFolio).
-    setForm({
-      summary: workOrder.summary || '',
-      description: workOrder.description || '',
-      priorityId: workOrder.priorityId || '',
-      categoryId: workOrder.categoryId || '',
-      statusId: workOrder.statusId || '',
-      priority: workOrder.priority || '',
-      status: workOrder.status || '',
+function fmtDateTime(d) {
+  if (!d) return '';
+  try {
+    return new Date(d).toLocaleString('en-US', {
+      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
     });
+  } catch { return d; }
+}
 
-    // RM-only: re-fetch the WO record so the form reflects current
-    // server state rather than whatever was cached in the list. The
-    // AppFolio path skips this — list_work_orders' row is already
-    // the canonical source for everything we render in the form.
-    if (dataSource === 'appfolio') {
-      setEditLoading(false);
-      return;
-    }
-    try {
-      const fresh = await getWorkOrder(workOrder.id);
-      if (fresh) {
-        setForm({
-          summary: fresh.Title || fresh.Summary || fresh.Description || '',
-          description: fresh.Description || '',
-          priorityId: fresh.PriorityID || '',
-          categoryId: fresh.CategoryID || '',
-          statusId: fresh.StatusID || '',
-        });
-      }
-    } catch {
-      // fall through — form already has list-view values as a fallback
-    } finally {
-      setEditLoading(false);
-    }
-  };
+function StatusBadge({ status }) {
+  const m = STATUS_META[status] || { label: status, color: '#555', bg: '#eee' };
+  return (
+    <span style={{
+      display: 'inline-block', padding: '3px 9px', borderRadius: 999,
+      fontSize: 11, fontWeight: 600, color: m.color, background: m.bg,
+    }}>{m.label}</span>
+  );
+}
 
-  const cancelEdit = () => {
-    setEditing(false);
-    setSaveError(null);
-  };
+function PriorityBadge({ priority }) {
+  const m = PRIORITY_META[priority] || PRIORITY_META.medium;
+  const Icon = m.icon;
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 4,
+      padding: '3px 9px', borderRadius: 999,
+      fontSize: 11, fontWeight: 600, color: m.color, background: m.bg,
+    }}>
+      <Icon size={11} /> {m.label}
+    </span>
+  );
+}
 
-  const save = async () => {
+// ── New ticket form ──────────────────────────────────────────────
+
+function NewTicketForm({ properties, vendors, onCreated, onCancel }) {
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [propertyId, setPropertyId] = useState('');
+  const [vendorId, setVendorId] = useState('');
+  const [priority, setPriority] = useState('medium');
+  const [category, setCategory] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!title.trim()) { setErr('Title is required'); return; }
     setSaving(true);
-    setSaveError(null);
+    setErr(null);
     try {
-      // services/data.updateWorkOrder accepts a normalised patch and
-      // translates per backend. RM expects numeric IDs (priorityId
-      // etc.); AppFolio expects string enums (priority='Urgent',
-      // status='Completed'). The form populates whichever field
-      // shape the active backend uses.
-      const patch = {
-        summary: form.summary,
-        description: form.description,
-      };
-      if (dataSource === 'appfolio') {
-        if (form.priority) patch.priority = form.priority;
-        if (form.status) patch.status = form.status;
-      } else {
-        if (form.priorityId) patch.priorityId = Number(form.priorityId);
-        if (form.categoryId) patch.categoryId = Number(form.categoryId);
-        if (form.statusId) patch.statusId = Number(form.statusId);
-      }
-
-      const result = await updateWorkOrder(dataSource, workOrder.id, patch);
-      if (!result.ok) {
-        throw new Error(result.error || 'Update failed');
-      }
-      setEditing(false);
-      setSaveOk(true);
-      if (onUpdated) onUpdated(workOrder.id);
-      setTimeout(() => setSaveOk(false), 3000);
-    } catch (err) {
-      setSaveError(err.message || 'Failed to save changes');
+      await fetchJson('/api/admin/upsert-maintenance-ticket', {
+        method: 'POST',
+        body: {
+          title: title.trim(),
+          description: description.trim() || undefined,
+          property_id: propertyId || undefined,
+          vendor_id: vendorId || undefined,
+          priority,
+          category: category.trim() || undefined,
+        },
+      });
+      onCreated();
+    } catch (e2) {
+      setErr(e2.message);
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="properties-page">
-      <button className="back-link" onClick={onBack}>
-        <ChevronLeft size={14} /> Back to all maintenance
-      </button>
+    <form onSubmit={submit} style={{
+      background: '#fff', border: '1px solid #e0e0e0', borderRadius: 12,
+      padding: 18, marginBottom: 16, display: 'grid', gap: 12,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h3 style={{ margin: 0, fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Plus size={16} /> New maintenance ticket
+        </h3>
+        <button type="button" onClick={onCancel} style={{
+          background: 'transparent', border: 'none', cursor: 'pointer', color: '#666',
+        }}><X size={18} /></button>
+      </div>
 
-      <div className="tenant-detail-topbar">
-        <div className="property-detail-header" style={{ flex: 1 }}>
-          <div
-            className="wo-detail-icon"
-            style={{ background: cat.color + '15', color: cat.color }}
+      <label style={{ display: 'grid', gap: 4 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#555' }}>Title</span>
+        <input
+          type="text"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="e.g., Kitchen sink leaking"
+          style={{ padding: '8px 10px', border: '1px solid #ccc', borderRadius: 6, fontSize: 14 }}
+        />
+      </label>
+
+      <label style={{ display: 'grid', gap: 4 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#555' }}>Description</span>
+        <textarea
+          rows={3}
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="What's going on?"
+          style={{ padding: '8px 10px', border: '1px solid #ccc', borderRadius: 6, fontSize: 14, fontFamily: 'inherit' }}
+        />
+      </label>
+
+      <div style={{
+        display: 'grid', gap: 12,
+        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+      }}>
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#555' }}>Property</span>
+          <select
+            value={propertyId}
+            onChange={(e) => setPropertyId(e.target.value)}
+            style={{ padding: '8px 10px', border: '1px solid #ccc', borderRadius: 6, fontSize: 14 }}
           >
-            <CatIcon size={28} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <h2>{workOrder.summary || `Work Order ${workOrder.id}`}</h2>
-            <p className="property-detail-address">
-              <span className={`unit-status ${status.className}`}>{status.label}</span>
-              <span className={`unit-status ${pri.className}`} style={{ marginLeft: 6 }}>
-                <PriIcon size={12} /> {pri.label}
-              </span>
-              <span className="tenant-display-id">#{workOrder.displayId || workOrder.id}</span>
-            </p>
-          </div>
+            <option value="">—</option>
+            {properties.map((p) => (
+              <option key={p.id} value={p.id}>{p.display_name}</option>
+            ))}
+          </select>
+        </label>
+
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#555' }}>Vendor</span>
+          <select
+            value={vendorId}
+            onChange={(e) => setVendorId(e.target.value)}
+            style={{ padding: '8px 10px', border: '1px solid #ccc', borderRadius: 6, fontSize: 14 }}
+          >
+            <option value="">— (unassigned)</option>
+            {vendors.map((v) => (
+              <option key={v.id} value={v.id}>{v.display_name}</option>
+            ))}
+          </select>
+        </label>
+
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#555' }}>Priority</span>
+          <select
+            value={priority}
+            onChange={(e) => setPriority(e.target.value)}
+            style={{ padding: '8px 10px', border: '1px solid #ccc', borderRadius: 6, fontSize: 14 }}
+          >
+            {PRIORITY_ORDER.map((p) => (
+              <option key={p} value={p}>{PRIORITY_META[p].label}</option>
+            ))}
+          </select>
+        </label>
+
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#555' }}>Category</span>
+          <input
+            type="text"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            placeholder="plumbing, HVAC, …"
+            style={{ padding: '8px 10px', border: '1px solid #ccc', borderRadius: 6, fontSize: 14 }}
+          />
+        </label>
+      </div>
+
+      {err && (
+        <div style={{
+          padding: '8px 12px', background: '#FFEBEE', border: '1px solid #FFCDD2',
+          borderRadius: 6, color: '#C62828', fontSize: 13,
+        }}>{err}</div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <button type="button" onClick={onCancel} disabled={saving} style={{
+          padding: '8px 14px', border: '1px solid #ccc', background: '#fff',
+          borderRadius: 6, cursor: 'pointer', fontSize: 13,
+        }}>Cancel</button>
+        <button type="submit" disabled={saving} style={{
+          padding: '8px 14px', border: 'none', background: '#1976D2', color: '#fff',
+          borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+        }}>
+          {saving ? <><Loader2 size={14} className="spin" /> Creating…</> : <><Plus size={14} /> Create ticket</>}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// ── Detail panel (comments timeline + controls) ──────────────────
+
+function TicketDetail({ ticket, vendors, onChanged }) {
+  const [comments, setComments] = useState(null);
+  const [loadingComments, setLoadingComments] = useState(true);
+  const [commentBody, setCommentBody] = useState('');
+  const [isInternal, setIsInternal] = useState(false);
+  const [posting, setPosting] = useState(false);
+  const [postErr, setPostErr] = useState(null);
+  const [updating, setUpdating] = useState(false);
+
+  const loadComments = useCallback(async () => {
+    setLoadingComments(true);
+    try {
+      const j = await fetchJson('/api/admin/list-ticket-comments', { query: { ticket_id: ticket.id } });
+      setComments(j.comments || []);
+    } catch (e) {
+      setPostErr(e.message);
+    } finally {
+      setLoadingComments(false);
+    }
+  }, [ticket.id]);
+
+  useEffect(() => { loadComments(); }, [loadComments]);
+
+  const postComment = async (e) => {
+    e.preventDefault();
+    if (!commentBody.trim()) return;
+    setPosting(true);
+    setPostErr(null);
+    try {
+      await fetchJson('/api/admin/add-ticket-comment', {
+        method: 'POST',
+        body: { ticket_id: ticket.id, body: commentBody.trim(), is_internal: isInternal },
+      });
+      setCommentBody('');
+      setIsInternal(false);
+      await loadComments();
+      onChanged();
+    } catch (e2) {
+      setPostErr(e2.message);
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  const updateField = async (patch) => {
+    setUpdating(true);
+    try {
+      await fetchJson('/api/admin/upsert-maintenance-ticket', {
+        method: 'POST',
+        body: { id: ticket.id, ...patch },
+      });
+      onChanged();
+    } catch (e) {
+      setPostErr(e.message);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  return (
+    <div style={{
+      padding: 16, background: '#fafbfc', borderTop: '1px solid #e8eaed',
+      display: 'grid', gap: 14,
+    }}>
+      {/* Controls row */}
+      <div style={{
+        display: 'grid', gap: 10,
+        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+      }}>
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: '#666', textTransform: 'uppercase' }}>Status</span>
+          <select
+            value={ticket.status}
+            disabled={updating}
+            onChange={(e) => updateField({ status: e.target.value })}
+            style={{ padding: '6px 8px', border: '1px solid #ccc', borderRadius: 6, fontSize: 13 }}
+          >
+            {STATUS_ORDER.map((s) => (
+              <option key={s} value={s}>{STATUS_META[s].label}</option>
+            ))}
+          </select>
+        </label>
+
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: '#666', textTransform: 'uppercase' }}>Priority</span>
+          <select
+            value={ticket.priority}
+            disabled={updating}
+            onChange={(e) => updateField({ priority: e.target.value })}
+            style={{ padding: '6px 8px', border: '1px solid #ccc', borderRadius: 6, fontSize: 13 }}
+          >
+            {PRIORITY_ORDER.map((p) => (
+              <option key={p} value={p}>{PRIORITY_META[p].label}</option>
+            ))}
+          </select>
+        </label>
+
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: '#666', textTransform: 'uppercase' }}>Vendor</span>
+          <select
+            value={ticket.vendor_id || ''}
+            disabled={updating}
+            onChange={(e) => updateField({ vendor_id: e.target.value || null })}
+            style={{ padding: '6px 8px', border: '1px solid #ccc', borderRadius: 6, fontSize: 13 }}
+          >
+            <option value="">— (unassigned)</option>
+            {vendors.map((v) => (
+              <option key={v.id} value={v.id}>{v.display_name}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {ticket.description && (
+        <div style={{
+          padding: 12, background: '#fff', borderRadius: 8, border: '1px solid #e0e0e0',
+          fontSize: 13, color: '#333', whiteSpace: 'pre-wrap',
+        }}>{ticket.description}</div>
+      )}
+
+      {/* Timeline */}
+      <div>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8,
+          fontSize: 12, fontWeight: 600, color: '#666', textTransform: 'uppercase',
+        }}>
+          <MessageSquare size={14} /> Timeline
         </div>
-        {!editing && (
-          <button className="btn-primary tenant-edit-btn" onClick={startEdit}>
-            <Edit3 size={14} /> Edit
-          </button>
+
+        {loadingComments && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#888', fontSize: 13 }}>
+            <Loader2 size={14} className="spin" /> Loading comments…
+          </div>
+        )}
+
+        {!loadingComments && comments && comments.length === 0 && (
+          <div style={{ color: '#888', fontSize: 13, fontStyle: 'italic' }}>
+            No comments yet. Add the first one below.
+          </div>
+        )}
+
+        {!loadingComments && comments && comments.length > 0 && (
+          <div style={{ display: 'grid', gap: 8 }}>
+            {comments.map((c) => {
+              const meta = AUTHOR_TYPE_META[c.author_type] || AUTHOR_TYPE_META.system;
+              return (
+                <div key={c.id} style={{
+                  padding: 10,
+                  background: c.is_internal ? '#FFFDE7' : '#fff',
+                  border: `1px solid ${c.is_internal ? '#FFF59D' : '#e0e0e0'}`,
+                  borderLeft: `3px solid ${meta.color}`,
+                  borderRadius: 6,
+                }}>
+                  <div style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    fontSize: 11, color: '#666', marginBottom: 4,
+                  }}>
+                    <span>
+                      <strong style={{ color: meta.color }}>{meta.label}</strong>
+                      {c.author_display && <span> · {c.author_display}</span>}
+                      {c.is_internal && (
+                        <span style={{ marginLeft: 6, color: '#F57C00', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                          <Lock size={10} /> internal
+                        </span>
+                      )}
+                    </span>
+                    <span>{fmtDateTime(c.created_at)}</span>
+                  </div>
+                  <div style={{ fontSize: 13, color: '#222', whiteSpace: 'pre-wrap' }}>{c.body}</div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
 
-      {saveOk && (
-        <div className="save-toast save-toast-ok">
-          <CheckCircle2 size={14} /> Changes saved to {sourceLabel}
+      {/* Comment composer */}
+      <form onSubmit={postComment} style={{
+        display: 'grid', gap: 6, padding: 10, background: '#fff',
+        border: '1px solid #e0e0e0', borderRadius: 8,
+      }}>
+        <textarea
+          rows={2}
+          value={commentBody}
+          onChange={(e) => setCommentBody(e.target.value)}
+          placeholder="Add a comment…"
+          style={{
+            padding: '6px 8px', border: '1px solid #d0d0d0', borderRadius: 4,
+            fontSize: 13, fontFamily: 'inherit', resize: 'vertical',
+          }}
+        />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#555' }}>
+            <input
+              type="checkbox"
+              checked={isInternal}
+              onChange={(e) => setIsInternal(e.target.checked)}
+            />
+            <Lock size={12} /> Internal note (staff-only)
+          </label>
+          <button type="submit" disabled={posting || !commentBody.trim()} style={{
+            padding: '6px 12px', border: 'none', background: '#1976D2', color: '#fff',
+            borderRadius: 6, cursor: posting || !commentBody.trim() ? 'not-allowed' : 'pointer',
+            opacity: posting || !commentBody.trim() ? 0.6 : 1,
+            fontSize: 12, fontWeight: 600,
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+          }}>
+            {posting ? <><Loader2 size={12} className="spin" /> Posting…</> : <><Send size={12} /> Post</>}
+          </button>
         </div>
-      )}
-      {saveError && (
-        <div className="save-toast save-toast-err">
-          <AlertCircle size={14} /> {saveError}
-        </div>
-      )}
+      </form>
 
-      {editing ? (
-        <div className="dashboard-card">
-          <div className="card-header">
-            <h3>
-              <Edit3 size={18} /> Edit Work Order
-              {editLoading && (
-                <span style={{ marginLeft: 10, fontSize: 12, color: '#6c757d', fontWeight: 400 }}>
-                  <Loader2 size={12} className="spin" /> refreshing...
-                </span>
-              )}
-            </h3>
-          </div>
-          <form
-            className="tenant-edit-form"
-            onSubmit={(e) => { e.preventDefault(); save(); }}
-          >
-            <label>
-              <span>Summary</span>
-              <input
-                type="text"
-                value={form.summary}
-                onChange={(e) => setForm({ ...form, summary: e.target.value })}
-              />
-            </label>
-
-            <label>
-              <span>Description</span>
-              <textarea
-                rows={4}
-                value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-              />
-            </label>
-
-            <div className="form-row">
-              <label>
-                <span>Priority</span>
-                {dataSource === 'appfolio' ? (
-                  <select
-                    value={form.priority}
-                    onChange={(e) => setForm({ ...form, priority: e.target.value })}
-                  >
-                    <option value="">—</option>
-                    {APPFOLIO_WO_PRIORITIES.map((p) => (
-                      <option key={p} value={p}>{p}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <select
-                    value={form.priorityId}
-                    onChange={(e) => setForm({ ...form, priorityId: e.target.value })}
-                  >
-                    <option value="">—</option>
-                    {priorities.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                )}
-              </label>
-
-              <label>
-                <span>Category</span>
-                {dataSource === 'appfolio' ? (
-                  // AppFolio doesn't have a categories endpoint that
-                  // matches RM's. The work-order row's VendorTrade
-                  // is the closest concept, but it's free-form on
-                  // AppFolio and not meaningfully editable from this
-                  // form. Render disabled with a hint.
-                  <input
-                    type="text"
-                    value={workOrder.categoryName || ''}
-                    disabled
-                    title="Category isn't editable from Breeze OS when AppFolio is the active source."
-                  />
-                ) : (
-                  <select
-                    value={form.categoryId}
-                    onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
-                  >
-                    <option value="">—</option>
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
-                )}
-              </label>
-            </div>
-
-            <label>
-              <span>Status</span>
-              {dataSource === 'appfolio' ? (
-                <select
-                  value={form.status}
-                  onChange={(e) => setForm({ ...form, status: e.target.value })}
-                >
-                  <option value="">—</option>
-                  {APPFOLIO_WO_STATUSES.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-              ) : (
-                <select
-                  value={form.statusId}
-                  onChange={(e) => setForm({ ...form, statusId: e.target.value })}
-                >
-                  <option value="">—</option>
-                  {statuses.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-              )}
-            </label>
-
-            <div className="form-actions">
-              <button type="button" className="btn-secondary" onClick={cancelEdit} disabled={saving}>
-                <X size={14} /> Cancel
-              </button>
-              <button type="submit" className="btn-primary" disabled={saving}>
-                {saving
-                  ? <><Loader2 size={14} className="spin" /> Saving...</>
-                  : <><Save size={14} /> Save Changes</>}
-              </button>
-            </div>
-          </form>
-        </div>
-      ) : (
-        <>
-          <div className="dashboard-card">
-            <div className="card-header">
-              <h3><Wrench size={18} /> Work Order Details</h3>
-            </div>
-            <div className="tenant-detail-list">
-              <DetailRow icon={CatIcon} label="Category" value={workOrder.category || cat.label} />
-              <DetailRow
-                icon={Building2}
-                label="Property"
-                value={workOrder.propertyName || (workOrder.propertyId ? `Property #${workOrder.propertyId}` : '—')}
-              />
-              <DetailRow
-                icon={Home}
-                label="Unit"
-                value={workOrder.unitName || (workOrder.unitId ? `Unit #${workOrder.unitId}` : '—')}
-              />
-              <DetailRow icon={UserIcon} label="Assigned to" value={workOrder.assignedTo || '—'} />
-              <DetailRow icon={Calendar} label="Created" value={formatDate(workOrder.createdDate)} />
-              <DetailRow icon={Calendar} label="Scheduled" value={formatDate(workOrder.scheduledDate)} />
-              {workOrder.completedDate && (
-                <DetailRow icon={CheckCircle2} label="Completed" value={formatDate(workOrder.completedDate)} />
-              )}
-            </div>
-          </div>
-
-          {workOrder.description && workOrder.description !== workOrder.summary && (
-            <div className="dashboard-card">
-              <div className="card-header">
-                <h3><Wrench size={18} /> Description</h3>
-              </div>
-              <p className="tenant-notes">{workOrder.description}</p>
-            </div>
-          )}
-        </>
+      {postErr && (
+        <div style={{
+          padding: '8px 12px', background: '#FFEBEE', border: '1px solid #FFCDD2',
+          borderRadius: 6, color: '#C62828', fontSize: 12,
+        }}>{postErr}</div>
       )}
     </div>
   );
 }
 
-function DetailRow({ icon: Icon, label, value }) {
+// ── Ticket row ──────────────────────────────────────────────────
+
+function TicketRow({ ticket, vendors, expanded, onToggle, onChanged }) {
   return (
-    <div className="tenant-detail-row">
-      <div className="tenant-detail-icon"><Icon size={18} /></div>
-      <div className="tenant-detail-info">
-        <span className="tenant-detail-label">{label}</span>
-        <span className="tenant-detail-value">{value}</span>
+    <div style={{
+      background: '#fff', border: '1px solid #e0e0e0', borderRadius: 10,
+      marginBottom: 8, overflow: 'hidden',
+    }}>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onToggle}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } }}
+        style={{
+          padding: '12px 14px', cursor: 'pointer', display: 'flex',
+          alignItems: 'center', gap: 12,
+        }}
+      >
+        <div style={{ color: '#888' }}>
+          {expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: '#222', marginBottom: 3 }}>{ticket.title}</div>
+          <div style={{
+            display: 'flex', flexWrap: 'wrap', gap: 10,
+            fontSize: 12, color: '#666',
+          }}>
+            {ticket.property_name && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                <Building2 size={11} /> {ticket.property_name}
+              </span>
+            )}
+            {ticket.unit_name && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                <Home size={11} /> {ticket.unit_name}
+              </span>
+            )}
+            {ticket.vendor_name && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                <Wrench size={11} /> {ticket.vendor_name}
+              </span>
+            )}
+            {ticket.category && <span>· {ticket.category}</span>}
+            <span>· reported {fmtDate(ticket.reported_at)}</span>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+          <PriorityBadge priority={ticket.priority} />
+          <StatusBadge status={ticket.status} />
+        </div>
       </div>
+      {expanded && (
+        <TicketDetail ticket={ticket} vendors={vendors} onChanged={onChanged} />
+      )}
+    </div>
+  );
+}
+
+// ── Stat card ───────────────────────────────────────────────────
+
+function StatCard({ label, value, accent }) {
+  return (
+    <div style={{
+      background: '#fff', border: '1px solid #e0e0e0', borderRadius: 10,
+      padding: '12px 14px',
+    }}>
+      <div style={{ fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', marginBottom: 4 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: accent || '#222' }}>{value}</div>
     </div>
   );
 }
 
 // ── Main page ───────────────────────────────────────────────────
 
-// Translate chat-supplied filters into the page's internal filter state.
-// Chat sends keys like { status, min_priority, category, search }.
-// min_priority is a keyword ("urgent" | "high" | "medium" | "low") but the
-// page now filters by numeric priorityId. We stash the keyword on a
-// separate field and resolve it to an ID in an effect once the lookup
-// has loaded.
-function normalizeInitialFilters(initial) {
-  if (!initial) return {};
-  return {
-    statusFilter:
-      initial.status === 'completed' ? 'completed'
-      : initial.status === 'all' ? 'all'
-      : initial.status === 'open' ? 'open'
-      : undefined,
-    categoryFilter: initial.category
-      ? normalizeCategory(initial.category)
-      : undefined,
-    priorityKeyword: initial.min_priority || undefined,
-    searchTerm: initial.search || undefined,
-  };
-}
-
-export default function MaintenancePage({ initialFilters }) {
-  const { dataSource, sources } = useDataSource();
-  const sourceLabel = sources.find((s) => s.value === dataSource)?.label || dataSource;
-  const applied = normalizeInitialFilters(initialFilters);
-
-  const [workOrders, setWorkOrders] = useState(null);
-  const [propertyMap, setPropertyMap] = useState({});
-  const [unitMap, setUnitMap] = useState({});
+export default function MaintenancePage() {
+  const [tickets, setTickets] = useState(null);
+  const [summary, setSummary] = useState([]);
+  const [properties, setProperties] = useState([]);
+  const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [isLive, setIsLive] = useState(false);
-  const [searchTerm, setSearchTerm] = useState(applied.searchTerm || '');
-  const [categoryFilter, setCategoryFilter] = useState(applied.categoryFilter || 'all');
-  const [statusFilter, setStatusFilter] = useState(applied.statusFilter || 'open');
+  const [error, setError] = useState(null);
+  const [statusFilter, setStatusFilter] = useState('open');
   const [priorityFilter, setPriorityFilter] = useState('all');
-  const [pendingPriorityKeyword, setPendingPriorityKeyword] = useState(
-    applied.priorityKeyword || null,
-  );
-  const [selectedId, setSelectedId] = useState(null);
+  const [search, setSearch] = useState('');
+  const [expandedId, setExpandedId] = useState(null);
+  const [showNew, setShowNew] = useState(false);
 
-  const [categoryLookup, setCategoryLookup] = useState({});
-  const [statusLookup, setStatusLookup] = useState({});
-  const [priorityLookup, setPriorityLookup] = useState({});
-  const [fetchFailed, setFetchFailed] = useState(false);
-  const [fetchError, setFetchError] = useState(null);
-  const [fetchMs, setFetchMs] = useState(null);
-  const [reloadTick, setReloadTick] = useState(0);
-
-  // When an initial chat filter specified a priority keyword like "urgent"
-  // but the priority lookup hadn't loaded yet, resolve it to the matching
-  // priorityId as soon as the lookup is populated.
-  useEffect(() => {
-    if (!pendingPriorityKeyword) return;
-    if (!priorityLookup || Object.keys(priorityLookup).length === 0) return;
-    const targetRank = priorityRank(pendingPriorityKeyword);
-    const match = Object.entries(priorityLookup).find(
-      ([, name]) => priorityRank(name) === targetRank,
-    );
-    if (match) {
-      setPriorityFilter(String(match[0]));
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [tjson, pjson, vjson] = await Promise.all([
+        fetchJson('/api/admin/list-maintenance-tickets', { query: { status: statusFilter } }),
+        fetchJson('/api/admin/list-properties-summary').catch(() => ({ properties: [] })),
+        fetchJson('/api/admin/list-vendors').catch(() => ({ vendors: [] })),
+      ]);
+      setTickets(tjson.tickets || []);
+      setSummary(tjson.summary_by_status || []);
+      setProperties(pjson.properties || []);
+      setVendors(vjson.vendors || []);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
     }
-    setPendingPriorityKeyword(null);
-  }, [pendingPriorityKeyword, priorityLookup]);
+  }, [statusFilter]);
 
-  // Critical path: fetch work orders AND priorities in parallel. Priorities
-  // must be loaded before the filter dropdown renders or we fall back to
-  // unreliable legacy string guessing.
-  useEffect(() => {
-    let cancelled = false;
-    async function fetchTickets() {
-      setLoading(true);
-      setFetchFailed(false);
-      setFetchError(null);
-      setFetchMs(null);
-      const startedAt = Date.now();
-      try {
-        // Priorities lookup is RM-only metadata. When AppFolio is the
-        // active source, skip the call (it would return unrelated RM
-        // priority IDs that don't match anything in our work orders)
-        // and let the page fall back to the inline priority strings.
-        const [woResult, prioritiesResult] = await Promise.allSettled([
-          getWorkOrders(dataSource, { status: 'all' }),
-          dataSource === 'appfolio'
-            ? Promise.resolve(null)
-            : getWorkOrderPriorities(),
-        ]);
-        if (cancelled) return;
-        setFetchMs(Date.now() - startedAt);
+  useEffect(() => { load(); }, [load]);
 
-        if (woResult.status === 'fulfilled' && woResult.value) {
-          setWorkOrders(woResult.value);
-          setIsLive(true);
-        } else {
-          setFetchFailed(true);
-          const err = woResult.status === 'rejected' ? woResult.reason : null;
-          setFetchError(err?.message || `Empty response from ${sourceLabel}`);
-        }
-
-        if (prioritiesResult.status === 'fulfilled' && prioritiesResult.value) {
-          const map = {};
-          prioritiesResult.value.forEach((p) => { map[p.id] = p.name; });
-          setPriorityLookup(map);
-        } else {
-          setPriorityLookup({});
-        }
-      } catch (err) {
-        if (cancelled) return;
-        setFetchMs(Date.now() - startedAt);
-        setFetchFailed(true);
-        setFetchError(err?.message || String(err));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+  const filtered = useMemo(() => {
+    let list = tickets || [];
+    if (priorityFilter !== 'all') list = list.filter((t) => t.priority === priorityFilter);
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      list = list.filter((t) =>
+        t.title?.toLowerCase().includes(q) ||
+        t.description?.toLowerCase().includes(q) ||
+        t.property_name?.toLowerCase().includes(q) ||
+        t.unit_name?.toLowerCase().includes(q) ||
+        t.vendor_name?.toLowerCase().includes(q) ||
+        t.category?.toLowerCase().includes(q),
+      );
     }
-    fetchTickets();
-    return () => { cancelled = true; };
-  }, [reloadTick, dataSource]);
-
-  // Phase two: the remaining lookups aren't on the critical path.
-  useEffect(() => {
-    if (!workOrders) return;
-    let cancelled = false;
-
-    async function fetchLookups() {
-      // Properties + units come from the backend-aware service.
-      // Categories + statuses are RM-only metadata; on AppFolio they
-      // resolve to empty lookups and the page falls back to inline
-      // labels and the work-order-row's own .status/.categoryName
-      // strings.
-      const steps = [
-        { fn: () => getProperties(dataSource), apply: (data) => {
-          const map = {};
-          data.forEach((p) => { map[p.id] = p.name; });
-          setPropertyMap(map);
-        }},
-        { fn: () => getUnits(dataSource), apply: (data) => {
-          const map = {};
-          data.forEach((u) => { map[u.id] = u.name; });
-          setUnitMap(map);
-        }},
-        { fn: dataSource === 'appfolio' ? null : getWorkOrderCategories, apply: (data) => {
-          const map = {};
-          data.forEach((c) => { map[c.id] = c.name; });
-          setCategoryLookup(map);
-        }},
-        { fn: dataSource === 'appfolio' ? null : getWorkOrderStatuses, apply: (data) => {
-          const map = {};
-          data.forEach((s) => { map[s.id] = s; });
-          setStatusLookup(map);
-        }},
-      ];
-
-      for (const step of steps) {
-        if (cancelled) return;
-        if (!step.fn) continue; // skipped step (e.g. RM-only on AppFolio)
-        try {
-          const data = await step.fn();
-          if (cancelled) return;
-          if (data) step.apply(data);
-        } catch {
-          // ignore individual lookup failures — the list is still usable
-        }
-      }
-    }
-    fetchLookups();
-    return () => { cancelled = true; };
-  }, [workOrders, dataSource]);
-
-  // Enrich work orders with names resolved client-side from lookup tables.
-  // RM's list endpoint returns both ID fields and legacy string fields (e.g.
-  // Priority / PriorityName) that can disagree with the canonical priorities
-  // table. The ID + lookup is the source of truth — never trust the string.
-  const enriched = workOrders
-    ? workOrders.map((w) => {
-        const resolvedCategory =
-          (w.categoryId != null ? categoryLookup[w.categoryId] : null) ||
-          w.categoryName || w.category || '';
-        const resolvedStatus =
-          (w.statusId != null ? statusLookup[w.statusId]?.name : null) ||
-          w.status || '';
-        const resolvedPriority =
-          (w.priorityId != null ? priorityLookup[w.priorityId] : null) ||
-          w.priority || '';
-
-        return {
-          ...w,
-          propertyName: propertyMap[w.propertyId] || '',
-          unitName: unitMap[w.unitId] || '',
-          category: resolvedCategory,
-          status: resolvedStatus,
-          priority: resolvedPriority,
-        };
-      })
-    : null;
-
-  if (loading) {
-    return (
-      <div className="properties-page">
-        <div className="loading-state">
-          <Loader2 size={28} className="spin" />
-          <span>Loading maintenance tickets from {sourceLabel}...</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (fetchFailed) {
-    return (
-      <div className="properties-page">
-        <div className="empty-state">
-          <WifiOff size={40} />
-          <h3>Couldn't reach {sourceLabel}</h3>
-          <p>The work order endpoint didn't respond successfully.</p>
-          {fetchError && (
-            <div style={{
-              marginTop: 12,
-              padding: '10px 14px',
-              background: '#FFEBEE',
-              border: '1px solid #FFCDD2',
-              borderRadius: 8,
-              color: '#C62828',
-              fontSize: 12,
-              fontFamily: 'monospace',
-              wordBreak: 'break-word',
-              textAlign: 'left',
-              maxWidth: 520,
-            }}>
-              <strong>Error:</strong> {fetchError}
-              {fetchMs != null && <div style={{ marginTop: 4 }}>Elapsed: {fetchMs}ms</div>}
-            </div>
-          )}
-          <button
-            className="btn-primary"
-            style={{ marginTop: 16 }}
-            onClick={() => setReloadTick((t) => t + 1)}
-          >
-            Retry
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (!enriched || enriched.length === 0) {
-    return (
-      <div className="properties-page">
-        <div className="empty-state">
-          <WifiOff size={40} />
-          <h3>No maintenance tickets found</h3>
-          <p>{sourceLabel} returned an empty list. There are no service orders on file.</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Detail view
-  if (selectedId) {
-    const wo = enriched.find((w) => w.id === selectedId);
-    if (!wo) {
-      setSelectedId(null);
-      return null;
-    }
-    const categoriesList = Object.entries(categoryLookup).map(([id, name]) => ({
-      id: Number(id), name,
-    }));
-    const statusesList = Object.entries(statusLookup).map(([id, s]) => ({
-      id: Number(id), name: s.name || s,
-    }));
-    const prioritiesList = Object.entries(priorityLookup).map(([id, name]) => ({
-      id: Number(id), name,
-    }));
-    return (
-      <WorkOrderDetail
-        workOrder={wo}
-        categories={categoriesList}
-        statuses={statusesList}
-        priorities={prioritiesList}
-        statusLookup={statusLookup}
-        onBack={() => setSelectedId(null)}
-        onUpdated={() => setReloadTick((t) => t + 1)}
-      />
-    );
-  }
-
-  // ── Counts used for filter chip labels ─────────────────────────
-  const categoryCounts = enriched.reduce((acc, w) => {
-    const k = normalizeCategory(w.category);
-    acc[k] = (acc[k] || 0) + 1;
-    return acc;
-  }, {});
-
-  const openCount = enriched.filter((w) => statusMetaFromWo(w, statusLookup).isOpen).length;
-  const completedCount = enriched.length - openCount;
-  const urgentOpenCount = enriched.filter(
-    (w) => statusMetaFromWo(w, statusLookup).isOpen && priorityRank(w.priority) >= 3,
-  ).length;
-
-  // ── Apply filters ──────────────────────────────────────────────
-  // Build a list of priorities from the lookup, ordered high → low by
-  // keyword severity so the dropdown reads naturally. Using priorityId as
-  // the filter key avoids all keyword-guessing on the legacy string field.
-  const priorityOptions = Object.entries(priorityLookup)
-    .map(([id, name]) => ({ id: Number(id), name, rank: priorityRank(name) }))
-    .sort((a, b) => b.rank - a.rank || a.name.localeCompare(b.name));
-
-  // Count tickets per priorityId
-  const priorityCountsById = enriched.reduce((acc, w) => {
-    if (w.priorityId != null) {
-      acc[w.priorityId] = (acc[w.priorityId] || 0) + 1;
-    }
-    return acc;
-  }, {});
-
-  const filtered = enriched
-    .filter((w) => {
-      if (categoryFilter !== 'all' && normalizeCategory(w.category) !== categoryFilter) return false;
-      const s = statusMetaFromWo(w, statusLookup);
-      if (statusFilter === 'open' && !s.isOpen) return false;
-      if (statusFilter === 'completed' && s.isOpen) return false;
-      if (priorityFilter !== 'all' && String(w.priorityId) !== String(priorityFilter)) return false;
-      if (searchTerm) {
-        const q = searchTerm.toLowerCase();
-        return (
-          (w.summary || '').toLowerCase().includes(q) ||
-          (w.description || '').toLowerCase().includes(q) ||
-          (w.propertyName || '').toLowerCase().includes(q) ||
-          (w.unitName || '').toLowerCase().includes(q) ||
-          (w.category || '').toLowerCase().includes(q)
-        );
-      }
-      return true;
-    })
-    // Sort open items by priority desc, then date desc
-    .sort((a, b) => {
-      const ap = priorityRank(a.priority);
-      const bp = priorityRank(b.priority);
-      if (ap !== bp) return bp - ap;
-      const ad = new Date(a.createdDate || 0).getTime();
-      const bd = new Date(b.createdDate || 0).getTime();
-      return bd - ad;
+    return list.slice().sort((a, b) => {
+      const ar = PRIORITY_META[a.priority]?.rank || 0;
+      const br = PRIORITY_META[b.priority]?.rank || 0;
+      if (ar !== br) return br - ar;
+      return new Date(b.reported_at).getTime() - new Date(a.reported_at).getTime();
     });
+  }, [tickets, priorityFilter, search]);
 
-  // Only show category chips that actually have items
-  const visibleCategories = Object.keys(CATEGORY_META).filter((k) => categoryCounts[k] > 0);
+  const counts = useMemo(() => {
+    const c = { total: 0, open: 0, urgent: 0, completed: 0 };
+    for (const s of summary) {
+      c.total += s.count;
+      if (s.status === 'completed') c.completed += s.count;
+      else if (s.status !== 'cancelled') c.open += s.count;
+    }
+    c.urgent = (tickets || []).filter(
+      (t) => t.status !== 'completed' && t.status !== 'cancelled'
+        && (t.priority === 'emergency' || t.priority === 'high'),
+    ).length;
+    return c;
+  }, [summary, tickets]);
+
+  if (loading && !tickets) {
+    return (
+      <div style={{ padding: 32, display: 'flex', alignItems: 'center', gap: 10, color: '#666' }}>
+        <Loader2 size={20} className="spin" /> Loading maintenance tickets…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={{ padding: 24 }}>
+        <div style={{
+          padding: 16, background: '#FFEBEE', border: '1px solid #FFCDD2',
+          borderRadius: 8, color: '#C62828',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontWeight: 600 }}>
+            <AlertCircle size={16} /> Failed to load maintenance tickets
+          </div>
+          <div style={{ fontSize: 13, fontFamily: 'monospace', wordBreak: 'break-word' }}>{error}</div>
+          <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
+            <button onClick={load} style={{
+              padding: '6px 12px', border: '1px solid #C62828', background: '#fff',
+              color: '#C62828', borderRadius: 6, cursor: 'pointer', fontSize: 12,
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+            }}><RefreshCw size={12} /> Retry</button>
+            <MigrationFixButton error={error} />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="properties-page">
-      <div className="data-source-banner" style={{
-        display: 'flex', alignItems: 'center', gap: '8px',
-        padding: '8px 14px', marginBottom: '16px', borderRadius: '8px',
-        fontSize: '12px', fontWeight: 600,
-        background: isLive ? '#E8F5E9' : '#FFF3E0',
-        color: isLive ? '#2E7D32' : '#E65100',
-        border: `1px solid ${isLive ? '#C8E6C9' : '#FFE0B2'}`,
+    <div style={{ padding: 24, maxWidth: 1200, margin: '0 auto' }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        marginBottom: 16, gap: 12, flexWrap: 'wrap',
       }}>
-        {isLive ? (
-          <><CheckCircle2 size={14} /> Live data — {enriched.length} tickets ({openCount} open, {urgentOpenCount} urgent/high)</>
-        ) : (
-          <><WifiOff size={14} /> Demo data</>
-        )}
+        <h1 style={{ margin: 0, fontSize: 22, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Wrench size={22} /> Maintenance
+        </h1>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={load} style={{
+            padding: '7px 12px', border: '1px solid #ccc', background: '#fff',
+            borderRadius: 6, cursor: 'pointer', fontSize: 13,
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+          }}><RefreshCw size={13} /> Refresh</button>
+          <button onClick={() => setShowNew((v) => !v)} style={{
+            padding: '7px 14px', border: 'none', background: '#1976D2', color: '#fff',
+            borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+          }}><Plus size={14} /> New ticket</button>
+        </div>
       </div>
 
-      {/* Compact filter row — three native selects */}
-      <div className="filter-select-row">
-        <label className="filter-select">
-          <span className="filter-select-label">Status</span>
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-            <option value="open">Open ({openCount})</option>
-            <option value="completed">Completed ({completedCount})</option>
-            <option value="all">All</option>
-          </select>
-        </label>
-
-        <label className="filter-select">
-          <span className="filter-select-label">Type</span>
-          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
-            <option value="all">All types</option>
-            {visibleCategories.map((key) => (
-              <option key={key} value={key}>
-                {CATEGORY_META[key].label} ({categoryCounts[key]})
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="filter-select">
-          <span className="filter-select-label">Priority</span>
-          <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)}>
-            <option value="all">Any</option>
-            {priorityOptions.map((p) => (
-              <option key={p.id} value={String(p.id)}>
-                {p.name} ({priorityCountsById[p.id] || 0})
-              </option>
-            ))}
-          </select>
-        </label>
+      {/* Stats */}
+      <div style={{
+        display: 'grid', gap: 10, marginBottom: 16,
+        gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+      }}>
+        <StatCard label="Open" value={counts.open} accent="#1976D2" />
+        <StatCard label="Urgent / High" value={counts.urgent} accent={counts.urgent > 0 ? '#C62828' : '#222'} />
+        <StatCard label="Completed" value={counts.completed} accent="#2E7D32" />
+        <StatCard label="Total" value={counts.total} />
       </div>
 
-      <div className="dashboard-search">
-        <Search size={18} />
-        <input
-          type="text"
-          placeholder="Search by description, property, unit, or type..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
+      {showNew && (
+        <NewTicketForm
+          properties={properties}
+          vendors={vendors}
+          onCancel={() => setShowNew(false)}
+          onCreated={() => { setShowNew(false); load(); }}
         />
+      )}
+
+      {/* Filters */}
+      <div style={{
+        display: 'grid', gap: 10, marginBottom: 14,
+        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+      }}>
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: '#666', textTransform: 'uppercase' }}>Status</span>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            style={{ padding: '7px 9px', border: '1px solid #ccc', borderRadius: 6, fontSize: 13 }}
+          >
+            <option value="open">Open (any active)</option>
+            <option value="all">All</option>
+            {STATUS_ORDER.map((s) => (
+              <option key={s} value={s}>{STATUS_META[s].label}</option>
+            ))}
+          </select>
+        </label>
+
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: '#666', textTransform: 'uppercase' }}>Priority</span>
+          <select
+            value={priorityFilter}
+            onChange={(e) => setPriorityFilter(e.target.value)}
+            style={{ padding: '7px 9px', border: '1px solid #ccc', borderRadius: 6, fontSize: 13 }}
+          >
+            <option value="all">Any</option>
+            {PRIORITY_ORDER.map((p) => (
+              <option key={p} value={p}>{PRIORITY_META[p].label}</option>
+            ))}
+          </select>
+        </label>
+
+        <label style={{ display: 'grid', gap: 4, gridColumn: 'span 2', minWidth: 0 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: '#666', textTransform: 'uppercase' }}>Search</span>
+          <div style={{ position: 'relative' }}>
+            <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#888' }} />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Title, property, unit, vendor…"
+              style={{ width: '100%', padding: '7px 9px 7px 30px', border: '1px solid #ccc', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }}
+            />
+          </div>
+        </label>
       </div>
 
-      <div className="tenants-list">
-        {filtered.map((w) => {
-          const catKey = normalizeCategory(w.category);
-          const cat = CATEGORY_META[catKey];
-          const CatIcon = cat.icon;
-          const pri = priorityMeta(w.priority);
-          const PriIcon = pri.icon;
-          const status = statusMetaFromWo(w, statusLookup);
-
-          return (
-            <div
-              key={w.id}
-              className="tenant-row"
-              role="button"
-              tabIndex={0}
-              onClick={() => setSelectedId(w.id)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  setSelectedId(w.id);
-                }
-              }}
-            >
-              <div
-                className="tenant-avatar"
-                style={{ background: cat.color + '15', color: cat.color }}
-              >
-                <CatIcon size={22} />
-              </div>
-              <div className="tenant-info">
-                <span className="tenant-name">{w.summary || `Work Order ${w.id}`}</span>
-                <div className="tenant-contact">
-                  {w.propertyName && (
-                    <span className="tenant-contact-item">
-                      <Building2 size={12} /> {w.propertyName}
-                    </span>
-                  )}
-                  {w.unitName && (
-                    <span className="tenant-contact-item">
-                      <Home size={12} /> {w.unitName}
-                    </span>
-                  )}
-                  {w.category && (
-                    <span className="tenant-contact-item">
-                      {w.category}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="wo-badges">
-                <span className={`unit-status ${pri.className}`}>
-                  <PriIcon size={12} />
-                  {pri.label}
-                </span>
-                <span className={`unit-status ${status.className}`}>
-                  {status.label}
-                </span>
-              </div>
-              <FollowButton
-                entityType="work_order"
-                entityId={w.id}
-                entityLabel={w.displayId || w.summary || `Work Order ${w.id}`}
-              />
-            </div>
-          );
-        })}
-      </div>
-
-      {filtered.length === 0 && (
-        <div className="empty-state">
-          <Search size={32} />
-          <p>No tickets match your filters</p>
+      {filtered.length === 0 ? (
+        <div style={{
+          padding: 32, textAlign: 'center', background: '#fafbfc',
+          border: '1px dashed #d0d0d0', borderRadius: 10, color: '#666',
+        }}>
+          <Wrench size={28} style={{ marginBottom: 8, opacity: 0.4 }} />
+          <div style={{ fontSize: 14 }}>
+            {tickets && tickets.length === 0
+              ? 'No tickets yet — click "New ticket" to create one.'
+              : 'No tickets match your filters.'}
+          </div>
+        </div>
+      ) : (
+        <div>
+          {filtered.map((t) => (
+            <TicketRow
+              key={t.id}
+              ticket={t}
+              vendors={vendors}
+              expanded={expandedId === t.id}
+              onToggle={() => setExpandedId((id) => (id === t.id ? null : t.id))}
+              onChanged={load}
+            />
+          ))}
         </div>
       )}
     </div>
