@@ -1472,6 +1472,8 @@ function ReconciliationTab({ token, onTokenInvalid }) {
         </p>
       </div>
 
+      <BookkeeperReviewSetting token={token} onTokenInvalid={onTokenInvalid} />
+
       <div style={{ marginBottom: '8px' }}>
         <button
           type="button"
@@ -4444,6 +4446,89 @@ function BankBillComEditor({ bankAccountId, currentValue, token, onTokenInvalid,
       >
         Cancel
       </button>
+    </div>
+  );
+}
+
+// ── Bookkeeper review location setting ──────────────────────────
+
+const BOOKKEEPER_LABELS = {
+  breeze:   'In Breeze OS — single review surface, AI-assisted',
+  bill_com: 'In Bill.com — Breeze writes GL coding back, bookkeeper signs off there',
+  both:     'Both — review in Breeze AND sync to Bill.com (transition mode)',
+};
+
+function BookkeeperReviewSetting({ token, onTokenInvalid }) {
+  const [value, setValue] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [savedHint, setSavedHint] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const url = new URL('/api/admin/bookkeeper-settings', window.location.origin);
+        url.searchParams.set('secret', token);
+        const res = await fetch(url.toString());
+        if (res.status === 401) { onTokenInvalid(); return; }
+        const json = await res.json();
+        setValue(json.bookkeeper_review_location || 'breeze');
+      } catch { /* fine */ }
+    })();
+  }, [token, onTokenInvalid]);
+
+  const save = async (next) => {
+    setSaving(true);
+    setSavedHint(false);
+    try {
+      const url = new URL('/api/admin/bookkeeper-settings', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookkeeper_review_location: next }),
+      });
+      if (res.status === 401) { onTokenInvalid(); return; }
+      const json = await res.json();
+      if (json.ok) {
+        setValue(next);
+        setSavedHint(true);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (value === null) return null;
+
+  return (
+    <div style={{
+      marginTop: 12, marginBottom: 12,
+      padding: '12px 14px',
+      background: 'linear-gradient(135deg, #FCE4EC 0%, #F8BBD0 100%)',
+      borderLeft: '3px solid #AD1457',
+      borderRadius: 8,
+    }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: '#AD1457', marginBottom: 4 }}>
+        Where does the bookkeeper review categorized charges?
+      </div>
+      <div style={{ fontSize: 11, color: '#555', marginBottom: 8 }}>
+        Breeze is the categorization surface either way. This decides where the final
+        sign-off happens — useful when bookkeepers prefer their existing Bill.com workflow.
+      </div>
+      <select
+        value={value}
+        onChange={(e) => save(e.target.value)}
+        disabled={saving}
+        style={{
+          padding: '7px 10px', border: '1px solid #BBB', borderRadius: 6,
+          fontSize: 13, width: '100%', maxWidth: 540, background: 'white',
+        }}
+      >
+        {Object.entries(BOOKKEEPER_LABELS).map(([k, v]) => (
+          <option key={k} value={k}>{v}</option>
+        ))}
+      </select>
+      {savedHint && <span style={{ marginLeft: 10, color: '#2E7D32', fontSize: 12 }}>Saved</span>}
     </div>
   );
 }
