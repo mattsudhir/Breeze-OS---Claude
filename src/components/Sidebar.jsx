@@ -4,6 +4,7 @@ import {
   DollarSign, Wrench, BarChart3, Settings, HelpCircle, LogOut,
   ChevronLeft, ChevronRight, ChevronDown, CheckSquare, Workflow, Database,
   Calendar, Mail, Stamp, Scale, AtSign, Bot, PhoneOutgoing, ShieldAlert,
+  Inbox as InboxIcon,
 } from 'lucide-react';
 import BreezeLogo from './BreezeLogo';
 
@@ -24,6 +25,7 @@ const NAV_ITEMS = [
   { id: 'mail-registered-agent', icon: Scale, label: 'Registered Agent', section: 'manage', child: true, parentId: 'mail-slapper' },
   { id: 'mail-email', icon: AtSign, label: 'Email', section: 'manage', child: true, parentId: 'mail-slapper' },
   { id: 'ai-agents', icon: Bot, label: 'AI Agents', section: 'manage', expandable: true, badge: 'AI' },
+  { id: 'ai-inbox', icon: InboxIcon, label: 'Inbox', section: 'manage', child: true, parentId: 'ai-agents' },
   { id: 'ai-approval-queue', icon: ShieldAlert, label: 'Approval Queue', section: 'manage', child: true, parentId: 'ai-agents' },
   { id: 'ai-switch-utilities', icon: PhoneOutgoing, label: 'Switch Utilities', section: 'manage', child: true, parentId: 'ai-agents' },
   { id: 'ai-payment-plan-followup', icon: PhoneOutgoing, label: 'Payment Plan Followup', section: 'manage', child: true, parentId: 'ai-agents' },
