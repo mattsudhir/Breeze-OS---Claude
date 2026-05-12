@@ -32,6 +32,7 @@ const SLUG_TO_VIEW = {
 };
 const VIEW_TO_SLUG = Object.fromEntries(Object.entries(SLUG_TO_VIEW).map(([k, v]) => [v, k]));
 const APPROVAL_QUEUE_VIEW = 'ai-approval-queue';
+const INBOX_VIEW = 'ai-inbox';
 
 const AUTONOMY_LABELS = {
   draft_only:             'Draft only — staff sends manually',
@@ -58,6 +59,7 @@ async function fetchJson(path, opts = {}) {
 
 export default function AiAgentsPage({ activeView, onNavigate }) {
   if (activeView === APPROVAL_QUEUE_VIEW) return <ApprovalQueuePage />;
+  if (activeView === INBOX_VIEW) return <InboxPage />;
   const slug = VIEW_TO_SLUG[activeView] || null;
   if (slug) return <WorkflowPage slug={slug} />;
   return <HubPage onNavigate={onNavigate} />;
@@ -686,6 +688,282 @@ function ApprovalQueuePage() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Inbox page ──────────────────────────────────────────────────
+
+function InboxPage() {
+  const [threads, setThreads] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [filter, setFilter] = useState('all');
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const url = new URL('/api/admin/list-message-threads', window.location.origin);
+      url.searchParams.set('secret', getToken());
+      if (filter !== 'all') url.searchParams.set('filter', filter);
+      const res = await fetch(url.toString());
+      const json = await res.json();
+      setThreads(json.threads || []);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  }, [filter]);
+
+  useEffect(() => { load(); }, [load]);
+  // Poll every 8s for updates.
+  useEffect(() => {
+    const t = setInterval(load, 8000);
+    return () => clearInterval(t);
+  }, [load]);
+
+  return (
+    <div style={{ display: 'flex', height: 'calc(100vh - 120px)' }}>
+      <aside style={{ width: 360, borderRight: '1px solid #EEE', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '12px 14px', borderBottom: '1px solid #EEE' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <strong style={{ fontSize: 14 }}>Inbox</strong>
+            <button
+              type="button" onClick={load}
+              style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#666' }}
+              title="Refresh"
+            >
+              <RefreshCw size={14} />
+            </button>
+          </div>
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            style={{ width: '100%', padding: '6px 8px', fontSize: 12, border: '1px solid #DDD', borderRadius: 5 }}
+          >
+            <option value="all">All threads</option>
+            <option value="unmatched">Unmatched inbound</option>
+            <option value="paused">Staff-paused</option>
+            <option value="active">AI active</option>
+          </select>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {loading && threads.length === 0 && (
+            <div style={{ padding: 16, color: '#999', fontSize: 13 }}>Loading…</div>
+          )}
+          {!loading && threads.length === 0 && (
+            <div style={{ padding: 16, color: '#999', fontSize: 13 }}>
+              No conversations yet. Inbound messages and outbound replies show up here.
+            </div>
+          )}
+          {threads.map((t) => (
+            <button
+              type="button"
+              key={t.id}
+              onClick={() => setSelectedId(t.id)}
+              style={{
+                width: '100%', textAlign: 'left', padding: '10px 12px',
+                border: 'none', borderBottom: '1px solid #F5F5F5',
+                background: selectedId === t.id ? '#F3E5F5' : 'white',
+                cursor: 'pointer',
+                display: 'flex', flexDirection: 'column', gap: 3,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontWeight: 600, fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {t.tenant_name || t.subject || '(unmatched)'}
+                </span>
+                {t.is_unmatched && (
+                  <span style={{ fontSize: 9, padding: '0 6px', borderRadius: 8, background: '#FFEBEE', color: '#C62828', fontWeight: 600 }}>
+                    UNMATCHED
+                  </span>
+                )}
+                {t.staff_paused && (
+                  <span style={{ fontSize: 9, padding: '0 6px', borderRadius: 8, background: '#FFF3E0', color: '#E65100', fontWeight: 600 }}>
+                    AI PAUSED
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 11, color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {t.last_direction === 'inbound' ? '↓ ' : '↑ '}
+                {t.last_body || '(no messages)'}
+              </div>
+              <div style={{ fontSize: 10, color: '#999' }}>
+                {t.last_message_at ? new Date(t.last_message_at).toLocaleString() : ''}
+                {' · '}{t.message_count} msg{t.message_count === 1 ? '' : 's'}
+              </div>
+            </button>
+          ))}
+        </div>
+      </aside>
+      <main style={{ flex: 1, overflowY: 'auto', padding: 0 }}>
+        {selectedId ? <ConversationPane threadId={selectedId} onChanged={load} /> : (
+          <div style={{ padding: 40, textAlign: 'center', color: '#999' }}>
+            Pick a thread on the left to view the conversation.
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+function ConversationPane({ threadId, onChanged }) {
+  const [data, setData] = useState(null);
+  const [composeText, setComposeText] = useState('');
+  const [sending, setSending] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const load = useCallback(async () => {
+    try {
+      const url = new URL('/api/admin/list-thread-messages', window.location.origin);
+      url.searchParams.set('secret', getToken());
+      url.searchParams.set('thread_id', threadId);
+      const res = await fetch(url.toString());
+      const json = await res.json();
+      setData(json);
+    } catch (e) {
+      console.error(e);
+    }
+  }, [threadId]);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t);
+  }, [load]);
+
+  const togglePause = async () => {
+    const next = !data?.thread?.staff_paused;
+    await fetchJson('/api/admin/pause-thread', {
+      method: 'POST',
+      body: { thread_id: threadId, paused: next },
+    });
+    load();
+    onChanged();
+  };
+
+  const send = async () => {
+    if (!composeText.trim()) return;
+    setSending(true);
+    setErr(null);
+    try {
+      const lastInbound = (data?.messages || []).filter((m) => m.direction === 'inbound').slice(-1)[0];
+      const to = lastInbound?.from_address;
+      if (!to) {
+        setErr('No tenant number known on this thread. Match the inbound sender first.');
+        return;
+      }
+      const res = await fetch(
+        `/api/messages/send-sms?secret=${getToken()}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tenant_id: data.thread.tenant_id,
+            to,
+            body: composeText.trim(),
+          }),
+        },
+      );
+      const json = await res.json();
+      if (!json.ok) { setErr(json.error); return; }
+      setComposeText('');
+      load();
+      onChanged();
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (!data) return <div style={{ padding: 24, color: '#999' }}>Loading…</div>;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid #EEE', background: '#FAFAFA' }}>
+        <div style={{ fontWeight: 600 }}>{data.thread.subject || 'Conversation'}</div>
+        <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>
+          {data.thread.tenant_id ? `Tenant ${data.thread.tenant_id.slice(0, 8)}…` : 'Unmatched'}
+          {' · '}{data.messages.length} messages
+        </div>
+        <div style={{ marginTop: 6 }}>
+          <button
+            type="button"
+            onClick={togglePause}
+            style={{
+              padding: '4px 10px', fontSize: 11, borderRadius: 5,
+              border: `1px solid ${data.thread.staff_paused ? '#E65100' : '#666'}`,
+              background: data.thread.staff_paused ? '#FFF3E0' : 'white',
+              color: data.thread.staff_paused ? '#E65100' : '#666',
+              cursor: 'pointer',
+            }}
+          >
+            {data.thread.staff_paused ? 'AI paused — resume' : 'Pause AI on this thread'}
+          </button>
+        </div>
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', background: 'white' }}>
+        {data.messages.map((m) => {
+          const isInbound = m.direction === 'inbound';
+          return (
+            <div
+              key={m.id}
+              style={{
+                display: 'flex',
+                justifyContent: isInbound ? 'flex-start' : 'flex-end',
+                marginBottom: 10,
+              }}
+            >
+              <div style={{
+                maxWidth: '70%',
+                padding: '8px 12px',
+                borderRadius: 12,
+                background: isInbound ? '#F0F0F0' : '#E3F2FD',
+                color: '#222',
+                fontSize: 13,
+                lineHeight: 1.4,
+              }}>
+                <div>{m.body}</div>
+                <div style={{ fontSize: 10, color: '#888', marginTop: 4 }}>
+                  {isInbound ? `from ${m.from_address}` : `to ${m.to_address}`}
+                  {' · '}{m.status}
+                  {' · '}{new Date(m.created_at).toLocaleString()}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ padding: 12, borderTop: '1px solid #EEE', background: '#FAFAFA' }}>
+        {err && (
+          <div style={{ marginBottom: 8, padding: '6px 10px', background: '#FFEBEE', color: '#C62828', fontSize: 12, borderRadius: 5 }}>
+            {err}
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <textarea
+            value={composeText}
+            onChange={(e) => setComposeText(e.target.value)}
+            placeholder="Type a reply…"
+            rows={2}
+            style={{ flex: 1, padding: 8, border: '1px solid #CCC', borderRadius: 6, fontSize: 13, fontFamily: 'inherit', resize: 'vertical' }}
+          />
+          <button
+            type="button"
+            onClick={send}
+            disabled={sending || !composeText.trim()}
+            style={{
+              padding: '8px 16px', background: sending || !composeText.trim() ? '#BBB' : '#6A1B9A',
+              color: 'white', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: 13,
+              cursor: sending || !composeText.trim() ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {sending ? 'Sending…' : 'Send'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

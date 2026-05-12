@@ -104,6 +104,7 @@ function App() {
     }
     if (
       activeView === 'ai-agents' ||
+      activeView === 'ai-inbox' ||
       activeView === 'ai-approval-queue' ||
       activeView === 'ai-switch-utilities' ||
       activeView === 'ai-payment-plan-followup'
