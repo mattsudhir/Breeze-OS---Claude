@@ -370,23 +370,59 @@ function ChartOfAccountsTab({ token, onTokenInvalid }) {
 
       {!loading && !error && filtered.length > 0 && (
         <div className="dashboard-card" style={{ padding: 0, overflow: 'hidden' }}>
-          <table className="properties-table" style={{ width: '100%' }}>
-            <thead>
-              <tr>
-                <th style={{ width: '70px' }}>Code</th>
-                <th>Name</th>
-                <th style={{ width: '100px' }}>Type</th>
-                <th style={{ width: '120px' }}>Subtype</th>
-                <th style={{ width: '80px', textAlign: 'right' }}>Postings</th>
-                <th>Tags</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((a) => (
-                <AccountRow key={a.id} account={a} />
-              ))}
-            </tbody>
-          </table>
+          <style>{`
+            .coa-table-wrap { max-height: calc(100vh - 320px); overflow: auto; }
+            .coa-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+            .coa-table thead th {
+              position: sticky; top: 0; z-index: 2;
+              background: #FAFAFA; padding: 10px 12px;
+              border-bottom: 1px solid #E0E0E0;
+              font-size: 12px; color: #555; text-align: left;
+              font-weight: 600;
+            }
+            .coa-table tbody td {
+              padding: 8px 12px; border-bottom: 1px solid #F0F0F0;
+              font-size: 13px; vertical-align: middle;
+            }
+            .coa-row-asset     { border-left: 3px solid #1565C0; }
+            .coa-row-liability { border-left: 3px solid #E65100; }
+            .coa-row-equity    { border-left: 3px solid #6A1B9A; }
+            .coa-row-income    { border-left: 3px solid #2E7D32; }
+            .coa-row-expense   { border-left: 3px solid #C62828; }
+            .coa-row-child td:first-child {
+              padding-left: 28px;
+              position: relative;
+            }
+            .coa-row-child td:first-child::before {
+              content: '└';
+              position: absolute; left: 12px; top: 8px;
+              color: #BBB; font-size: 12px; font-family: monospace;
+            }
+            .coa-postings-zero { color: #BBB; }
+            .coa-postings-nonzero { color: #1A1A1A; font-weight: 600; }
+            @media (max-width: 720px) {
+              .coa-col-subtype, .coa-col-tags { display: none; }
+            }
+          `}</style>
+          <div className="coa-table-wrap">
+            <table className="coa-table">
+              <thead>
+                <tr>
+                  <th style={{ width: '70px' }}>Code</th>
+                  <th>Name</th>
+                  <th style={{ width: '100px' }}>Type</th>
+                  <th className="coa-col-subtype" style={{ width: '140px' }}>Subtype</th>
+                  <th style={{ width: '80px', textAlign: 'right' }}>Postings</th>
+                  <th className="coa-col-tags">Tags</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((a) => (
+                  <AccountRow key={a.id} account={a} />
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
@@ -395,10 +431,13 @@ function ChartOfAccountsTab({ token, onTokenInvalid }) {
 
 function AccountRow({ account }) {
   const tone = ACCOUNT_TYPE_COLORS[account.account_type] || { bg: '#eee', fg: '#333' };
-  const indent = account.parent_code ? '20px' : '0';
+  const rowClass = [
+    `coa-row-${account.account_type}`,
+    account.parent_code ? 'coa-row-child' : '',
+  ].filter(Boolean).join(' ');
   return (
-    <tr style={{ opacity: account.is_active ? 1 : 0.55 }}>
-      <td style={{ fontFamily: 'monospace', fontWeight: 600, paddingLeft: indent }}>
+    <tr className={rowClass} style={{ opacity: account.is_active ? 1 : 0.55 }}>
+      <td style={{ fontFamily: 'monospace', fontWeight: 600 }}>
         {account.code}
       </td>
       <td>
@@ -430,13 +469,16 @@ function AccountRow({ account }) {
           {account.account_type}
         </span>
       </td>
-      <td style={{ fontSize: '12px', color: '#666' }}>
+      <td className="coa-col-subtype" style={{ fontSize: '12px', color: '#666' }}>
         {account.account_subtype || '—'}
       </td>
-      <td style={{ textAlign: 'right', color: account.posting_count > 0 ? '#222' : '#aaa' }}>
+      <td
+        style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}
+        className={account.posting_count > 0 ? 'coa-postings-nonzero' : 'coa-postings-zero'}
+      >
         {account.posting_count}
       </td>
-      <td>
+      <td className="coa-col-tags">
         {Object.keys(account.tags || {}).length === 0 ? (
           <span style={{ color: '#bbb', fontSize: '12px' }}>—</span>
         ) : (
