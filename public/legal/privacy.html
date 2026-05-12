@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Privacy Policy — Breeze OS</title>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      max-width: 760px;
+      margin: 40px auto;
+      padding: 0 20px 80px;
+      line-height: 1.55;
+      color: #222;
+    }
+    h1 { font-size: 28px; margin-bottom: 6px; }
+    h2 { font-size: 18px; margin-top: 28px; }
+    .updated { color: #666; font-size: 13px; margin-bottom: 20px; }
+    code { background: #f3f3f3; padding: 1px 4px; border-radius: 3px; font-size: 90%; }
+    a { color: #1565C0; }
+    ul { padding-left: 22px; }
+    li { margin: 4px 0; }
+  </style>
+</head>
+<body>
+  <h1>Breeze OS Privacy Policy</h1>
+  <p class="updated">Last updated: 2026-05-12</p>
+
+  <p>
+    Breeze OS ("we", "us") provides accounting and property-management
+    software for owners of residential rental property. This policy
+    describes what data we collect, how we use it, and the third-party
+    service providers we share it with.
+  </p>
+
+  <h2>Information we collect</h2>
+  <ul>
+    <li>
+      <strong>Account information</strong> — name, email, organization
+      name, and authentication credentials supplied when you create or
+      sign into an account.
+    </li>
+    <li>
+      <strong>Property and tenant records</strong> — addresses, lease
+      terms, contact details for tenants and vendors, that you enter or
+      import from your prior property-management system.
+    </li>
+    <li>
+      <strong>Financial data</strong> — chart of accounts, journal
+      entries, bank transactions retrieved via Plaid, and other
+      bookkeeping records you create or sync into the platform.
+    </li>
+  </ul>
+
+  <h2>How we use your information</h2>
+  <ul>
+    <li>Operate the application: accounting, reporting, reconciliation.</li>
+    <li>Improve and secure the service: error monitoring, abuse prevention.</li>
+    <li>
+      Send service notifications (e.g. authentication required for a
+      linked bank). We do not use your data for advertising.
+    </li>
+  </ul>
+
+  <h2>Third-party service providers</h2>
+
+  <p>
+    We share information with the following service providers only to
+    the extent necessary to deliver the service:
+  </p>
+
+  <ul>
+    <li>
+      <strong>Plaid Inc.</strong> — We use Plaid to connect to your
+      financial institutions, retrieve account information, and pull
+      transaction history. When you link an account, Plaid collects
+      your bank credentials directly (we never see them) and provides
+      us with an access token plus the account, balance, and
+      transaction data you have authorized. Plaid's handling of this
+      data is governed by Plaid's own privacy policy
+      (<a href="https://plaid.com/legal/#end-user-privacy-policy" target="_blank" rel="noopener">plaid.com/legal</a>).
+      You may revoke Plaid's access at any time via your Plaid Portal
+      or by removing the linked account in Breeze OS.
+    </li>
+    <li>
+      <strong>Anthropic, PBC</strong> — We send transaction descriptions
+      and your one-line categorization hints to Anthropic's Claude API
+      so the platform can generate reconciliation rules. We do not send
+      account numbers, routing numbers, or personally identifying tenant
+      data.
+    </li>
+    <li>
+      <strong>Vercel Inc.</strong> — Hosts the application and its
+      database in the United States.
+    </li>
+    <li>
+      <strong>AppFolio</strong> — If you choose to import data from
+      AppFolio, we authenticate to AppFolio with credentials you provide
+      and pull the specific property records you authorize.
+    </li>
+  </ul>
+
+  <h2>Data storage and security</h2>
+  <ul>
+    <li>
+      Financial access tokens (Plaid access tokens, AppFolio credentials)
+      are encrypted at rest using AES-256-GCM with a per-deployment
+      encryption key.
+    </li>
+    <li>
+      All traffic between your browser, our servers, and our
+      service providers is encrypted in transit via TLS 1.2+.
+    </li>
+    <li>
+      Database backups follow our hosting provider's standard
+      retention schedule.
+    </li>
+  </ul>
+
+  <h2>Data retention</h2>
+  <p>
+    We retain financial records for as long as your account is active
+    plus the period required to satisfy your accounting, tax, and
+    audit obligations (typically seven years). You may request export
+    of your data, or deletion of all non-required records, by emailing
+    the address below.
+  </p>
+
+  <h2>Your rights</h2>
+  <ul>
+    <li>Access, correct, or export the data we hold about you.</li>
+    <li>Revoke Plaid's access to your financial institutions at any time.</li>
+    <li>Delete your account; financial records may be retained as required by law.</li>
+  </ul>
+
+  <h2>Children's privacy</h2>
+  <p>
+    Breeze OS is not directed to children under 13 and we do not
+    knowingly collect data from them.
+  </p>
+
+  <h2>Changes to this policy</h2>
+  <p>
+    We will update the "Last updated" date at the top of this page when
+    we revise this policy. Material changes will be communicated via
+    email or an in-app notice.
+  </p>
+
+  <h2>Contact</h2>
+  <p>
+    Questions or requests:
+    <a href="mailto:privacy@breeze-os.dev">privacy@breeze-os.dev</a>.
+  </p>
+</body>
+</html>
