@@ -11,6 +11,7 @@ import TasksPage from './components/TasksPage';
 import WorkflowsPage from './components/WorkflowsPage';
 import LeasingPage from './components/LeasingPage';
 import AccountingPage from './components/AccountingPage';
+import MailSlapperPage from './components/MailSlapperPage';
 import ReportsPage from './components/ReportsPage';
 import SettingsPage from './components/SettingsPage';
 import HelpPage from './components/HelpPage';
@@ -64,6 +65,14 @@ function App() {
     if (activeView === 'workflows') return <WorkflowsPage />;
     if (activeView === 'leasing') return <LeasingPage />;
     if (activeView === 'accounting') return <AccountingPage />;
+    if (
+      activeView === 'mail-slapper' ||
+      activeView === 'mail-snail' ||
+      activeView === 'mail-registered-agent' ||
+      activeView === 'mail-email'
+    ) {
+      return <MailSlapperPage activeView={activeView} onNavigate={handleNavigate} />;
+    }
     if (activeView === 'reports') return <ReportsPage />;
     if (activeView === 'property-directory') return <PropertyDirectoryPage />;
     if (activeView === 'move-events') return <MoveEventsPage />;
