@@ -57,6 +57,13 @@
       "when": 1778572800000,
       "tag": "0007_accounting_ar",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1778659200000,
+      "tag": "0008_accounting_banking",
+      "breakpoints": true
     }
   ]
 }
