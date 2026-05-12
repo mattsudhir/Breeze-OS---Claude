@@ -19,7 +19,7 @@ import {
   DollarSign, Receipt, CreditCard, Landmark, FileSpreadsheet,
   BookOpen, BarChart3, AlertCircle, RefreshCw, Search, Tag, Eye, EyeOff,
   Link2, Download, Sparkles, Check, X, Settings, Trash2, Power, Building2, Plus,
-  Users,
+  Users, FileText, Send,
 } from 'lucide-react';
 import { usePlaidLink } from 'react-plaid-link';
 
@@ -27,6 +27,7 @@ const TABS = [
   { id: 'coa',       label: 'Chart of Accounts', icon: BookOpen },
   { id: 'entities',  label: 'Entities',          icon: Building2 },
   { id: 'vendors',   label: 'Vendors',           icon: Users },
+  { id: 'bills',     label: 'Bills',             icon: FileText },
   { id: 'journal',   label: 'Journal Entries',   icon: FileSpreadsheet },
   { id: 'ar',        label: 'Receivables',       icon: Receipt },
   { id: 'receipts',  label: 'Receipts',          icon: DollarSign },
@@ -105,6 +106,7 @@ export default function AccountingPage() {
             {activeTab === 'coa' && <ChartOfAccountsTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'entities' && <EntitiesTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'vendors' && <VendorsTab token={token} onTokenInvalid={() => setToken('')} />}
+            {activeTab === 'bills' && <BillsTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'journal' && <JournalEntriesTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'ar' && <ReceivablesTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'receipts' && <ReceiptsTab token={token} onTokenInvalid={() => setToken('')} />}
@@ -3256,5 +3258,532 @@ function VendField({ label, children }) {
       <span style={{ fontWeight: 600 }}>{label}</span>
       {children}
     </label>
+  );
+}
+
+// ── Bills tab ───────────────────────────────────────────────────
+
+const BILL_PAYMENT_METHOD_LABELS = {
+  check: 'Check',
+  ach: 'ACH',
+  wire: 'Wire',
+  credit_card: 'Credit card',
+  bill_pay_provider: 'Bill pay provider',
+  cash: 'Cash',
+  other: 'Other',
+};
+
+function BillsTab({ token, onTokenInvalid }) {
+  const [data, setData] = useState(null);
+  const [vendors, setVendors] = useState([]);
+  const [glAccounts, setGlAccounts] = useState([]);
+  const [banks, setBanks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [showNew, setShowNew] = useState(false);
+  const [paying, setPaying] = useState(null);
+  const [status, setStatus] = useState('open');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const u = (path) => {
+        const url = new URL(path, window.location.origin);
+        url.searchParams.set('secret', token);
+        return url;
+      };
+      const billsUrl = u('/api/admin/list-bills');
+      billsUrl.searchParams.set('status', status);
+      const [bRes, vRes, gRes, bnkRes] = await Promise.all([
+        fetch(billsUrl.toString()),
+        fetch(u('/api/admin/list-vendors').toString()),
+        fetch(u('/api/admin/list-gl-accounts').toString()),
+        fetch(u('/api/admin/list-bank-accounts').toString()),
+      ]);
+      if ([bRes, vRes, gRes, bnkRes].some((r) => r.status === 401)) { onTokenInvalid(); return; }
+      const bJson = await bRes.json();
+      const vJson = vRes.ok ? await vRes.json() : { vendors: [] };
+      const gJson = gRes.ok ? await gRes.json() : { accounts: [] };
+      const bnkJson = bnkRes.ok ? await bnkRes.json() : { bank_accounts: [] };
+      setData(bJson);
+      setVendors(vJson.vendors || []);
+      setGlAccounts(gJson.accounts || []);
+      setBanks(bnkJson.bank_accounts || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [token, onTokenInvalid, status]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <div style={{ padding: 24, color: '#666' }}>Loading…</div>;
+  if (error) {
+    return (
+      <div className="dashboard-card" style={{ padding: 16, background: '#FFEBEE', color: '#C62828' }}>
+        <strong>Failed to load:</strong> {error}
+      </div>
+    );
+  }
+
+  const bills = data?.bills || [];
+
+  return (
+    <div>
+      <div style={{
+        padding: '14px 16px', marginBottom: 12,
+        background: 'linear-gradient(135deg, #FCE4EC 0%, #F8BBD0 100%)',
+        borderLeft: '3px solid #AD1457', borderRadius: 8,
+      }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: '#AD1457', marginBottom: 4 }}>
+          <FileText size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />
+          Bills
+        </div>
+        <div style={{ fontSize: 12, color: '#555' }}>
+          Vendor invoices. Post a bill to debit the expense GL and credit AP; pay a bill
+          to debit AP and credit cash. Multi-line bills support per-property attribution.
+          {' '}
+          <strong>Open AP balance:</strong> {formatCents(data?.open_balance_cents || 0)}
+          {' '}across {data?.open_count || 0} bill{data?.open_count === 1 ? '' : 's'}.
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          onClick={load}
+          className="btn-secondary"
+          style={{ padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+        >
+          <RefreshCw size={14} /> Refresh
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowNew(true)}
+          style={{
+            padding: '6px 14px', background: '#AD1457', color: 'white', border: 'none',
+            borderRadius: 6, fontWeight: 600, fontSize: 13, cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+          }}
+        >
+          <Plus size={14} /> New bill
+        </button>
+        <select
+          value={status}
+          onChange={(e) => setStatus(e.target.value)}
+          style={{ padding: '6px 10px', border: '1px solid #CCC', borderRadius: 6, fontSize: 13 }}
+        >
+          <option value="open">Open (draft + unpaid)</option>
+          <option value="draft">Draft only</option>
+          <option value="posted">Posted only</option>
+          <option value="paid">Fully paid</option>
+          <option value="voided">Voided</option>
+          <option value="all">All</option>
+        </select>
+        <span style={{ fontSize: 13, color: '#666' }}>{bills.length}</span>
+      </div>
+
+      {showNew && (
+        <NewBillForm
+          vendors={vendors}
+          glAccounts={glAccounts}
+          token={token}
+          onCreated={() => { setShowNew(false); load(); }}
+          onCancel={() => setShowNew(false)}
+          onTokenInvalid={onTokenInvalid}
+        />
+      )}
+
+      {paying && (
+        <PayBillForm
+          bill={paying}
+          banks={banks}
+          token={token}
+          onPaid={() => { setPaying(null); load(); }}
+          onCancel={() => setPaying(null)}
+          onTokenInvalid={onTokenInvalid}
+        />
+      )}
+
+      {bills.length === 0 ? (
+        <div className="dashboard-card" style={{ padding: 24, textAlign: 'center', color: '#666' }}>
+          No bills here. Click <strong>New bill</strong> to record one.
+        </div>
+      ) : (
+        <div className="dashboard-card" style={{ padding: 0, overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: '#FAFAFA', borderBottom: '1px solid #E0E0E0' }}>
+                <th style={th}>Vendor</th>
+                <th style={th}>Bill #</th>
+                <th style={th}>Date</th>
+                <th style={th}>Due</th>
+                <th style={th}>Status</th>
+                <th style={{ ...th, textAlign: 'right' }}>Total</th>
+                <th style={{ ...th, textAlign: 'right' }}>Balance</th>
+                <th style={th}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {bills.map((b) => (
+                <tr key={b.id} style={{ borderBottom: '1px solid #F0F0F0' }}>
+                  <td style={td}>{b.vendor_name || '—'}</td>
+                  <td style={{ ...td, fontFamily: 'monospace', fontSize: 11 }}>{b.bill_number || '—'}</td>
+                  <td style={td}>{b.bill_date}</td>
+                  <td style={td}>{b.due_date}</td>
+                  <td style={td}>
+                    <span style={{
+                      padding: '1px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600,
+                      textTransform: 'uppercase',
+                      background: b.status === 'posted'
+                        ? (b.balance_cents > 0 ? '#FFF3E0' : '#E8F5E9')
+                        : b.status === 'draft' ? '#E3F2FD' : '#EEEEEE',
+                      color: b.status === 'posted'
+                        ? (b.balance_cents > 0 ? '#E65100' : '#2E7D32')
+                        : b.status === 'draft' ? '#1565C0' : '#666',
+                    }}>
+                      {b.status === 'posted' && b.balance_cents === 0 ? 'paid' : b.status}
+                    </span>
+                  </td>
+                  <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace' }}>
+                    {formatCents(b.amount_cents)}
+                  </td>
+                  <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>
+                    {formatCents(b.balance_cents)}
+                  </td>
+                  <td style={{ ...td, textAlign: 'right' }}>
+                    {b.status === 'draft' && (
+                      <button
+                        type="button"
+                        onClick={() => postBillAction(b.id)}
+                        style={btnTiny('#1565C0')}
+                      >
+                        Post
+                      </button>
+                    )}
+                    {b.status === 'posted' && b.balance_cents > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setPaying(b)}
+                        style={btnTiny('#2E7D32')}
+                      >
+                        <Send size={11} /> Pay
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+
+  async function postBillAction(billId) {
+    try {
+      const url = new URL('/api/admin/post-bill', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bill_id: billId }),
+      });
+      if (res.status === 401) { onTokenInvalid(); return; }
+      const json = await res.json();
+      if (!json.ok) { alert(`Post failed: ${json.error}`); return; }
+      load();
+    } catch (e) {
+      alert(`Post failed: ${e.message}`);
+    }
+  }
+}
+
+const btnTiny = (color) => ({
+  padding: '4px 10px', fontSize: 11, borderRadius: 5,
+  background: color, color: 'white', border: 'none', fontWeight: 600,
+  cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3,
+});
+
+function NewBillForm({ vendors, glAccounts, token, onCreated, onCancel, onTokenInvalid }) {
+  const [vendorId, setVendorId] = useState('');
+  const [billNumber, setBillNumber] = useState('');
+  const [billDate, setBillDate] = useState(new Date().toISOString().slice(0, 10));
+  const [dueDate, setDueDate] = useState('');
+  const [memo, setMemo] = useState('');
+  const [postImmediately, setPostImmediately] = useState(true);
+  const [lines, setLines] = useState([{ gl_account_id: '', amount_dollars: '', memo: '' }]);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const addLine = () => setLines([...lines, { gl_account_id: '', amount_dollars: '', memo: '' }]);
+  const removeLine = (i) => setLines(lines.filter((_, idx) => idx !== i));
+  const updateLine = (i, patch) => setLines(lines.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+
+  const sortedGl = useMemo(
+    () => [...glAccounts].filter((a) => a.is_active).sort((a, b) => a.code.localeCompare(b.code)),
+    [glAccounts],
+  );
+
+  const total = lines.reduce((s, l) => {
+    const n = Number(l.amount_dollars);
+    return Number.isFinite(n) ? s + Math.round(n * 100) : s;
+  }, 0);
+
+  const save = async () => {
+    if (!vendorId) { setErr('Vendor required'); return; }
+    if (!billDate) { setErr('Bill date required'); return; }
+    if (lines.length === 0 || lines.some((l) => !l.gl_account_id || !Number(l.amount_dollars))) {
+      setErr('Each line needs a GL account and amount');
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      const url = new URL('/api/admin/create-bill', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vendor_id: vendorId,
+          bill_number: billNumber.trim() || null,
+          bill_date: billDate,
+          due_date: dueDate || undefined,
+          memo: memo.trim() || null,
+          post_immediately: postImmediately,
+          lines: lines.map((l) => ({
+            gl_account_id: l.gl_account_id,
+            amount_cents: Math.round(Number(l.amount_dollars) * 100),
+            memo: l.memo || null,
+          })),
+        }),
+      });
+      if (res.status === 401) { onTokenInvalid(); return; }
+      const json = await res.json();
+      if (!json.ok) { setErr(json.error || 'create failed'); return; }
+      onCreated();
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="dashboard-card" style={{ padding: 16, marginBottom: 12, border: '2px solid #AD1457' }}>
+      <div style={{ fontWeight: 700, color: '#AD1457', marginBottom: 12 }}>New bill</div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10 }}>
+        <VendField label="Vendor *">
+          <select value={vendorId} onChange={(e) => setVendorId(e.target.value)} style={vendInput}>
+            <option value="">— pick vendor —</option>
+            {vendors.map((v) => <option key={v.id} value={v.id}>{v.display_name}</option>)}
+          </select>
+        </VendField>
+        <VendField label="Bill # (vendor invoice)">
+          <input value={billNumber} onChange={(e) => setBillNumber(e.target.value)} style={vendInput} />
+        </VendField>
+        <VendField label="Bill date *">
+          <input type="date" value={billDate} onChange={(e) => setBillDate(e.target.value)} style={vendInput} />
+        </VendField>
+        <VendField label="Due date (defaults to vendor terms)">
+          <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} style={vendInput} />
+        </VendField>
+      </div>
+
+      <div style={{ marginTop: 14, fontWeight: 600, fontSize: 12, color: '#444' }}>Lines</div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginTop: 4 }}>
+        <thead>
+          <tr style={{ background: '#FAFAFA' }}>
+            <th style={{ ...th, width: '40%' }}>GL Account</th>
+            <th style={{ ...th, width: 130 }}>Amount</th>
+            <th style={th}>Memo</th>
+            <th style={{ ...th, width: 40 }}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {lines.map((l, i) => (
+            <tr key={i} style={{ borderBottom: '1px solid #F0F0F0' }}>
+              <td style={td}>
+                <select
+                  value={l.gl_account_id}
+                  onChange={(e) => updateLine(i, { gl_account_id: e.target.value })}
+                  style={vendInput}
+                >
+                  <option value="">— pick —</option>
+                  {sortedGl.map((a) => (
+                    <option key={a.id} value={a.id}>{a.code} · {a.name}</option>
+                  ))}
+                </select>
+              </td>
+              <td style={td}>
+                <input
+                  type="number" step="0.01" min="0"
+                  value={l.amount_dollars}
+                  onChange={(e) => updateLine(i, { amount_dollars: e.target.value })}
+                  style={{ ...vendInput, fontFamily: 'monospace' }}
+                />
+              </td>
+              <td style={td}>
+                <input
+                  value={l.memo}
+                  onChange={(e) => updateLine(i, { memo: e.target.value })}
+                  style={vendInput}
+                />
+              </td>
+              <td style={td}>
+                {lines.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeLine(i)}
+                    style={{ background: 'none', border: 'none', color: '#C62828', cursor: 'pointer', fontSize: 12 }}
+                  >
+                    Remove
+                  </button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <button
+        type="button"
+        onClick={addLine}
+        style={{ background: 'none', border: 'none', color: '#AD1457', fontSize: 12, fontWeight: 600, cursor: 'pointer', marginTop: 6, padding: 0 }}
+      >
+        + Add line
+      </button>
+
+      <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 16, fontWeight: 700 }}>
+          Total: <span style={{ fontFamily: 'monospace' }}>{formatCents(total)}</span>
+        </div>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+          <input type="checkbox" checked={postImmediately} onChange={(e) => setPostImmediately(e.target.checked)} />
+          Post immediately (debit GL, credit AP)
+        </label>
+      </div>
+      <VendField label="Memo">
+        <input value={memo} onChange={(e) => setMemo(e.target.value)} style={vendInput} />
+      </VendField>
+
+      {err && <div style={{ color: '#C62828', fontSize: 12, marginTop: 6 }}>Error: {err}</div>}
+      <div style={{ marginTop: 12, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <button
+          type="button" onClick={onCancel} disabled={saving}
+          style={{ padding: '7px 14px', border: '1px solid #999', background: 'white', color: '#444', borderRadius: 6, fontSize: 13 }}
+        >
+          Cancel
+        </button>
+        <button
+          type="button" onClick={save} disabled={saving}
+          style={{ padding: '7px 16px', background: saving ? '#BBB' : '#AD1457', color: 'white', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: 13 }}
+        >
+          {saving ? 'Saving…' : 'Create bill'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PayBillForm({ bill, banks, token, onPaid, onCancel, onTokenInvalid }) {
+  const linkedBanks = banks.filter((b) => b.gl_account_id);
+  const [bankAccountId, setBankAccountId] = useState(linkedBanks[0]?.id || '');
+  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
+  const [paymentMethod, setPaymentMethod] = useState('check');
+  const [amount, setAmount] = useState((bill.balance_cents / 100).toFixed(2));
+  const [externalRef, setExternalRef] = useState('');
+  const [memo, setMemo] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const submit = async () => {
+    setSaving(true);
+    setErr(null);
+    try {
+      const url = new URL('/api/admin/pay-bill', window.location.origin);
+      url.searchParams.set('secret', token);
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vendor_id: bill.vendor_id,
+          bank_account_id: bankAccountId,
+          payment_date: paymentDate,
+          payment_method: paymentMethod,
+          external_reference: externalRef.trim() || null,
+          memo: memo.trim() || null,
+          allocations: [{ bill_id: bill.id, amount_cents: Math.round(Number(amount) * 100) }],
+        }),
+      });
+      if (res.status === 401) { onTokenInvalid(); return; }
+      const json = await res.json();
+      if (!json.ok) { setErr(json.error || 'pay failed'); return; }
+      onPaid();
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="dashboard-card" style={{ padding: 16, marginBottom: 12, border: '2px solid #2E7D32' }}>
+      <div style={{ fontWeight: 700, color: '#2E7D32', marginBottom: 12 }}>
+        Pay {bill.vendor_name} — balance {formatCents(bill.balance_cents)}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+        <VendField label="Bank account">
+          <select value={bankAccountId} onChange={(e) => setBankAccountId(e.target.value)} style={vendInput}>
+            {linkedBanks.length === 0 && <option value="">No linked bank accounts</option>}
+            {linkedBanks.map((b) => (
+              <option key={b.id} value={b.id}>{b.display_name}</option>
+            ))}
+          </select>
+        </VendField>
+        <VendField label="Payment date">
+          <input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} style={vendInput} />
+        </VendField>
+        <VendField label="Method">
+          <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} style={vendInput}>
+            {Object.entries(BILL_PAYMENT_METHOD_LABELS).map(([k, v]) => (
+              <option key={k} value={k}>{v}</option>
+            ))}
+          </select>
+        </VendField>
+        <VendField label="Amount">
+          <input
+            type="number" step="0.01" min="0.01"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            style={{ ...vendInput, fontFamily: 'monospace' }}
+          />
+        </VendField>
+        <VendField label="Reference (check #, ACH trace)">
+          <input value={externalRef} onChange={(e) => setExternalRef(e.target.value)} style={vendInput} />
+        </VendField>
+        <VendField label="Memo">
+          <input value={memo} onChange={(e) => setMemo(e.target.value)} style={vendInput} />
+        </VendField>
+      </div>
+      {err && <div style={{ color: '#C62828', fontSize: 12, marginTop: 6 }}>Error: {err}</div>}
+      <div style={{ marginTop: 12, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <button
+          type="button" onClick={onCancel} disabled={saving}
+          style={{ padding: '7px 14px', border: '1px solid #999', background: 'white', color: '#444', borderRadius: 6, fontSize: 13 }}
+        >
+          Cancel
+        </button>
+        <button
+          type="button" onClick={submit} disabled={saving || !bankAccountId}
+          style={{ padding: '7px 16px', background: saving ? '#BBB' : '#2E7D32', color: 'white', border: 'none', borderRadius: 6, fontWeight: 600, fontSize: 13 }}
+        >
+          {saving ? 'Posting…' : 'Record payment'}
+        </button>
+      </div>
+    </div>
   );
 }

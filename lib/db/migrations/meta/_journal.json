@@ -169,6 +169,13 @@
       "when": 1779350400000,
       "tag": "0023_ap_vendors",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1779436800000,
+      "tag": "0024_ap_bills",
+      "breakpoints": true
     }
   ]
 }
