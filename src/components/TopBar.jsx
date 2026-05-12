@@ -19,6 +19,7 @@ const TITLES = {
   'mail-registered-agent': 'Mail Slapper · Registered Agent',
   'mail-email': 'Mail Slapper · Email',
   'ai-agents': 'AI Agents',
+  'ai-approval-queue': 'AI · Approval Queue',
   'ai-switch-utilities': 'AI · Switch Utilities',
   'ai-payment-plan-followup': 'AI · Payment Plan Followup',
   reports: 'Reports',
