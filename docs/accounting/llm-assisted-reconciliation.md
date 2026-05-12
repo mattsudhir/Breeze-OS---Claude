@@ -173,13 +173,18 @@ posting, so a malformed rule (e.g. missing target code) rolls back
 the whole confirm — the candidate stays pending and the user sees
 the error.
 
+## Auto-match on Plaid sync
+
+`/api/admin/plaid-sync-transactions` runs `runRulesAgainstTransaction`
+inside the same transaction that inserts a freshly-pulled
+bank_transaction. Every active rule is evaluated against the new
+row; matches become `match_candidates` (status `pending_review`,
+or `auto_matched` if confidence ≥ 0.95 AND the rule's `times_used
+> 5`). The sync response includes a `auto_match_candidates_created`
+counter per Plaid item.
+
 ## What's still missing (next iteration)
 
-- Auto-match worker on Plaid sync. Currently rules are only applied
-  to (a) the originating transaction at rule-creation time and (b)
-  any future explicit `applyRuleToTransaction` calls. The worker
-  that runs all active rules against every newly-ingested
-  bank_transaction is a small follow-up.
 - Rule-management UI. Endpoints exist (`list-match-rules`); a
   Settings tab to edit / disable / delete is the next UI piece.
 - Cluster-based suggestions ("you have 17 similar transactions —

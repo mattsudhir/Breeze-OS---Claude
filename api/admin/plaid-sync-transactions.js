@@ -25,6 +25,7 @@ import {
   isPlaidConfigured,
 } from '../../lib/backends/plaid.js';
 import { decryptText, isEncryptionConfigured } from '../../lib/encryption.js';
+import { runRulesAgainstTransaction } from '../../lib/accounting/matchEngine.js';
 
 export default withAdminHandler(async (req, res) => {
   if (req.method !== 'POST' && req.method !== 'GET') {
@@ -120,6 +121,7 @@ export default withAdminHandler(async (req, res) => {
 
     let insertedCount = 0;
     let skippedCount = 0;
+    let candidatesCreated = 0;
 
     await db.transaction(async (tx) => {
       for (const txn of synced.added) {
@@ -146,8 +148,21 @@ export default withAdminHandler(async (req, res) => {
           })
           .onConflictDoNothing()
           .returning({ id: schema.bankTransactions.id });
-        if (result.length > 0) insertedCount += 1;
-        else skippedCount += 1;
+        if (result.length > 0) {
+          insertedCount += 1;
+          // Auto-match: run every active rule against the new
+          // transaction and insert match_candidates for every match.
+          // Same tx — if rule eval throws, we don't want a half-
+          // ingested batch.
+          const matched = await runRulesAgainstTransaction(
+            tx,
+            organizationId,
+            result[0].id,
+          );
+          candidatesCreated += matched.candidates_created;
+        } else {
+          skippedCount += 1;
+        }
       }
 
       // For now, modified/removed transactions are not auto-applied.
@@ -173,6 +188,7 @@ export default withAdminHandler(async (req, res) => {
       removed: synced.removed.length,
       inserted_count: insertedCount,
       skipped_count: skippedCount,
+      auto_match_candidates_created: candidatesCreated,
       next_cursor_updated: true,
     });
   }
