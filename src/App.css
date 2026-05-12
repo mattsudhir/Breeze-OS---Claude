@@ -1690,10 +1690,30 @@
   }
   .topbar-title {
     font-size: 15px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
   }
+  .topbar-left {
+    min-width: 0;
+    flex-shrink: 1;
+  }
+  .topbar-center {
+    flex-shrink: 0;
+  }
+  /* Icon-only view toggle on mobile to save horizontal space. */
   .view-toggle-btn {
-    padding: 5px 10px;
+    padding: 5px 8px;
     font-size: 12px;
+  }
+  .view-toggle-btn span {
+    display: none;
+  }
+  /* Hide the ops-wrench on mobile — error cards still surface
+     "Apply migrations" inline, and the topbar gets crowded. */
+  .topbar-ops-btn {
+    display: none !important;
   }
   .stats-row {
     grid-template-columns: 1fr;
