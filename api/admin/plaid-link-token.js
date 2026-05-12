@@ -1,15 +1,28 @@
-// GET /api/admin/plaid-link-token?secret=<TOKEN>
+// GET  /api/admin/plaid-link-token?secret=<TOKEN>
+// POST /api/admin/plaid-link-token?secret=<TOKEN>
+//        body: { bank_account_id }    // optional — re-link mode
 //
-// Returns a one-shot Plaid Link token for the frontend's Plaid Link
-// initialization. The token is short-lived (30 minutes) and tied
-// to the org's id, so re-link flows can match back to existing
-// Items.
+// Returns a Plaid Link token. Two modes:
+//
+//   Default (new link)
+//     Plaid's institution-selection flow. Used when adding a new bank.
+//
+//   Update mode (re-link)
+//     If body.bank_account_id is provided, we look up the bank's
+//     encrypted access_token, decrypt it, and create a Link token
+//     scoped to the existing Item. Plaid Link skips institution
+//     selection and prompts the user to re-authenticate. Required
+//     when a bank flips to plaid_status='re_auth_required'.
 
+import { and, eq } from 'drizzle-orm';
 import {
   withAdminHandler,
   getDefaultOrgId,
+  parseBody,
 } from '../../lib/adminHelpers.js';
 import { createLinkToken, isPlaidConfigured } from '../../lib/backends/plaid.js';
+import { decryptText, isEncryptionConfigured } from '../../lib/encryption.js';
+import { getDb, schema } from '../../lib/db/index.js';
 
 export default withAdminHandler(async (req, res) => {
   if (req.method !== 'GET' && req.method !== 'POST') {
@@ -23,16 +36,65 @@ export default withAdminHandler(async (req, res) => {
   }
 
   const organizationId = await getDefaultOrgId();
+
+  // Detect re-link mode.
+  const body = req.method === 'POST' ? parseBody(req) : {};
+  const bankAccountId = body.bank_account_id || null;
+  let accessToken = null;
+
+  if (bankAccountId) {
+    if (!isEncryptionConfigured()) {
+      return res.status(503).json({
+        ok: false,
+        error: 'BREEZE_ENCRYPTION_KEY not set; cannot decrypt access_token for re-link.',
+      });
+    }
+    const db = getDb();
+    const [bank] = await db
+      .select({
+        id: schema.bankAccounts.id,
+        tokenCipher: schema.bankAccounts.plaidAccessTokenEncrypted,
+      })
+      .from(schema.bankAccounts)
+      .where(
+        and(
+          eq(schema.bankAccounts.id, bankAccountId),
+          eq(schema.bankAccounts.organizationId, organizationId),
+        ),
+      )
+      .limit(1);
+    if (!bank) {
+      return res.status(404).json({ ok: false, error: 'bank_account not found in org' });
+    }
+    if (!bank.tokenCipher) {
+      return res.status(400).json({
+        ok: false,
+        error: 'bank_account has no Plaid access_token; cannot re-link an unlinked account',
+      });
+    }
+    try {
+      accessToken = decryptText(bank.tokenCipher);
+    } catch (err) {
+      return res.status(500).json({
+        ok: false,
+        error: `Failed to decrypt access_token: ${err.message}`,
+      });
+    }
+  }
+
   try {
     const { link_token, expiration } = await createLinkToken({
       organizationId,
       clientName: 'Breeze OS',
-      products: ['transactions'],
+      // Update-mode call omits products; the helper handles that.
+      products: accessToken ? undefined : ['transactions'],
+      accessToken,
     });
     return res.status(200).json({
       ok: true,
       link_token,
       expiration,
+      mode: accessToken ? 'update' : 'new',
     });
   } catch (err) {
     // Plaid SDK errors come through Axios. The real Plaid error
