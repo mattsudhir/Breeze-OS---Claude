@@ -506,7 +506,7 @@ function WorkflowConfigCard({ workflow, defaultLevel, onChanged }) {
         <h3 style={{ margin: 0, fontSize: 14 }}>Configuration</h3>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
         <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12, color: '#444', gap: 4 }}>
           <span style={{ fontWeight: 600 }}>VAPI assistant id</span>
           <input
@@ -606,7 +606,7 @@ function PlaceCallCard({ workflow }) {
         <em> draft only</em> or <em>approve before contact</em>, the call queues for
         review instead of dialing immediately.
       </p>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
         <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12, color: '#444', gap: 3 }}>
           <span style={{ fontWeight: 600 }}>Phone (E.164)</span>
           <input

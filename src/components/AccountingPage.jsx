@@ -2366,7 +2366,7 @@ function EntityEditor({ entity, token, onSaved, onCancel, onTokenInvalid }) {
       <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '12px', color: '#1565C0' }}>
         {entity ? `Edit ${entity.name}` : 'New entity'}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
         <EntityField label="Display name *">
           <input type="text" value={name} onChange={(e) => setName(e.target.value)} style={entityInputStyle} />
         </EntityField>
@@ -3349,7 +3349,7 @@ function VendorEditor({ vendor, glAccounts, token, onSaved, onCancel, onTokenInv
       <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12, color: '#2E7D32' }}>
         {vendor ? `Edit ${vendor.display_name}` : 'New vendor'}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
         <VendField label="Display name *">
           <input type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)} style={vendInput} />
         </VendField>
@@ -3779,7 +3779,7 @@ function NewBillForm({ vendors, glAccounts, token, onCreated, onCancel, onTokenI
     <div className="dashboard-card" style={{ padding: 16, marginBottom: 12, border: '2px solid #AD1457' }}>
       <div style={{ fontWeight: 700, color: '#AD1457', marginBottom: 12 }}>New bill</div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
         <VendField label="Vendor *">
           <select value={vendorId} onChange={(e) => setVendorId(e.target.value)} style={vendInput}>
             <option value="">— pick vendor —</option>
@@ -3952,7 +3952,7 @@ function PayBillForm({ bill, banks, token, onPaid, onCancel, onTokenInvalid }) {
       <div style={{ fontWeight: 700, color: '#2E7D32', marginBottom: 12 }}>
         Pay {bill.vendor_name} — balance {formatCents(bill.balance_cents)}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
         <VendField label="Bank account">
           <select value={bankAccountId} onChange={(e) => setBankAccountId(e.target.value)} style={vendInput}>
             {linkedBanks.length === 0 && <option value="">No linked bank accounts</option>}
@@ -4085,7 +4085,7 @@ function RecordReceiptForm({ token, onTokenInvalid, onSaved, onCancel }) {
   return (
     <div className="dashboard-card" style={{ padding: 16, marginBottom: 12, border: '2px solid #E65100' }}>
       <div style={{ fontWeight: 700, color: '#E65100', marginBottom: 12 }}>Record receipt</div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
         <VendField label="Tenant id (optional — paste from Tenants page)">
           <input value={tenantId} onChange={(e) => setTenantId(e.target.value)} style={vendInput} />
         </VendField>
@@ -4280,7 +4280,7 @@ function BuildDepositForm({ token, onTokenInvalid, onSaved, onCancel }) {
   return (
     <div className="dashboard-card" style={{ padding: 16, marginBottom: 12, border: '2px solid #2E7D32' }}>
       <div style={{ fontWeight: 700, color: '#2E7D32', marginBottom: 12 }}>Build deposit</div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10, marginBottom: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, marginBottom: 12 }}>
         <VendField label="Bank account">
           <select value={bankId} onChange={(e) => setBankId(e.target.value)} style={vendInput}>
             {banks.length === 0 && <option value="">No linked banks</option>}
