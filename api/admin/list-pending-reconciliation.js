@@ -88,7 +88,14 @@ export default withAdminHandler(async (req, res) => {
       if (!candidatesByTxn.has(c.bankTransactionId)) {
         candidatesByTxn.set(c.bankTransactionId, []);
       }
-      candidatesByTxn.get(c.bankTransactionId).push(c);
+      candidatesByTxn.get(c.bankTransactionId).push({
+        id: c.id,
+        bank_transaction_id: c.bankTransactionId,
+        confidence_score: c.confidenceScore,
+        match_reason_codes: c.matchReasonCodes,
+        status: c.status,
+        created_at: c.createdAt,
+      });
     }
   }
 
