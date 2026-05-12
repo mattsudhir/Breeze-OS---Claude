@@ -141,6 +141,13 @@
       "when": 1779004800000,
       "tag": "0019_entities",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1779091200000,
+      "tag": "0020_intercompany",
+      "breakpoints": true
     }
   ]
 }
