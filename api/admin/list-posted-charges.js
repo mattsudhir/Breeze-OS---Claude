@@ -21,6 +21,7 @@ export default withAdminHandler(async (req, res) => {
   const organizationId = await getDefaultOrgId();
 
   const status = req.query?.status || null;
+  const tenantId = req.query?.tenant_id || null;
   const includeVoided =
     req.query?.include_voided === 'true' || req.query?.include_voided === '1';
   const limit = Math.min(
@@ -33,6 +34,9 @@ export default withAdminHandler(async (req, res) => {
     whereClauses.push(eq(schema.postedCharges.status, status));
   } else if (!includeVoided) {
     whereClauses.push(ne(schema.postedCharges.status, 'voided'));
+  }
+  if (tenantId) {
+    whereClauses.push(eq(schema.postedCharges.tenantId, tenantId));
   }
 
   const rows = await db

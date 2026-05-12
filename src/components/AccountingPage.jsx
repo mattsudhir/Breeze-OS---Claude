@@ -4001,11 +4001,47 @@ function RecordReceiptForm({ token, onTokenInvalid, onSaved, onCancel }) {
   const [amount, setAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('check');
   const [externalRef, setExternalRef] = useState('');
+  const [openCharges, setOpenCharges] = useState([]);
+  const [allocations, setAllocations] = useState({}); // charge_id → dollars
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(null);
 
+  // Fetch open charges when tenant_id changes (debounced via the
+  // 'is it a uuid?' check).
+  useEffect(() => {
+    const tid = tenantId.trim();
+    if (!tid || tid.length < 30) { setOpenCharges([]); return; }
+    (async () => {
+      try {
+        const url = new URL('/api/admin/list-posted-charges', window.location.origin);
+        url.searchParams.set('secret', token);
+        url.searchParams.set('status', 'open');
+        url.searchParams.set('tenant_id', tid);
+        const res = await fetch(url.toString());
+        if (!res.ok) return;
+        const json = await res.json();
+        setOpenCharges(json.charges || []);
+      } catch { /* fine */ }
+    })();
+  }, [tenantId, token]);
+
+  const allocatedCents = Object.values(allocations).reduce(
+    (s, v) => s + (Number.isFinite(Number(v)) ? Math.round(Number(v) * 100) : 0),
+    0,
+  );
+  const amountCents = Math.round(Number(amount) * 100) || 0;
+  const remainingCents = amountCents - allocatedCents;
+  const overAllocated = allocatedCents > amountCents;
+
   const save = async () => {
     if (!Number(amount) || Number(amount) <= 0) { setErr('Amount required'); return; }
+    if (overAllocated) { setErr('Allocations exceed amount'); return; }
+    const allocList = Object.entries(allocations)
+      .filter(([, v]) => Number(v) > 0)
+      .map(([chargeId, v]) => ({
+        posted_charge_id: chargeId,
+        amount_cents: Math.round(Number(v) * 100),
+      }));
     setSaving(true);
     setErr(null);
     try {
@@ -4017,9 +4053,10 @@ function RecordReceiptForm({ token, onTokenInvalid, onSaved, onCancel }) {
         body: JSON.stringify({
           tenant_id: tenantId.trim() || null,
           received_date: receivedDate,
-          amount_cents: Math.round(Number(amount) * 100),
+          amount_cents: amountCents,
           payment_method: paymentMethod,
           external_reference: externalRef.trim() || null,
+          allocations: allocList,
         }),
       });
       if (res.status === 401) { onTokenInvalid(); return; }
@@ -4066,9 +4103,74 @@ function RecordReceiptForm({ token, onTokenInvalid, onSaved, onCancel }) {
           <input value={externalRef} onChange={(e) => setExternalRef(e.target.value)} style={vendInput} />
         </VendField>
       </div>
+      {openCharges.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#444', marginBottom: 6 }}>
+            Allocate to open charges ({openCharges.length})
+          </div>
+          <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid #EEE', borderRadius: 5 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr style={{ background: '#FAFAFA', borderBottom: '1px solid #E0E0E0' }}>
+                  <th style={{ ...th, padding: '6px 8px' }}>Charge</th>
+                  <th style={{ ...th, padding: '6px 8px' }}>Due</th>
+                  <th style={{ ...th, padding: '6px 8px', textAlign: 'right' }}>Balance</th>
+                  <th style={{ ...th, padding: '6px 8px', width: 120 }}>Apply</th>
+                </tr>
+              </thead>
+              <tbody>
+                {openCharges.map((c) => {
+                  const balanceDollars = (c.balance_cents / 100).toFixed(2);
+                  return (
+                    <tr key={c.id} style={{ borderBottom: '1px solid #F5F5F5' }}>
+                      <td style={{ padding: '6px 8px' }}>
+                        <div style={{ fontWeight: 600 }}>{c.description}</div>
+                        <div style={{ fontSize: 10, color: '#888' }}>{c.gl_code} · {c.gl_name}</div>
+                      </td>
+                      <td style={{ padding: '6px 8px' }}>{c.due_date}</td>
+                      <td style={{ padding: '6px 8px', textAlign: 'right', fontFamily: 'monospace' }}>
+                        ${balanceDollars}
+                      </td>
+                      <td style={{ padding: '6px 8px' }}>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <input
+                            type="number" step="0.01" min="0" max={balanceDollars}
+                            value={allocations[c.id] || ''}
+                            onChange={(e) => setAllocations({ ...allocations, [c.id]: e.target.value })}
+                            style={{ ...vendInput, fontFamily: 'monospace', padding: '4px 6px', fontSize: 12 }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setAllocations({ ...allocations, [c.id]: balanceDollars })}
+                            title="Apply full balance"
+                            style={{ padding: '2px 6px', background: 'white', border: '1px solid #BBB', borderRadius: 3, fontSize: 10, cursor: 'pointer' }}
+                          >
+                            full
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ marginTop: 6, fontSize: 12, display: 'flex', justifyContent: 'space-between' }}>
+            <span style={{ color: '#666' }}>
+              Allocated: <span style={{ fontFamily: 'monospace' }}>{formatCents(allocatedCents)}</span>
+              {' · '}
+              Remaining: <span style={{ fontFamily: 'monospace', color: remainingCents < 0 ? '#C62828' : remainingCents > 0 ? '#E65100' : '#2E7D32' }}>
+                {formatCents(remainingCents)}
+              </span>
+              {remainingCents > 0 && <span style={{ color: '#888' }}> (goes to Tenant Credit)</span>}
+              {overAllocated && <span style={{ color: '#C62828' }}> ⚠ over-allocated</span>}
+            </span>
+          </div>
+        </div>
+      )}
       <div style={{ fontSize: 11, color: '#666', marginTop: 8 }}>
         Posts to Undeposited Funds (1110). Unallocated amount lands in Tenant Credit (2210)
-        until you allocate against open charges. Allocations UI is a follow-up.
+        until you allocate later.
       </div>
       {err && <div style={{ color: '#C62828', fontSize: 12, marginTop: 6 }}>Error: {err}</div>}
       <div style={{ marginTop: 12, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
