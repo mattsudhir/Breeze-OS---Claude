@@ -77,6 +77,7 @@ export default function TopBar({
           type="button"
           onClick={() => setOpsOpen(!opsOpen)}
           title="Ops: apply pending migrations"
+          className="topbar-ops-btn"
           style={{
             background: 'none',
             border: 'none',
