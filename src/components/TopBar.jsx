@@ -3,6 +3,7 @@ import { Menu, MessageSquare, LayoutDashboard, Wrench } from 'lucide-react';
 import { UserButton } from '@clerk/clerk-react';
 import NotificationsBell from './NotificationsBell.jsx';
 import MigrationFixButton from './MigrationFixButton.jsx';
+import IntegrationHealthDot from './IntegrationHealthDot.jsx';
 
 const CLERK_ENABLED = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
 
@@ -90,6 +91,7 @@ export default function TopBar({
         >
           <Wrench size={18} />
         </button>
+        <IntegrationHealthDot />
         <NotificationsBell onNavigate={onNavigate} />
         {CLERK_ENABLED && <UserButton afterSignOutUrl="/" />}
         {opsOpen && (

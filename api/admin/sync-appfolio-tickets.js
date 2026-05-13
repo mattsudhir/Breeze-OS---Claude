@@ -25,6 +25,7 @@ import {
 } from '../../lib/adminHelpers.js';
 import { getDb, schema } from '../../lib/db/index.js';
 import { fetchAllPages } from '../../lib/backends/appfolio.js';
+import { recordHealth } from '../../lib/integrationHealth.js';
 
 export const config = { maxDuration: 300 };
 
@@ -90,10 +91,13 @@ export default withAdminHandler(async (req, res) => {
   try {
     const result = await fetchAllPages('/work_orders', params);
     if (result.error) {
+      await recordHealth(organizationId, 'appfolio_database', 'AppFolio (Database API)', { ok: false, error: result.error });
       return res.status(502).json({ ok: false, error: `AppFolio: ${result.error}` });
     }
     afRows = result.data || [];
+    await recordHealth(organizationId, 'appfolio_database', 'AppFolio (Database API)', { ok: true });
   } catch (err) {
+    await recordHealth(organizationId, 'appfolio_database', 'AppFolio (Database API)', { ok: false, error: err.message || String(err) });
     return res.status(502).json({
       ok: false,
       error: `AppFolio fetch failed: ${err.message || String(err)}`,

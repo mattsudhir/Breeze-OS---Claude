@@ -211,6 +211,13 @@
       "when": 1779868800000,
       "tag": "0029_maintenance_tickets",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1779955200000,
+      "tag": "0030_integration_health",
+      "breakpoints": true
     }
   ]
 }
