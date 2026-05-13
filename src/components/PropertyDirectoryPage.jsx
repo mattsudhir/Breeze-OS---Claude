@@ -197,7 +197,7 @@ function SyncAppfolioLeasesTab() {
           body: JSON.stringify({ limit: batchSize, offset }),
         });
         const json = await res.json();
-        if (!res.ok || !json.ok) {
+        if (!res.ok && !json.aborted) {
           throw new Error(json.error || `HTTP ${res.status}`);
         }
         total = json.total_properties;
@@ -213,6 +213,10 @@ function SyncAppfolioLeasesTab() {
         setTotals({ tenants: totalTenants, leases: totalLeases, skipped: totalSkipped, backfilled: totalBackfilled });
         setErrors([...seenErrors]);
 
+        if (json.aborted) {
+          setLastError(json.abort_reason || 'Sync aborted by circuit breaker.');
+          break;
+        }
         if (!json.has_more) break;
       }
     } catch (err) {

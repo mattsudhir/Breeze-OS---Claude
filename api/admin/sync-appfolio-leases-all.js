@@ -300,6 +300,9 @@ export default withAdminHandler(async (req, res) => {
   let totalLeases = 0;
   let totalSkippedNoUnit = 0;
   let totalUnitIdsBackfilled = 0;
+  let consecutive401s = 0;
+  let aborted = false;
+  let abortReason = null;
 
   for (const property of properties) {
     try {
@@ -314,25 +317,44 @@ export default withAdminHandler(async (req, res) => {
       totalLeases += summary.leases_upserted || 0;
       totalSkippedNoUnit += summary.leases_skipped_no_unit || 0;
       totalUnitIdsBackfilled += summary.unit_ids_backfilled || 0;
+      consecutive401s = 0;
     } catch (err) {
+      const msg = err.message || String(err);
       results.push({
         property_id: property.id,
         display_name: property.displayName,
         source_property_id: property.sourcePropertyId,
-        error: err.message || String(err),
+        error: msg,
       });
+      // Circuit-breaker: if AppFolio returns 401 (auth failure) or
+      // 429 (rate limit) repeatedly, stop hammering and surface the
+      // error to the UI. A handful of bad creds shouldn't cost us
+      // 250 wasted calls + a rate-limit cooldown.
+      if (/\b401\b|\b429\b/.test(msg)) {
+        consecutive401s += 1;
+        if (consecutive401s >= 3) {
+          aborted = true;
+          abortReason = `Aborted after ${consecutive401s} consecutive AppFolio ${msg.includes('429') ? '429' : '401'} responses. Fix credentials (run /api/admin/debug-appfolio-auth) before retrying.`;
+          break;
+        }
+      } else {
+        consecutive401s = 0;
+      }
     }
   }
 
-  const nextOffset = offset + properties.length;
+  const processed = results.length;
+  const nextOffset = offset + processed;
   return res.status(200).json({
-    ok: true,
+    ok: !aborted,
     organization_id: organizationId,
-    processed: properties.length,
+    processed,
     offset,
     next_offset: nextOffset,
     total_properties: total,
-    has_more: nextOffset < total,
+    has_more: !aborted && nextOffset < total,
+    aborted,
+    abort_reason: abortReason,
     totals: {
       tenants_upserted: totalTenants,
       leases_upserted: totalLeases,
