@@ -21,6 +21,7 @@ import {
 } from '../../lib/adminHelpers.js';
 import { getDb, schema } from '../../lib/db/index.js';
 import { fetchAllPages } from '../../lib/backends/appfolio.js';
+import { recordHealth } from '../../lib/integrationHealth.js';
 
 export const config = { maxDuration: 300 };
 
@@ -329,6 +330,7 @@ export default withAdminHandler(async (req, res) => {
       totalSkippedNoUnit += summary.leases_skipped_no_unit || 0;
       totalUnitIdsBackfilled += summary.unit_ids_backfilled || 0;
       consecutive401s = 0;
+      await recordHealth(organizationId, 'appfolio_database', 'AppFolio (Database API)', { ok: true });
     } catch (err) {
       const msg = err.message || String(err);
       results.push({
@@ -337,6 +339,7 @@ export default withAdminHandler(async (req, res) => {
         source_property_id: property.sourcePropertyId,
         error: msg,
       });
+      await recordHealth(organizationId, 'appfolio_database', 'AppFolio (Database API)', { ok: false, error: msg });
       // Circuit-breaker: if AppFolio returns 401 (auth failure) or
       // 429 (rate limit) repeatedly, stop hammering and surface the
       // error to the UI. A handful of bad creds shouldn't cost us
