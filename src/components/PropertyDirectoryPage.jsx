@@ -8,7 +8,7 @@
 // PR, we can upgrade the primitives.
 
 import { useEffect, useState, useCallback } from 'react';
-import { Building2, Users, Zap, Database, RefreshCw, Plus, Trash2, Upload, Settings2, Grid3x3, Link2 } from 'lucide-react';
+import { Building2, Users, Zap, Database, RefreshCw, Plus, Trash2, Upload, Settings2, Grid3x3, Link2, UserPlus } from 'lucide-react';
 import {
   owners as ownersApi,
   properties as propertiesApi,
@@ -116,6 +116,7 @@ export default function PropertyDirectoryPage() {
             { id: 'bulkConfig', label: 'Bulk Config', icon: Settings2 },
             { id: 'gridImport', label: 'Grid Import', icon: Grid3x3 },
             { id: 'backfill', label: 'Backfill Unit IDs', icon: Link2 },
+            { id: 'syncLeases', label: 'Sync Leases (AppFolio)', icon: UserPlus },
           ].map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -148,8 +149,161 @@ export default function PropertyDirectoryPage() {
         {tab === 'bulkConfig' && <BulkConfigTab />}
         {tab === 'gridImport' && <GridImportTab />}
         {tab === 'backfill' && <BackfillUnitIdsTab />}
+        {tab === 'syncLeases' && <SyncAppfolioLeasesTab />}
       </div>
     </TokenGate>
+  );
+}
+
+// ── Sync AppFolio Leases tab ─────────────────────────────────────
+//
+// Loops /api/admin/sync-appfolio-leases-all in batches of 25 until
+// has_more=false. Live progress shown as bar + per-batch summary.
+// Use after bulk-importing properties + units to populate tenants +
+// active leases from AppFolio's /tenants endpoint.
+
+function SyncAppfolioLeasesTab() {
+  const [running, setRunning] = useState(false);
+  const [stopped, setStopped] = useState(false);
+  const [progress, setProgress] = useState({ processed: 0, total: 0 });
+  const [totals, setTotals] = useState({ tenants: 0, leases: 0, skipped: 0 });
+  const [errors, setErrors] = useState([]);
+  const [lastError, setLastError] = useState(null);
+  const [batchSize, setBatchSize] = useState(25);
+
+  const run = async () => {
+    setRunning(true);
+    setStopped(false);
+    setErrors([]);
+    setLastError(null);
+    setTotals({ tenants: 0, leases: 0, skipped: 0 });
+    setProgress({ processed: 0, total: 0 });
+
+    let offset = 0;
+    let total = 0;
+    let totalTenants = 0;
+    let totalLeases = 0;
+    let totalSkipped = 0;
+    const seenErrors = [];
+
+    try {
+      while (true) {
+        const url = new URL('/api/admin/sync-appfolio-leases-all', window.location.origin);
+        url.searchParams.set('secret', getAdminToken());
+        const res = await fetch(url.toString(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ limit: batchSize, offset }),
+        });
+        const json = await res.json();
+        if (!res.ok || !json.ok) {
+          throw new Error(json.error || `HTTP ${res.status}`);
+        }
+        total = json.total_properties;
+        offset = json.next_offset;
+        totalTenants += json.totals?.tenants_upserted || 0;
+        totalLeases += json.totals?.leases_upserted || 0;
+        totalSkipped += json.totals?.leases_skipped_no_unit || 0;
+        for (const r of json.results || []) {
+          if (r.error) seenErrors.push({ name: r.display_name, error: r.error });
+        }
+        setProgress({ processed: offset, total });
+        setTotals({ tenants: totalTenants, leases: totalLeases, skipped: totalSkipped });
+        setErrors([...seenErrors]);
+
+        if (!json.has_more) break;
+      }
+    } catch (err) {
+      setLastError(err.message || String(err));
+    } finally {
+      setRunning(false);
+      setStopped(true);
+    }
+  };
+
+  const pct = progress.total > 0 ? Math.round((progress.processed / progress.total) * 100) : 0;
+
+  return (
+    <div>
+      <div style={{
+        marginBottom: 16, padding: 12, background: '#f0f9ff',
+        border: '1px solid #bae6fd', borderRadius: 8, fontSize: 13, color: '#0c4a6e',
+      }}>
+        <strong>Sync active leases from AppFolio.</strong><br />
+        Loops every property with <code>source_pms='appfolio'</code> and a
+        non-null <code>source_property_id</code>. For each, pulls
+        <code> /tenants?property_id=&lt;id&gt;</code>, filters to active leases
+        (end date null or ≥ today), and upserts tenants + leases + lease-tenant
+        links in our DB. Idempotent — safe to re-run.
+        <br /><br />
+        Requires <code>APPFOLIO_*</code> env vars to be set in Vercel.
+        Properties must already exist (import via Bulk Import / Grid Import first).
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12 }}>
+        <label style={{ fontSize: 13, color: '#555' }}>
+          Batch size:{' '}
+          <input
+            type="number"
+            min={1}
+            max={100}
+            value={batchSize}
+            disabled={running}
+            onChange={(e) => setBatchSize(Math.max(1, Math.min(100, parseInt(e.target.value, 10) || 25)))}
+            style={{ width: 70, padding: '4px 6px', border: '1px solid #d1d5db', borderRadius: 4, fontSize: 13 }}
+          />
+        </label>
+        <button type="button" onClick={run} disabled={running} style={primaryButtonStyle}>
+          {running ? `Syncing… ${progress.processed}/${progress.total}` : 'Start sync'}
+        </button>
+      </div>
+
+      {(running || stopped) && progress.total > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{
+            height: 8, background: '#e5e7eb', borderRadius: 4, overflow: 'hidden', marginBottom: 6,
+          }}>
+            <div style={{
+              height: '100%', width: `${pct}%`, background: '#1565C0',
+              transition: 'width 0.3s ease',
+            }} />
+          </div>
+          <div style={{ fontSize: 12, color: '#666' }}>
+            {progress.processed} / {progress.total} properties processed ({pct}%)
+            {' · '}
+            <strong>{totals.tenants}</strong> tenants upserted
+            {' · '}
+            <strong>{totals.leases}</strong> leases upserted
+            {totals.skipped > 0 && <>{' · '}<strong>{totals.skipped}</strong> skipped (unit not in DB)</>}
+          </div>
+        </div>
+      )}
+
+      {lastError && <ErrorBox message={lastError} />}
+
+      {stopped && !lastError && progress.processed >= progress.total && progress.total > 0 && (
+        <div style={{
+          padding: 16, background: '#f0fdf4', border: '1px solid #bbf7d0',
+          borderRadius: 8, color: '#166534',
+        }}>
+          <strong>Sync complete.</strong> Refresh the Properties page to see updated occupancy.
+        </div>
+      )}
+
+      {errors.length > 0 && (
+        <details style={{ marginTop: 12 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 13, color: '#b91c1c' }}>
+            {errors.length} property error{errors.length === 1 ? '' : 's'}
+          </summary>
+          <pre style={{
+            fontSize: 11, maxHeight: 300, overflow: 'auto', background: '#fff',
+            padding: 8, borderRadius: 4, border: '1px solid #fecaca', marginTop: 8,
+          }}>
+            {JSON.stringify(errors, null, 2)}
+          </pre>
+        </details>
+      )}
+    </div>
   );
 }
 
