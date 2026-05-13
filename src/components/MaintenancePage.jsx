@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Wrench, Search, CheckCircle2, AlertCircle, Loader2,
   ChevronDown, ChevronRight, Plus, RefreshCw, Building2, Home,
-  Clock, AlertTriangle, MessageSquare, Send, Lock, X,
+  Clock, AlertTriangle, MessageSquare, Send, Lock, X, Download,
 } from 'lucide-react';
 import MigrationFixButton from './MigrationFixButton.jsx';
 
@@ -580,6 +580,8 @@ export default function MaintenancePage() {
   const [search, setSearch] = useState('');
   const [expandedId, setExpandedId] = useState(null);
   const [showNew, setShowNew] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -602,6 +604,29 @@ export default function MaintenancePage() {
   }, [statusFilter]);
 
   useEffect(() => { load(); }, [load]);
+
+  const syncFromAppfolio = async (status = 'all') => {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const j = await fetchJson('/api/admin/sync-appfolio-tickets', {
+        method: 'POST',
+        body: { status },
+      });
+      setSyncResult({
+        ok: true,
+        fetched: j.fetched,
+        inserted: j.inserted,
+        updated: j.updated,
+        skipped: j.skipped_no_property,
+      });
+      await load();
+    } catch (e) {
+      setSyncResult({ ok: false, error: e.message });
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const filtered = useMemo(() => {
     let list = tickets || [];
@@ -680,12 +705,26 @@ export default function MaintenancePage() {
         <h1 style={{ margin: 0, fontSize: 22, display: 'flex', alignItems: 'center', gap: 8 }}>
           <Wrench size={22} /> Maintenance
         </h1>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={load} style={{
             padding: '7px 12px', border: '1px solid #ccc', background: '#fff',
             borderRadius: 6, cursor: 'pointer', fontSize: 13,
             display: 'inline-flex', alignItems: 'center', gap: 5,
           }}><RefreshCw size={13} /> Refresh</button>
+          <button
+            onClick={() => syncFromAppfolio('all')}
+            disabled={syncing}
+            style={{
+              padding: '7px 12px', border: '1px solid #1565C0', background: '#fff',
+              color: '#1565C0', borderRadius: 6,
+              cursor: syncing ? 'wait' : 'pointer', fontSize: 13, fontWeight: 600,
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+            }}
+          >
+            {syncing
+              ? <><Loader2 size={13} className="spin" /> Syncing…</>
+              : <><Download size={13} /> Sync from AppFolio</>}
+          </button>
           <button onClick={() => setShowNew((v) => !v)} style={{
             padding: '7px 14px', border: 'none', background: '#1976D2', color: '#fff',
             borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
@@ -693,6 +732,27 @@ export default function MaintenancePage() {
           }}><Plus size={14} /> New ticket</button>
         </div>
       </div>
+
+      {syncResult && (
+        <div style={{
+          marginBottom: 12,
+          padding: '10px 14px', borderRadius: 8, fontSize: 13,
+          background: syncResult.ok ? '#E8F5E9' : '#FFEBEE',
+          border: `1px solid ${syncResult.ok ? '#C8E6C9' : '#FFCDD2'}`,
+          color: syncResult.ok ? '#2E7D32' : '#C62828',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+        }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            {syncResult.ok
+              ? <><CheckCircle2 size={14} /> Synced {syncResult.fetched} AppFolio work orders — {syncResult.inserted} new, {syncResult.updated} updated{syncResult.skipped > 0 ? `, ${syncResult.skipped} skipped (property not in DB)` : ''}.</>
+              : <><AlertCircle size={14} /> Sync failed: {syncResult.error}</>}
+          </span>
+          <button onClick={() => setSyncResult(null)} style={{
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            color: 'inherit', padding: 2,
+          }}><X size={14} /></button>
+        </div>
+      )}
 
       {/* Stats */}
       <div style={{
