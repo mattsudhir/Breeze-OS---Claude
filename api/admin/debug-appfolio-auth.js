@@ -1,16 +1,13 @@
 // GET /api/admin/debug-appfolio-auth?secret=<TOKEN>
 //
-// Diagnoses why AppFolio is returning 401 without leaking secrets.
-// Returns:
-//   - whether each env var is set
-//   - length + sha256 hash prefix of each (so we can spot whitespace
-//     diffs vs. what's in our records, without exposing values)
-//   - whitespace flags (leading/trailing space, contains newline)
-//   - the BASE_URL we'll call
-//   - the result of one /properties?page[size]=1 probe with status,
-//     body snippet, and resolved Authorization header length
+// Diagnoses why AppFolio API calls are failing without leaking secrets.
+// Probes the Database API at BOTH the shared host (api.appfolio.com)
+// and the customer subdomain (<APPFOLIO_SUBDOMAIN>.appfolio.com), so
+// we can see which one auths and which one 404s.
 //
-// Token never echoed. Read-only.
+// Returns env-var presence + length + whitespace flags + sha256 hash
+// prefix (never the raw value), and the HTTP status + body snippet
+// from each probe.
 
 import crypto from 'crypto';
 import { withAdminHandler } from '../../lib/adminHelpers.js';
@@ -31,6 +28,19 @@ function inspect(name) {
   };
 }
 
+async function probe(label, url, headers) {
+  const out = { label, url };
+  try {
+    const r = await fetch(url, { headers });
+    out.status = r.status;
+    const text = await r.text();
+    out.body_snippet = text.slice(0, 400);
+  } catch (err) {
+    out.error = err.message || String(err);
+  }
+  return out;
+}
+
 export default withAdminHandler(async (req, res) => {
   if (req.method !== 'GET') {
     return res.status(405).json({ ok: false, error: 'GET only' });
@@ -40,67 +50,60 @@ export default withAdminHandler(async (req, res) => {
     APPFOLIO_CLIENT_ID: inspect('APPFOLIO_CLIENT_ID'),
     APPFOLIO_CLIENT_SECRET: inspect('APPFOLIO_CLIENT_SECRET'),
     APPFOLIO_DEVELOPER_ID: inspect('APPFOLIO_DEVELOPER_ID'),
+    APPFOLIO_SUBDOMAIN: inspect('APPFOLIO_SUBDOMAIN'),
     APPFOLIO_DATABASE_API_URL: inspect('APPFOLIO_DATABASE_API_URL'),
   };
 
   const clientId = (process.env.APPFOLIO_CLIENT_ID || '').trim();
   const clientSecret = (process.env.APPFOLIO_CLIENT_SECRET || '').trim();
   const developerId = (process.env.APPFOLIO_DEVELOPER_ID || '').trim();
-  const baseUrl =
-    (process.env.APPFOLIO_DATABASE_API_URL || '').trim() ||
-    'https://api.appfolio.com/api/v0';
+  const subdomain = (process.env.APPFOLIO_SUBDOMAIN || '').trim() || 'breezepg';
 
   if (!clientId || !clientSecret || !developerId) {
     return res.status(200).json({
       ok: false,
       stage: 'env_missing',
       inspections,
-      base_url: baseUrl,
       hint: 'One or more of APPFOLIO_CLIENT_ID / APPFOLIO_CLIENT_SECRET / APPFOLIO_DEVELOPER_ID is not set in this environment.',
     });
   }
 
   const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+  const headers = {
+    Authorization: `Basic ${auth}`,
+    Accept: 'application/json',
+    'X-AppFolio-Developer-ID': developerId,
+  };
 
-  let probeStatus = null;
-  let probeBodySnippet = null;
-  let probeUrl = `${baseUrl}/properties?page%5Bsize%5D=1`;
-  let probeError = null;
-  try {
-    const r = await fetch(probeUrl, {
-      headers: {
-        Authorization: `Basic ${auth}`,
-        Accept: 'application/json',
-        'X-AppFolio-Developer-ID': developerId,
-      },
-    });
-    probeStatus = r.status;
-    const text = await r.text();
-    probeBodySnippet = text.slice(0, 400);
-  } catch (err) {
-    probeError = err.message || String(err);
+  // Probe every endpoint pattern we know about so the user can see
+  // which one AppFolio's actually serving for their account.
+  const qs = 'page%5Bsize%5D=1';
+  const probes = await Promise.all([
+    probe('shared_v0',     `https://api.appfolio.com/api/v0/properties?${qs}`,            headers),
+    probe('subdomain_v0',  `https://${subdomain}.appfolio.com/api/v0/properties?${qs}`,    headers),
+    probe('subdomain_v1',  `https://${subdomain}.appfolio.com/api/v1/properties?${qs}`,    headers),
+    probe('reports_v2',    `https://${subdomain}.appfolio.com/api/v2/reports/property_directory.json`, {
+      ...headers, 'Content-Type': 'application/json',
+    }),
+  ]);
+
+  const successful = probes.find((p) => p.status === 200);
+  const hints = [];
+  if (successful) {
+    hints.push(`Working endpoint: ${successful.label} → ${successful.url}. If different from the default, set APPFOLIO_DATABASE_API_URL or APPFOLIO_SUBDOMAIN accordingly.`);
+  }
+  for (const p of probes) {
+    if (p.status === 401) hints.push(`${p.label}: 401 — credentials rejected at this host.`);
+    if (p.status === 403) hints.push(`${p.label}: 403 — auth accepted but developer-id may be wrong.`);
+    if (p.status === 404) hints.push(`${p.label}: 404 — endpoint not at this path.`);
   }
 
   return res.status(200).json({
-    ok: probeStatus === 200,
-    stage: probeStatus === 200 ? 'auth_ok' : 'auth_failed',
+    ok: !!successful,
+    stage: successful ? 'auth_ok' : 'auth_failed',
     inspections,
-    base_url: baseUrl,
-    auth_header_length: `Basic ${auth}`.length,
-    probe_url: probeUrl,
-    probe_status: probeStatus,
-    probe_body_snippet: probeBodySnippet,
-    probe_error: probeError,
-    hints: [
-      probeStatus === 401
-        ? 'AppFolio rejected the credentials. Either the client_id/client_secret were rotated on their side, or whitespace got into the env values (check has_leading/trailing_whitespace flags above).'
-        : null,
-      probeStatus === 403
-        ? 'Credentials were accepted but the developer-id may be wrong for this customer.'
-        : null,
-      probeStatus === 404
-        ? `404 — the BASE_URL is probably wrong. We called ${probeUrl}. If your AppFolio subdomain is custom (e.g. https://<customer>.appfolio.com/api/v0), set APPFOLIO_DATABASE_API_URL in Vercel.`
-        : null,
-    ].filter(Boolean),
+    subdomain_in_use: subdomain,
+    probes,
+    hints,
   });
 });
