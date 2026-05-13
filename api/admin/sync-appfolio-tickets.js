@@ -89,7 +89,10 @@ export default withAdminHandler(async (req, res) => {
   const startedAt = Date.now();
   try {
     const result = await fetchAllPages('/work_orders', params);
-    afRows = result.rows || result.data || [];
+    if (result.error) {
+      return res.status(502).json({ ok: false, error: `AppFolio: ${result.error}` });
+    }
+    afRows = result.data || [];
   } catch (err) {
     return res.status(502).json({
       ok: false,

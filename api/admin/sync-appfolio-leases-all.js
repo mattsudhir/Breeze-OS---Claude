@@ -47,8 +47,10 @@ async function syncOneProperty(tx, organizationId, property) {
     fetchAllPages('/units', { property_ids: appfolioPropertyId }),
     fetchAllPages('/tenants', { property_id: appfolioPropertyId }),
   ]);
-  const afUnits = unitsResult.rows || [];
-  const afTenants = tenantsResult.rows || [];
+  if (unitsResult.error) throw new Error(`AppFolio /units: ${unitsResult.error}`);
+  if (tenantsResult.error) throw new Error(`AppFolio /tenants: ${tenantsResult.error}`);
+  const afUnits = unitsResult.data || [];
+  const afTenants = tenantsResult.data || [];
 
   const today = new Date().toISOString().slice(0, 10);
   const activeTenants = afTenants.filter((t) => {
