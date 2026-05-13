@@ -35,6 +35,7 @@ const TABS = [
   { id: 'deposits',  label: 'Deposits',          icon: Landmark },
   { id: 'banks',     label: 'Bank Accounts',     icon: CreditCard },
   { id: 'recon',     label: 'Reconciliation',    icon: Sparkles },
+  { id: 'bill_com',  label: 'Bill.com',          icon: Send },
   { id: 'rules',     label: 'Rules',             icon: Settings },
   { id: 'reports',   label: 'Reports',           icon: BarChart3 },
 ];
@@ -114,6 +115,7 @@ export default function AccountingPage() {
             {activeTab === 'deposits' && <DepositsTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'banks' && <BankAccountsTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'recon' && <ReconciliationTab token={token} onTokenInvalid={() => setToken('')} />}
+            {activeTab === 'bill_com' && <BillComTab token={token} onTokenInvalid={() => setToken('')} onTabChange={setActiveTab} />}
             {activeTab === 'rules' && <RulesTab token={token} onTokenInvalid={() => setToken('')} />}
             {activeTab === 'reports' && <ReportsTab token={token} onTokenInvalid={() => setToken('')} />}
           </div>
@@ -1471,8 +1473,6 @@ function ReconciliationTab({ token, onTokenInvalid }) {
           earn auto-trust as they're confirmed; rules rejected 3+ times auto-disable.
         </p>
       </div>
-
-      <BookkeeperReviewSetting token={token} onTokenInvalid={onTokenInvalid} />
 
       <div style={{ marginBottom: '8px' }}>
         <button
@@ -4529,6 +4529,273 @@ function BookkeeperReviewSetting({ token, onTokenInvalid }) {
         ))}
       </select>
       {savedHint && <span style={{ marginLeft: 10, color: '#2E7D32', fontSize: 12 }}>Saved</span>}
+    </div>
+  );
+}
+
+// ── Bill.com tab ─────────────────────────────────────────────────
+//
+// One-stop surface for Bill.com integration. Surfaces the bookkeeper
+// review-location setting, lets you trigger the card-transaction sync
+// (PR #42), shows quick-counts of mapped banks + vendors, and links
+// out to where you actually set the IDs.
+
+function BillComTab({ token, onTokenInvalid, onTabChange }) {
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
+
+  const loadStatus = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [banksRes, vendorsRes] = await Promise.all([
+        fetch(`/api/admin/list-bank-accounts?secret=${encodeURIComponent(token)}`),
+        fetch(`/api/admin/list-vendors?secret=${encodeURIComponent(token)}`),
+      ]);
+      if (banksRes.status === 401 || vendorsRes.status === 401) {
+        onTokenInvalid(); return;
+      }
+      const banksJson = await banksRes.json().catch(() => ({}));
+      const vendorsJson = await vendorsRes.json().catch(() => ({}));
+      const banks = banksJson.bank_accounts || banksJson.banks || [];
+      const vendors = vendorsJson.vendors || [];
+      setStatus({
+        banks_total: banks.length,
+        banks_mapped: banks.filter((b) => b.bill_com_bank_account_id || b.bill_com_card_account_id).length,
+        banks_card_mapped: banks.filter((b) => b.bill_com_card_account_id).length,
+        vendors_total: vendors.length,
+        vendors_mapped: vendors.filter((v) => v.bill_com_vendor_id).length,
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [token, onTokenInvalid]);
+
+  useEffect(() => { loadStatus(); }, [loadStatus]);
+
+  const syncCards = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await fetch(`/api/admin/sync-bill-com-card-transactions?secret=${encodeURIComponent(token)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (res.status === 401) { onTokenInvalid(); return; }
+      const json = await res.json();
+      if (res.status === 503) {
+        setSyncResult({ ok: false, error: 'Bill.com is not configured. Set BILL_COM_USERNAME / BILL_COM_PASSWORD / BILL_COM_DEV_KEY in Vercel.' });
+        return;
+      }
+      if (!res.ok || json.ok === false) {
+        setSyncResult({ ok: false, error: json.error || `HTTP ${res.status}` });
+        return;
+      }
+      const syncedBanks = json.synced || [];
+      const totalInserted = syncedBanks.reduce((s, b) => s + (b.inserted || 0), 0);
+      const totalCandidates = syncedBanks.reduce((s, b) => s + (b.auto_match_candidates_created || 0), 0);
+      const totalSeen = syncedBanks.reduce((s, b) => s + (b.transactions_seen || 0), 0);
+      setSyncResult({
+        ok: true,
+        banks: syncedBanks.length,
+        seen: totalSeen,
+        inserted: totalInserted,
+        candidates: totalCandidates,
+        message: json.message,
+      });
+    } catch (err) {
+      setSyncResult({ ok: false, error: err.message || String(err) });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  return (
+    <div>
+      <div style={{
+        padding: '14px 16px', marginBottom: 16,
+        background: 'linear-gradient(135deg, #FCE4EC 0%, #F8BBD0 100%)',
+        borderLeft: '3px solid #AD1457', borderRadius: 8,
+      }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: '#AD1457', marginBottom: 4 }}>
+          <Send size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />
+          Bill.com integration
+        </div>
+        <div style={{ fontSize: 12, color: '#555' }}>
+          Bill.com is one of Breeze's connected systems for AP. Breeze stays the
+          categorization surface; this tab is where you wire it up and pull data in.
+        </div>
+      </div>
+
+      <BookkeeperReviewSetting token={token} onTokenInvalid={onTokenInvalid} />
+
+      {/* Status cards */}
+      <div style={{
+        display: 'grid', gap: 10, marginTop: 16, marginBottom: 16,
+        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+      }}>
+        <StatusCard
+          loading={loading}
+          label="Bank accounts mapped"
+          value={status ? `${status.banks_mapped} / ${status.banks_total}` : '—'}
+          sub={status ? `${status.banks_card_mapped} card-mapped` : ''}
+          onClick={() => onTabChange?.('banks')}
+        />
+        <StatusCard
+          loading={loading}
+          label="Vendors mapped"
+          value={status ? `${status.vendors_mapped} / ${status.vendors_total}` : '—'}
+          sub="Required for AP payments"
+          onClick={() => onTabChange?.('vendors')}
+        />
+      </div>
+
+      {/* Card transaction sync */}
+      <div style={{
+        padding: 16, marginBottom: 16, background: '#fff',
+        border: '1px solid #e0e0e0', borderRadius: 10,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 240 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
+              <Download size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />
+              Sync card transactions
+            </div>
+            <div style={{ fontSize: 12, color: '#666' }}>
+              Pulls recent Bill.com charge-card transactions and writes them into
+              Breeze's <code>bank_transactions</code> table. Runs your reconciliation
+              rules so auto-match candidates appear immediately. Idempotent — safe
+              to re-run.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={syncCards}
+            disabled={syncing || !status?.banks_card_mapped}
+            style={{
+              padding: '8px 14px', border: 'none',
+              background: (syncing || !status?.banks_card_mapped) ? '#bbb' : '#AD1457',
+              color: '#fff', borderRadius: 6,
+              cursor: (syncing || !status?.banks_card_mapped) ? 'not-allowed' : 'pointer',
+              fontSize: 13, fontWeight: 600,
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            {syncing
+              ? <><RefreshCw size={13} className="spin" /> Syncing…</>
+              : <><Download size={13} /> Sync now</>}
+          </button>
+        </div>
+        {!loading && !status?.banks_card_mapped && (
+          <div style={{
+            marginTop: 10, padding: '8px 12px', background: '#FFF8E1',
+            border: '1px solid #FFE082', borderRadius: 6, fontSize: 12, color: '#6D4C00',
+          }}>
+            No bank accounts have a Bill.com card-account ID set yet. Go to{' '}
+            <button
+              type="button"
+              onClick={() => onTabChange?.('banks')}
+              style={{
+                background: 'none', border: 'none', padding: 0, color: '#1565C0',
+                textDecoration: 'underline', cursor: 'pointer', font: 'inherit',
+              }}
+            >Bank Accounts</button>{' '}
+            and set <em>Bill.com card id</em> on at least one card to enable this sync.
+          </div>
+        )}
+        {syncResult && (
+          <div style={{
+            marginTop: 12, padding: '10px 12px', borderRadius: 6, fontSize: 13,
+            background: syncResult.ok ? '#E8F5E9' : '#FFEBEE',
+            color: syncResult.ok ? '#2E7D32' : '#C62828',
+            border: `1px solid ${syncResult.ok ? '#C8E6C9' : '#FFCDD2'}`,
+          }}>
+            {syncResult.ok
+              ? syncResult.banks > 0
+                ? <><Check size={13} style={{ verticalAlign: '-2px' }} /> Synced {syncResult.banks} card{syncResult.banks === 1 ? '' : 's'} — {syncResult.seen} transactions seen, {syncResult.inserted} new, {syncResult.candidates} auto-match candidate{syncResult.candidates === 1 ? '' : 's'} created.</>
+                : <><Check size={13} style={{ verticalAlign: '-2px' }} /> {syncResult.message || 'Nothing to sync.'}</>
+              : <><AlertCircle size={13} style={{ verticalAlign: '-2px' }} /> {syncResult.error}</>}
+          </div>
+        )}
+      </div>
+
+      {/* Where things live */}
+      <div style={{
+        padding: 14, background: '#fafbfc', border: '1px solid #e8eaed',
+        borderRadius: 10, fontSize: 12, color: '#555',
+      }}>
+        <div style={{ fontWeight: 600, marginBottom: 8, color: '#222', fontSize: 13 }}>
+          Where Bill.com touches Breeze
+        </div>
+        <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.7 }}>
+          <li>
+            <button
+              type="button"
+              onClick={() => onTabChange?.('vendors')}
+              style={{
+                background: 'none', border: 'none', padding: 0, color: '#1565C0',
+                textDecoration: 'underline', cursor: 'pointer', font: 'inherit',
+              }}
+            >Vendors tab</button> — set each vendor's <code>bill_com_vendor_id</code> so AP payments can route.
+          </li>
+          <li>
+            <button
+              type="button"
+              onClick={() => onTabChange?.('banks')}
+              style={{
+                background: 'none', border: 'none', padding: 0, color: '#1565C0',
+                textDecoration: 'underline', cursor: 'pointer', font: 'inherit',
+              }}
+            >Bank Accounts tab</button> — set each bank's <code>bill_com_bank_account_id</code>
+            (for checks/ACH) and <code>bill_com_card_account_id</code> (for credit cards / sync).
+          </li>
+          <li>
+            <button
+              type="button"
+              onClick={() => onTabChange?.('bills')}
+              style={{
+                background: 'none', border: 'none', padding: 0, color: '#1565C0',
+                textDecoration: 'underline', cursor: 'pointer', font: 'inherit',
+              }}
+            >Bills tab</button> — when scheduling a bill payment, pick "Bill.com" as the method.
+          </li>
+          <li>
+            <button
+              type="button"
+              onClick={() => onTabChange?.('recon')}
+              style={{
+                background: 'none', border: 'none', padding: 0, color: '#1565C0',
+                textDecoration: 'underline', cursor: 'pointer', font: 'inherit',
+              }}
+            >Reconciliation tab</button> — synced card transactions land here for matching to bills/JEs.
+          </li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function StatusCard({ label, value, sub, loading, onClick }) {
+  return (
+    <div
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } } : undefined}
+      style={{
+        padding: '12px 14px', background: '#fff', border: '1px solid #e0e0e0',
+        borderRadius: 10, cursor: onClick ? 'pointer' : 'default',
+      }}
+    >
+      <div style={{ fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', marginBottom: 4 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: '#222' }}>
+        {loading ? '…' : value}
+      </div>
+      {sub && <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>{sub}</div>}
     </div>
   );
 }
