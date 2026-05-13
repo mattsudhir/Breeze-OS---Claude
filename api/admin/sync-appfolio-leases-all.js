@@ -304,7 +304,18 @@ export default withAdminHandler(async (req, res) => {
   let aborted = false;
   let abortReason = null;
 
-  for (const property of properties) {
+  // Soft throttle: 150ms gap between properties. Each property fires
+  // 2 AppFolio calls (/units + /tenants), so this keeps us under ~13
+  // req/sec — comfortably below AppFolio's ~10/sec rate ceiling once
+  // overhead is factored in. fetchAllPages also honors Retry-After on
+  // 429s as a safety net.
+  const PROPERTY_DELAY_MS = 150;
+
+  for (let i = 0; i < properties.length; i += 1) {
+    const property = properties[i];
+    if (i > 0) {
+      await new Promise((resolve) => setTimeout(resolve, PROPERTY_DELAY_MS));
+    }
     try {
       const summary = await db.transaction((tx) => syncOneProperty(tx, organizationId, property));
       results.push({
