@@ -57,7 +57,7 @@ permissions:
 jobs:
   build:
     name: Build APK / AAB
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     timeout-minutes: 30
 
     env:
@@ -66,6 +66,10 @@ jobs:
       # builds should be tag-driven; we'll switch when there's a
       # tagging convention.)
       DO_RELEASE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'release' }}
+      # Hoisting the secret into an env var here makes it visible to
+      # `if:` expressions on individual steps. GitHub blocks
+      # `secrets.*` from being referenced directly in conditionals.
+      GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
 
     steps:
       - name: Checkout repository
@@ -83,17 +87,14 @@ jobs:
           node-version: '22'
           cache: npm
 
-      # The ubuntu-22.04 image ships with the Android SDK pre-installed
-      # but at a varying API level. Force-install platforms-35 +
-      # build-tools-35.0.0 so Gradle has what variables.gradle asks for.
-      - name: Install Android SDK packages
-        run: |
-          set -e
-          yes | sdkmanager --licenses >/dev/null 2>&1 || true
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
+      # Use the maintained Android Actions setup. It installs the
+      # command-line tools, accepts every Android SDK license, and
+      # puts sdkmanager on PATH. Then we request the exact packages
+      # variables.gradle wants (compileSdk = 35, build-tools 35.0.0).
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
 
       - name: Install JS dependencies
         run: npm ci --no-audit --no-fund
@@ -107,9 +108,7 @@ jobs:
       # runtime. We keep it optional so first-time CI runs work
       # before Firebase is provisioned.
       - name: Write google-services.json
-        if: env.GOOGLE_SERVICES_JSON != ''
-        env:
-          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        if: ${{ env.GOOGLE_SERVICES_JSON != '' }}
         run: |
           printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
           echo "google-services.json written ($(wc -c < android/app/google-services.json) bytes)"
@@ -119,12 +118,12 @@ jobs:
 
       # ── Debug branch ────────────────────────────────────────────
       - name: Build debug APK
-        if: env.DO_RELEASE != 'true'
+        if: ${{ env.DO_RELEASE != 'true' }}
         working-directory: android
-        run: ./gradlew --no-daemon assembleDebug
+        run: ./gradlew --no-daemon --stacktrace assembleDebug
 
       - name: Upload debug APK
-        if: env.DO_RELEASE != 'true'
+        if: ${{ env.DO_RELEASE != 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: breeze-os-debug-apk
@@ -134,7 +133,7 @@ jobs:
 
       # ── Release branch (signed AAB for Play Console) ────────────
       - name: Decode signing keystore
-        if: env.DO_RELEASE == 'true'
+        if: ${{ env.DO_RELEASE == 'true' }}
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
@@ -148,7 +147,7 @@ jobs:
           echo "Decoded keystore: $(wc -c < android/keystore/release.jks) bytes"
 
       - name: Write keystore.properties
-        if: env.DO_RELEASE == 'true'
+        if: ${{ env.DO_RELEASE == 'true' }}
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS:         ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -162,12 +161,12 @@ jobs:
           } > android/keystore.properties
 
       - name: Build release AAB
-        if: env.DO_RELEASE == 'true'
+        if: ${{ env.DO_RELEASE == 'true' }}
         working-directory: android
-        run: ./gradlew --no-daemon bundleRelease
+        run: ./gradlew --no-daemon --stacktrace bundleRelease
 
       - name: Upload release AAB
-        if: env.DO_RELEASE == 'true'
+        if: ${{ env.DO_RELEASE == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: breeze-os-release-aab
