@@ -38,7 +38,16 @@ async function syncOneProperty(tx, organizationId, property) {
     return { skipped: true, reason: 'invalid source_property_id' };
   }
 
-  const tenantsResult = await fetchAllPages('/tenants', { property_id: appfolioPropertyId });
+  // Pull units AND tenants for the property in parallel. Units pass
+  // gives us AppFolio's UnitId → UnitName, which we use to match our
+  // already-imported units by source_unit_name (since bulk-import
+  // didn't populate source_unit_id). We also backfill source_unit_id
+  // on our rows so subsequent syncs are fast.
+  const [unitsResult, tenantsResult] = await Promise.all([
+    fetchAllPages('/units', { property_ids: appfolioPropertyId }),
+    fetchAllPages('/tenants', { property_id: appfolioPropertyId }),
+  ]);
+  const afUnits = unitsResult.rows || [];
   const afTenants = tenantsResult.rows || [];
 
   const today = new Date().toISOString().slice(0, 10);
@@ -55,13 +64,18 @@ async function syncOneProperty(tx, organizationId, property) {
       tenants_upserted: 0,
       leases_upserted: 0,
       leases_skipped_no_unit: 0,
+      unit_ids_backfilled: 0,
     };
   }
 
-  // Map AppFolio UnitId → our unit_id (units must already exist; bulk-import
-  // populated them with source_unit_id from AppFolio).
+  // Load our units for this property — both source_unit_id (if set)
+  // and source_unit_name (always set by bulk-import).
   const ourUnits = await tx
-    .select({ id: schema.units.id, sourceUnitId: schema.units.sourceUnitId })
+    .select({
+      id: schema.units.id,
+      sourceUnitId: schema.units.sourceUnitId,
+      sourceUnitName: schema.units.sourceUnitName,
+    })
     .from(schema.units)
     .where(
       and(
@@ -69,9 +83,42 @@ async function syncOneProperty(tx, organizationId, property) {
         eq(schema.units.propertyId, property.id),
       ),
     );
-  const unitIdBySource = new Map(
-    ourUnits.filter((u) => u.sourceUnitId).map((u) => [String(u.sourceUnitId), u.id]),
-  );
+
+  // Map approaches, in priority order:
+  //   1. (already-set source_unit_id) → our unit_id  — exact match
+  //   2. (source_unit_name) → our unit_id            — fallback for
+  //      units imported via bulk CSV without an AppFolio UnitId
+  const unitIdBySource = new Map();
+  const ourUnitByName = new Map();
+  for (const u of ourUnits) {
+    if (u.sourceUnitId) unitIdBySource.set(String(u.sourceUnitId), u.id);
+    if (u.sourceUnitName) ourUnitByName.set(String(u.sourceUnitName).trim(), u.id);
+  }
+
+  // Walk AppFolio's unit list, fill any gaps in the lookup, and
+  // backfill source_unit_id on rows that matched by name.
+  let unitIdsBackfilled = 0;
+  for (const au of afUnits) {
+    const afUnitId = au.UnitId != null ? String(au.UnitId) : null;
+    if (!afUnitId) continue;
+    if (unitIdBySource.has(afUnitId)) continue;
+
+    const candidateNames = [au.UnitName, au.Address1, au.AddressLine1]
+      .filter(Boolean)
+      .map((s) => String(s).trim());
+    let matched = null;
+    for (const name of candidateNames) {
+      if (ourUnitByName.has(name)) { matched = ourUnitByName.get(name); break; }
+    }
+    if (matched) {
+      unitIdBySource.set(afUnitId, matched);
+      await tx
+        .update(schema.units)
+        .set({ sourceUnitId: afUnitId, updatedAt: new Date() })
+        .where(eq(schema.units.id, matched));
+      unitIdsBackfilled += 1;
+    }
+  }
 
   let tenantsUpserted = 0;
   let leasesUpserted = 0;
@@ -193,6 +240,7 @@ async function syncOneProperty(tx, organizationId, property) {
     tenants_upserted: tenantsUpserted,
     leases_upserted: leasesUpserted,
     leases_skipped_no_unit: leasesSkippedNoUnit,
+    unit_ids_backfilled: unitIdsBackfilled,
   };
 }
 
@@ -249,6 +297,7 @@ export default withAdminHandler(async (req, res) => {
   let totalTenants = 0;
   let totalLeases = 0;
   let totalSkippedNoUnit = 0;
+  let totalUnitIdsBackfilled = 0;
 
   for (const property of properties) {
     try {
@@ -262,6 +311,7 @@ export default withAdminHandler(async (req, res) => {
       totalTenants += summary.tenants_upserted || 0;
       totalLeases += summary.leases_upserted || 0;
       totalSkippedNoUnit += summary.leases_skipped_no_unit || 0;
+      totalUnitIdsBackfilled += summary.unit_ids_backfilled || 0;
     } catch (err) {
       results.push({
         property_id: property.id,
@@ -285,6 +335,7 @@ export default withAdminHandler(async (req, res) => {
       tenants_upserted: totalTenants,
       leases_upserted: totalLeases,
       leases_skipped_no_unit: totalSkippedNoUnit,
+      unit_ids_backfilled: totalUnitIdsBackfilled,
     },
     results,
   });

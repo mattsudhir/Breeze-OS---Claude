@@ -166,7 +166,7 @@ function SyncAppfolioLeasesTab() {
   const [running, setRunning] = useState(false);
   const [stopped, setStopped] = useState(false);
   const [progress, setProgress] = useState({ processed: 0, total: 0 });
-  const [totals, setTotals] = useState({ tenants: 0, leases: 0, skipped: 0 });
+  const [totals, setTotals] = useState({ tenants: 0, leases: 0, skipped: 0, backfilled: 0 });
   const [errors, setErrors] = useState([]);
   const [lastError, setLastError] = useState(null);
   const [batchSize, setBatchSize] = useState(25);
@@ -176,7 +176,7 @@ function SyncAppfolioLeasesTab() {
     setStopped(false);
     setErrors([]);
     setLastError(null);
-    setTotals({ tenants: 0, leases: 0, skipped: 0 });
+    setTotals({ tenants: 0, leases: 0, skipped: 0, backfilled: 0 });
     setProgress({ processed: 0, total: 0 });
 
     let offset = 0;
@@ -184,6 +184,7 @@ function SyncAppfolioLeasesTab() {
     let totalTenants = 0;
     let totalLeases = 0;
     let totalSkipped = 0;
+    let totalBackfilled = 0;
     const seenErrors = [];
 
     try {
@@ -204,11 +205,12 @@ function SyncAppfolioLeasesTab() {
         totalTenants += json.totals?.tenants_upserted || 0;
         totalLeases += json.totals?.leases_upserted || 0;
         totalSkipped += json.totals?.leases_skipped_no_unit || 0;
+        totalBackfilled += json.totals?.unit_ids_backfilled || 0;
         for (const r of json.results || []) {
           if (r.error) seenErrors.push({ name: r.display_name, error: r.error });
         }
         setProgress({ processed: offset, total });
-        setTotals({ tenants: totalTenants, leases: totalLeases, skipped: totalSkipped });
+        setTotals({ tenants: totalTenants, leases: totalLeases, skipped: totalSkipped, backfilled: totalBackfilled });
         setErrors([...seenErrors]);
 
         if (!json.has_more) break;
@@ -274,6 +276,7 @@ function SyncAppfolioLeasesTab() {
             <strong>{totals.tenants}</strong> tenants upserted
             {' · '}
             <strong>{totals.leases}</strong> leases upserted
+            {totals.backfilled > 0 && <>{' · '}<strong>{totals.backfilled}</strong> unit IDs backfilled</>}
             {totals.skipped > 0 && <>{' · '}<strong>{totals.skipped}</strong> skipped (unit not in DB)</>}
           </div>
         </div>
