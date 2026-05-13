@@ -103,19 +103,29 @@ export default withAdminHandler(async (req, res) => {
   let afTenants;
   try {
     const propResult = await fetchAllPages('/properties', { property_ids: appfolioPropertyId });
-    if (!propResult.rows || propResult.rows.length === 0) {
+    if (propResult.error) {
+      return res.status(502).json({ ok: false, error: `AppFolio /properties: ${propResult.error}` });
+    }
+    const propRows = propResult.data || [];
+    if (propRows.length === 0) {
       return res.status(404).json({
         ok: false,
         error: `AppFolio property ${appfolioPropertyId} not found`,
       });
     }
-    afProperty = propResult.rows[0];
+    afProperty = propRows[0];
 
     const unitsResult = await fetchAllPages('/units', { property_ids: appfolioPropertyId });
-    afUnits = unitsResult.rows || [];
+    if (unitsResult.error) {
+      return res.status(502).json({ ok: false, error: `AppFolio /units: ${unitsResult.error}` });
+    }
+    afUnits = unitsResult.data || [];
 
     const tenantsResult = await fetchAllPages('/tenants', { property_id: appfolioPropertyId });
-    afTenants = tenantsResult.rows || [];
+    if (tenantsResult.error) {
+      return res.status(502).json({ ok: false, error: `AppFolio /tenants: ${tenantsResult.error}` });
+    }
+    afTenants = tenantsResult.data || [];
   } catch (err) {
     return res.status(502).json({
       ok: false,
