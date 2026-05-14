@@ -186,4 +186,10 @@ export const appfolioDiagnostics = {
   leasesState: () => adminFetch('/api/admin/debug-leases-state'),
   syncOneProperty: (body = {}) =>
     adminFetch('/api/admin/sync-appfolio-leases-one', { method: 'POST', body }),
+  // Batched — caller loops with rolling offset until has_more=false.
+  backfillUnitIdsBatch: ({ dryRun = true, offset = 0, limit = 25 } = {}) =>
+    adminFetch('/api/admin/backfill-appfolio-unit-ids', {
+      method: 'POST',
+      body: { dry_run: dryRun, offset, limit },
+    }),
 };
