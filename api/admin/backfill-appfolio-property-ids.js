@@ -186,6 +186,8 @@ export default withAdminHandler(async (req, res) => {
     dry_run: dryRun,
     fetch_ms: Date.now() - t0,
     appfolio_properties_returned: afProperties.length,
+    appfolio_raw_sample_keys: afProperties[0] ? Object.keys(afProperties[0]) : [],
+    appfolio_raw_sample_row: afProperties[0] || null,
     our_properties_total: ourProps.length,
     matches_count: matches.length,
     matches_will_update_count: matches.filter((m) => m.will_update).length,
