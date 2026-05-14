@@ -108,7 +108,40 @@ async function syncOneProperty(tx, organizationId, property) {
   // (NOT `UnitId` — that's only on rows that REFERENCE a unit, like
   // tenants/work-orders). The display name is `Name` / `UnitNumber`
   // / `Address1`.
+  //
+  // The DB write of source_unit_id is just a caching optimization —
+  // unitIdBySource (in-memory) is what actually resolves leases. So
+  // when a write would collide with units_org_source_unit_unique
+  // (the same AppFolio unit id already on another row, or this row
+  // already claimed), skip the write but keep the in-memory mapping.
   let unitIdsBackfilled = 0;
+  const assignedOurUnitIds = new Set();
+
+  async function tryBackfillSourceUnitId(ourUnitId, afUnitId) {
+    if (assignedOurUnitIds.has(ourUnitId)) return; // already wrote this row
+    const [collision] = await tx
+      .select({ id: schema.units.id })
+      .from(schema.units)
+      .where(
+        and(
+          eq(schema.units.organizationId, organizationId),
+          eq(schema.units.sourceUnitId, afUnitId),
+        ),
+      )
+      .limit(1);
+    if (collision && collision.id !== ourUnitId) return; // someone else owns it
+    if (collision && collision.id === ourUnitId) {
+      assignedOurUnitIds.add(ourUnitId);
+      return; // already correct, no write needed
+    }
+    await tx
+      .update(schema.units)
+      .set({ sourceUnitId: afUnitId, updatedAt: new Date() })
+      .where(eq(schema.units.id, ourUnitId));
+    assignedOurUnitIds.add(ourUnitId);
+    unitIdsBackfilled += 1;
+  }
+
   for (const au of afUnits) {
     const afUnitId = au.Id != null ? String(au.Id) : null;
     if (!afUnitId) continue;
@@ -123,11 +156,7 @@ async function syncOneProperty(tx, organizationId, property) {
     }
     if (matched) {
       unitIdBySource.set(afUnitId, matched);
-      await tx
-        .update(schema.units)
-        .set({ sourceUnitId: afUnitId, updatedAt: new Date() })
-        .where(eq(schema.units.id, matched));
-      unitIdsBackfilled += 1;
+      await tryBackfillSourceUnitId(matched, afUnitId);
     }
   }
 
@@ -142,11 +171,7 @@ async function syncOneProperty(tx, organizationId, property) {
     const onlyOurUnit = ourUnits[0];
     if (onlyAfId && !unitIdBySource.has(onlyAfId)) {
       unitIdBySource.set(onlyAfId, onlyOurUnit.id);
-      await tx
-        .update(schema.units)
-        .set({ sourceUnitId: onlyAfId, updatedAt: new Date() })
-        .where(eq(schema.units.id, onlyOurUnit.id));
-      unitIdsBackfilled += 1;
+      await tryBackfillSourceUnitId(onlyOurUnit.id, onlyAfId);
     }
   }
 
