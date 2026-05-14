@@ -87,20 +87,54 @@ export default withAdminHandler(async (req, res) => {
     }),
   ]);
 
-  const successful = probes.find((p) => p.status === 200);
+  // Intermittency check: same shared_v0 probe, 5 times, sequentially.
+  // If the secret is genuinely dead we get 5×401. If it's an IP
+  // allowlist or rate-limit problem we get a MIX — that's the
+  // smoking gun the user needs to see.
+  const repeatProbes = [];
+  for (let i = 0; i < 5; i += 1) {
+    const r = await probe(`repeat_${i + 1}`, `https://api.appfolio.com/api/v0/properties?${qs}`, headers);
+    repeatProbes.push({ attempt: i + 1, status: r.status, error: r.error || null });
+  }
+  const repeatStatuses = repeatProbes.map((r) => r.status);
+  const distinctStatuses = [...new Set(repeatStatuses)];
+  const intermittent = distinctStatuses.length > 1;
+
+  const successful = probes.find((p) => p.status === 200) ||
+    (repeatStatuses.includes(200) ? { label: 'repeat', url: 'shared_v0' } : null);
   const hints = [];
-  if (successful) {
-    hints.push(`Working endpoint: ${successful.label} → ${successful.url}. If different from the default, set APPFOLIO_DATABASE_API_URL or APPFOLIO_SUBDOMAIN accordingly.`);
+
+  if (intermittent) {
+    hints.push(
+      `INTERMITTENT: 5 identical probes returned mixed statuses ${JSON.stringify(repeatStatuses)}. ` +
+      'The secret is VALID — this is not a dead credential. Cause is almost certainly either ' +
+      '(a) an IP allowlist on the AppFolio Database API credential (Vercel runs from rotating IPs, ' +
+      'so only some invocations land on an allowed IP), or (b) AppFolio rate-limiting. ' +
+      'Check AppFolio Developer Space for an "Allowed IPs" / IP restriction setting on the breezepg ' +
+      'credential and either remove it or add Vercel\'s IP ranges.',
+    );
+  } else if (distinctStatuses[0] === 401) {
+    hints.push('All 5 probes returned 401 — credential is genuinely rejected. Regenerate the Client Secret and update Vercel.');
+  } else if (distinctStatuses[0] === 200) {
+    hints.push('All 5 probes returned 200 — auth is healthy right now.');
+  } else if (distinctStatuses[0] === 429) {
+    hints.push('All 5 probes returned 429 — AppFolio is rate-limiting. Wait for the cooldown and retry.');
+  }
+
+  if (successful && !intermittent) {
+    hints.push(`Working endpoint: ${successful.label}.`);
   }
   for (const p of probes) {
-    if (p.status === 401) hints.push(`${p.label}: 401 — credentials rejected at this host.`);
     if (p.status === 403) hints.push(`${p.label}: 403 — auth accepted but developer-id may be wrong.`);
     if (p.status === 404) hints.push(`${p.label}: 404 — endpoint not at this path.`);
   }
 
   return res.status(200).json({
-    ok: !!successful,
-    stage: successful ? 'auth_ok' : 'auth_failed',
+    ok: repeatStatuses.includes(200),
+    stage: intermittent ? 'intermittent' : (repeatStatuses.includes(200) ? 'auth_ok' : 'auth_failed'),
+    intermittent,
+    repeat_probe_statuses: repeatStatuses,
+    repeat_probes: repeatProbes,
     inspections,
     subdomain_in_use: subdomain,
     probes,
