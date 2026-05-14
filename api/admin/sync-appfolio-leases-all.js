@@ -65,10 +65,17 @@ async function syncOneProperty(tx, organizationId, property) {
   const afUnits = unitsResult.data || [];
   const afTenants = tenantsResult.data || [];
 
-  const today = new Date().toISOString().slice(0, 10);
+  // AppFolio's tenant Status is the authoritative "is this occupancy
+  // active" flag. Month-to-month tenants commonly have a LeaseEndDate
+  // years in the past while Status stays 'Current' and MoveOutOn is
+  // null — so filtering on the end date would wrongly drop them.
   const activeTenants = afTenants.filter((t) => {
-    const end = t.LeaseToDate || t.LeaseTo || null;
-    return !end || end >= today;
+    const status = String(t.Status || '').toLowerCase();
+    if (status === 'current' || status === 'notice') return true;
+    // Fallback for older payloads with no Status: present if they
+    // haven't moved out.
+    if (!t.Status && !t.MoveOutOn && !t.MoveOutDate) return true;
+    return false;
   });
 
   if (activeTenants.length === 0) {
@@ -79,6 +86,7 @@ async function syncOneProperty(tx, organizationId, property) {
       tenants_upserted: 0,
       leases_upserted: 0,
       leases_skipped_no_unit: 0,
+      leases_skipped_no_start: 0,
       unit_ids_backfilled: 0,
     };
   }
@@ -187,9 +195,13 @@ async function syncOneProperty(tx, organizationId, property) {
   let tenantsUpserted = 0;
   let leasesUpserted = 0;
   let leasesSkippedNoUnit = 0;
+  let leasesSkippedNoStart = 0;
 
   for (const t of activeTenants) {
-    const sourceTenantId = String(t.TenantId || t.OccupancyId || '');
+    // AppFolio's tenant primary key is `Id`. OccupancyId is the
+    // shared lease/occupancy key — falling back to it would collapse
+    // two roommates into one tenant row.
+    const sourceTenantId = String(t.Id || t.OccupancyId || '');
     if (!sourceTenantId) continue;
 
     const firstName = t.FirstName || null;
@@ -242,13 +254,21 @@ async function syncOneProperty(tx, organizationId, property) {
       continue;
     }
 
-    const startDate = t.LeaseFromDate || t.LeaseFrom || null;
-    const endDate = t.LeaseToDate || t.LeaseTo || null;
-    const rent = t.Rent || t.MonthlyRent || 0;
+    // AppFolio tenant lease fields: LeaseStartDate / LeaseEndDate /
+    // CurrentRent. Fall back to MoveInOn for the start when a tenant
+    // predates structured lease data.
+    const startDate = t.LeaseStartDate || t.MoveInOn || null;
+    const endDate = t.LeaseEndDate || null;
+    const rent = t.CurrentRent || t.MarketRent || 0;
     const rentCents = Math.round(Number(rent) * 100);
-    if (!startDate) continue;
+    if (!startDate) {
+      leasesSkippedNoStart += 1;
+      continue;
+    }
 
-    const sourceLeaseId = String(t.OccupancyId || t.TenantId);
+    // One lease per AppFolio occupancy — roommates share an
+    // OccupancyId and get linked to the same lease via lease_tenants.
+    const sourceLeaseId = String(t.OccupancyId || t.Id);
     const [existingLease] = await tx
       .select({ id: schema.leases.id })
       .from(schema.leases)
@@ -304,6 +324,7 @@ async function syncOneProperty(tx, organizationId, property) {
     tenants_upserted: tenantsUpserted,
     leases_upserted: leasesUpserted,
     leases_skipped_no_unit: leasesSkippedNoUnit,
+    leases_skipped_no_start: leasesSkippedNoStart,
     unit_ids_backfilled: unitIdsBackfilled,
   };
 }
@@ -365,6 +386,7 @@ export default withAdminHandler(async (req, res) => {
   let totalTenants = 0;
   let totalLeases = 0;
   let totalSkippedNoUnit = 0;
+  let totalSkippedNoStart = 0;
   let totalUnitIdsBackfilled = 0;
   let consecutive401s = 0;
   let aborted = false;
@@ -405,6 +427,7 @@ export default withAdminHandler(async (req, res) => {
       totalTenants += summary.tenants_upserted || 0;
       totalLeases += summary.leases_upserted || 0;
       totalSkippedNoUnit += summary.leases_skipped_no_unit || 0;
+      totalSkippedNoStart += summary.leases_skipped_no_start || 0;
       totalUnitIdsBackfilled += summary.unit_ids_backfilled || 0;
       consecutive401s = 0;
       await recordHealth(organizationId, 'appfolio_database', 'AppFolio (Database API)', { ok: true });
@@ -452,6 +475,7 @@ export default withAdminHandler(async (req, res) => {
       tenants_upserted: totalTenants,
       leases_upserted: totalLeases,
       leases_skipped_no_unit: totalSkippedNoUnit,
+      leases_skipped_no_start: totalSkippedNoStart,
       unit_ids_backfilled: totalUnitIdsBackfilled,
     },
     results,
