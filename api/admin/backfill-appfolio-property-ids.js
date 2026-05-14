@@ -35,11 +35,18 @@ function normalize(s) {
 }
 
 export default withAdminHandler(async (req, res) => {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ ok: false, error: 'POST only' });
+  if (req.method !== 'POST' && req.method !== 'GET') {
+    return res.status(405).json({ ok: false, error: 'POST or GET only' });
   }
-  const body = parseBody(req);
-  const dryRun = body.dry_run !== false; // default true
+  // Body wins, then query string. Default dry_run=true for safety.
+  const body = req.method === 'POST' ? parseBody(req) : {};
+  const queryDryRun = req.query?.dry_run;
+  const dryRun =
+    body.dry_run !== undefined
+      ? body.dry_run !== false
+      : queryDryRun !== undefined
+        ? !(queryDryRun === 'false' || queryDryRun === '0')
+        : true;
   const db = getDb();
   const organizationId = await getDefaultOrgId();
 
