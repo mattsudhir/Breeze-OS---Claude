@@ -250,6 +250,7 @@ export default withAdminHandler(async (req, res) => {
   let totalWritten = 0;       // matches with no collision (written when !dryRun)
   let totalAlreadySet = 0;
   let totalConflicts = 0;
+  let totalStaleReclaimed = 0; // ids stolen back from a stale cross-property squatter
   const unmatchedSamples = [];   // { property, our:[...], appfolio:[...] }
   const conflictSamples = [];    // { property, our_name, af_name, af_id, owned_by }
   const errors = [];
@@ -267,13 +268,18 @@ export default withAdminHandler(async (req, res) => {
 
         let written = 0;
         let conflicts = 0;
+        let staleReclaimed = 0;
         const conflicts_detail = [];
         for (const m of plan.match_plan) {
           // Collision check runs for BOTH preview and apply — a
           // dry run that "would write" something that'll actually
           // collide is a lie. Only the UPDATE is gated by dryRun.
           const [collision] = await tx
-            .select({ id: schema.units.id, sourceUnitName: schema.units.sourceUnitName })
+            .select({
+              id: schema.units.id,
+              propertyId: schema.units.propertyId,
+              sourceUnitName: schema.units.sourceUnitName,
+            })
             .from(schema.units)
             .where(
               and(
@@ -283,6 +289,31 @@ export default withAdminHandler(async (req, res) => {
             )
             .limit(1);
           if (collision && collision.id !== m.ourUnitId) {
+            // AppFolio says m.afId belongs to THIS property (we got
+            // it from /units?filters[PropertyId]=this property). If
+            // the squatter is in a DIFFERENT property, its
+            // source_unit_id is stale — left over from a sync that
+            // ran while properties were mis-mapped. Null the
+            // squatter and take the id; the squatter re-matches to
+            // its own correct unit on its property's pass.
+            //
+            // Only a same-property squatter is a genuine conflict
+            // (true ambiguity) — skip those.
+            if (collision.propertyId !== property.id) {
+              if (!dryRun) {
+                await tx
+                  .update(schema.units)
+                  .set({ sourceUnitId: null, updatedAt: new Date() })
+                  .where(eq(schema.units.id, collision.id));
+                await tx
+                  .update(schema.units)
+                  .set({ sourceUnitId: m.afId, updatedAt: new Date() })
+                  .where(eq(schema.units.id, m.ourUnitId));
+              }
+              staleReclaimed += 1;
+              written += 1;
+              continue;
+            }
             conflicts += 1;
             conflicts_detail.push({
               our_name: m.ourName,
@@ -301,13 +332,14 @@ export default withAdminHandler(async (req, res) => {
           }
           written += 1;
         }
-        return { ...plan, written, conflicts, conflicts_detail };
+        return { ...plan, written, conflicts, staleReclaimed, conflicts_detail };
       });
       processed += 1;
       if (result.skipped) continue;
       totalWritten += result.written;
       totalAlreadySet += result.already_set;
       totalConflicts += result.conflicts;
+      totalStaleReclaimed += result.staleReclaimed || 0;
       // Pair up unmatched AppFolio + unmatched our units for this
       // property so both sides are visible side-by-side.
       if ((result.unmatched_appfolio.length || result.unmatched_our.length)
@@ -348,6 +380,7 @@ export default withAdminHandler(async (req, res) => {
     totals: {
       units_written: totalWritten,
       units_already_set: totalAlreadySet,
+      stale_ids_reclaimed: totalStaleReclaimed,
       conflicts: totalConflicts,
       unmatched_properties: unmatchedSamples.length,
     },
