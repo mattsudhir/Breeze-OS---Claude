@@ -33,13 +33,19 @@ function isAppfolioConfigured() {
   );
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 async function syncOneProperty(tx, organizationId, property) {
-  // source_property_id is AppFolio's property Id — a UUID string,
-  // not an integer. (It used to be a RentManager integer; migration
-  // 0031 widened the column and the backfill rewrote the values.)
+  // source_property_id is AppFolio's property Id — a UUID string.
+  // AppFolio's filters[PropertyId] 422s on anything non-UUID, so a
+  // property whose id the backfill couldn't match (still holding its
+  // old RentManager integer) is skipped cleanly instead of erroring.
   const appfolioPropertyId = String(property.sourcePropertyId || '').trim();
   if (!appfolioPropertyId) {
     return { skipped: true, reason: 'missing source_property_id' };
+  }
+  if (!UUID_RE.test(appfolioPropertyId)) {
+    return { skipped: true, reason: 'source_property_id is not a UUID (un-backfilled property)' };
   }
 
   // Pull units AND tenants for this property in parallel.
