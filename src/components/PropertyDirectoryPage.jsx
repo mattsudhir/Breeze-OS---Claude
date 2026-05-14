@@ -340,6 +340,7 @@ function ResultBlock({ result }) {
   if (kind === 'unitBackfill') {
     const t = data.totals || {};
     const unmatched = data.unmatched || [];
+    const conflicts = data.conflicts || [];
     return (
       <div style={{
         padding: 12, background: '#FAFAFA', border: '1px solid #1565C0',
@@ -350,31 +351,53 @@ function ResultBlock({ result }) {
         </div>
         <table style={{ fontSize: 13, borderSpacing: '0 2px' }}>
           <tbody>
-            <tr><td style={{ paddingRight: 12, color: '#777' }}>Units matched {data.dry_run ? '(would write)' : '(written)'}</td><td><strong>{t.units_matched}</strong></td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>{data.dry_run ? 'Would write (no conflict)' : 'Units written'}</td><td><strong>{t.units_written}</strong></td></tr>
             <tr><td style={{ paddingRight: 12, color: '#777' }}>Already correct</td><td>{t.units_already_set}</td></tr>
-            {t.conflicts > 0 && <tr><td style={{ paddingRight: 12, color: '#C62828' }}>Conflicts</td><td style={{ color: '#C62828' }}>{t.conflicts}</td></tr>}
-            <tr><td style={{ paddingRight: 12, color: '#777' }}>AppFolio units unmatched</td><td>{unmatched.length}</td></tr>
+            {t.conflicts > 0 && <tr><td style={{ paddingRight: 12, color: '#C62828' }}>Conflicts (skipped)</td><td style={{ color: '#C62828' }}>{t.conflicts}</td></tr>}
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>Properties with unmatched units</td><td>{unmatched.length}</td></tr>
           </tbody>
         </table>
-        {unmatched.length > 0 && (
+
+        {conflicts.length > 0 && (
           <div style={{ marginTop: 10 }}>
-            <div style={{ fontWeight: 600, fontSize: 12, color: '#b45309', marginBottom: 4 }}>
-              Couldn&apos;t auto-match — hand-map these:
+            <div style={{ fontWeight: 600, fontSize: 12, color: '#C62828', marginBottom: 4 }}>
+              Conflicts — recon wants an id another unit already owns:
             </div>
-            <div style={{ maxHeight: 220, overflowY: 'auto', fontSize: 12 }}>
-              {unmatched.map((u, i) => (
-                <div key={i} style={{
-                  padding: '4px 0', borderBottom: '1px solid #eee', color: '#555',
-                }}>
-                  <strong>{u.property}</strong> — {u.appfolio_name || u.appfolio_address || u.appfolio_unit_id}
-                  {' '}<span style={{ color: u.current_occupancy === 'occupied' ? '#C62828' : '#999' }}>
-                    ({u.current_occupancy})
-                  </span>
+            <div style={{ maxHeight: 200, overflowY: 'auto', fontSize: 12 }}>
+              {conflicts.map((c, i) => (
+                <div key={i} style={{ padding: '4px 0', borderBottom: '1px solid #eee', color: '#555' }}>
+                  <strong>{c.property}</strong>: our &quot;{c.our_name}&quot; → AppFolio &quot;{c.af_name}&quot;
+                  {' '}<span style={{ color: '#999' }}>[{c.strategy}]</span>
+                  {' — '}id already on &quot;{c.owned_by}&quot;
                 </div>
               ))}
             </div>
           </div>
         )}
+
+        {unmatched.length > 0 && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontWeight: 600, fontSize: 12, color: '#b45309', marginBottom: 4 }}>
+              Couldn&apos;t auto-match (both sides shown):
+            </div>
+            <div style={{ maxHeight: 260, overflowY: 'auto', fontSize: 12 }}>
+              {unmatched.map((p, i) => (
+                <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid #eee' }}>
+                  <div style={{ fontWeight: 600 }}>{p.property}</div>
+                  <div style={{ color: '#1565C0', marginLeft: 8 }}>
+                    AppFolio: {(p.appfolio || []).map((a) => (
+                      `${a.appfolio_name || a.appfolio_address || a.appfolio_unit_id} (${a.current_occupancy})`
+                    )).join(', ') || '—'}
+                  </div>
+                  <div style={{ color: '#6A1B9A', marginLeft: 8 }}>
+                    Ours: {(p.our || []).map((o) => `"${o.source_unit_name}"`).join(', ') || '—'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {(data.errors || []).length > 0 && (
           <div style={{ marginTop: 8, color: '#C62828', fontSize: 12 }}>
             {data.errors.length} property error(s): {data.errors[0]?.error}
@@ -382,7 +405,7 @@ function ResultBlock({ result }) {
         )}
         {data.dry_run && (
           <div style={{ marginTop: 8, color: '#555', fontStyle: 'italic' }}>
-            Looks right? Run button 7 to apply, then re-run Sync Leases.
+            Review conflicts + unmatched above. Run button 7 to apply, then re-run Sync Leases.
           </div>
         )}
       </div>
@@ -430,11 +453,9 @@ function AppfolioDiagnosticsTab() {
     setRunning(key);
     setResult(null);
     setUnitProgress({ processed: 0, total: 0 });
-    const acc = {
-      units_matched: 0, units_already_set: 0, conflicts: 0,
-      unmatched_appfolio_units: 0,
-    };
+    const acc = { units_written: 0, units_already_set: 0, conflicts: 0 };
     const unmatched = [];
+    const conflicts = [];
     const errors = [];
     let offset = 0;
     try {
@@ -445,19 +466,24 @@ function AppfolioDiagnosticsTab() {
           return;
         }
         const tt = json.totals || {};
-        acc.units_matched += tt.units_matched || 0;
+        acc.units_written += tt.units_written || 0;
         acc.units_already_set += tt.units_already_set || 0;
         acc.conflicts += tt.conflicts || 0;
         for (const u of json.unmatched_samples || []) {
           if (unmatched.length < 80) unmatched.push(u);
+        }
+        for (const c of json.conflict_samples || []) {
+          if (conflicts.length < 80) conflicts.push(c);
         }
         for (const e of json.errors || []) errors.push(e);
         offset = json.next_offset;
         setUnitProgress({ processed: offset, total: json.total_properties });
         if (!json.has_more) break;
       }
-      acc.unmatched_appfolio_units = unmatched.length;
-      setResult({ kind: 'unitBackfill', data: { dry_run: dryRun, totals: acc, unmatched, errors } });
+      setResult({
+        kind: 'unitBackfill',
+        data: { dry_run: dryRun, totals: acc, unmatched, conflicts, errors },
+      });
     } catch (err) {
       setResult({ kind: 'unitBackfill', error: err.message || String(err) });
     } finally {

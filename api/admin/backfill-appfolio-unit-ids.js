@@ -108,7 +108,6 @@ async function reconcileProperty(tx, organizationId, property) {
   }
 
   let alreadySet = 0;
-  const conflicts = 0;
   const claimedOurIds = new Set();
   const claimedAfIds = new Set();
   const unmatchedAf = [];
@@ -150,7 +149,13 @@ async function reconcileProperty(tx, organizationId, property) {
     if (ourMatch) {
       claimedOurIds.add(ourMatch.id);
       claimedAfIds.add(afId);
-      matchPlan.push({ ourUnitId: ourMatch.id, afId, strategy });
+      matchPlan.push({
+        ourUnitId: ourMatch.id,
+        ourName: ourMatch.sourceUnitName || null,
+        afId,
+        afName: au.Name || au.UnitNumber || au.Address1 || afId,
+        strategy,
+      });
     } else {
       unmatchedAf.push({
         appfolio_unit_id: afId,
@@ -169,7 +174,9 @@ async function reconcileProperty(tx, organizationId, property) {
       && unmatchedOur.length === 1) {
     matchPlan.push({
       ourUnitId: unmatchedOur[0].id,
+      ourName: unmatchedOur[0].sourceUnitName || null,
       afId: unmatchedAf[0].appfolio_unit_id,
+      afName: unmatchedAf[0].appfolio_name || unmatchedAf[0].appfolio_unit_id,
       strategy: 'sfr_1to1',
     });
     claimedOurIds.add(unmatchedOur[0].id);
@@ -184,9 +191,7 @@ async function reconcileProperty(tx, organizationId, property) {
     display_name: property.displayName,
     appfolio_units: afUnits.length,
     our_units: ourUnits.length,
-    matched: matchPlan.length,
     already_set: alreadySet,
-    conflicts,
     unmatched_appfolio: unmatchedAf,
     unmatched_our: unmatchedOur.map((u) => ({
       our_unit_id: u.id,
@@ -242,10 +247,11 @@ export default withAdminHandler(async (req, res) => {
   const startedAt = Date.now();
   const TIME_BUDGET_MS = 240_000;
 
-  let totalMatched = 0;
+  let totalWritten = 0;       // matches with no collision (written when !dryRun)
   let totalAlreadySet = 0;
   let totalConflicts = 0;
-  const unmatchedSamples = [];
+  const unmatchedSamples = [];   // { property, our:[...], appfolio:[...] }
+  const conflictSamples = [];    // { property, our_name, af_name, af_id, owned_by }
   const errors = [];
   let timedOut = false;
   let processed = 0;
@@ -255,42 +261,66 @@ export default withAdminHandler(async (req, res) => {
     try {
       // Each property runs in its own tx so a write failure on one
       // doesn't roll back the whole batch.
-      const summary = await db.transaction(async (tx) => {
+      const result = await db.transaction(async (tx) => {
         const plan = await reconcileProperty(tx, organizationId, property);
         if (plan.skipped) return plan;
-        if (!dryRun) {
-          for (const m of plan.match_plan) {
-            // collision guard
-            const [collision] = await tx
-              .select({ id: schema.units.id })
-              .from(schema.units)
-              .where(
-                and(
-                  eq(schema.units.organizationId, organizationId),
-                  eq(schema.units.sourceUnitId, m.afId),
-                ),
-              )
-              .limit(1);
-            if (collision && collision.id !== m.ourUnitId) {
-              plan.conflicts += 1;
-              continue;
-            }
+
+        let written = 0;
+        let conflicts = 0;
+        const conflicts_detail = [];
+        for (const m of plan.match_plan) {
+          // Collision check runs for BOTH preview and apply — a
+          // dry run that "would write" something that'll actually
+          // collide is a lie. Only the UPDATE is gated by dryRun.
+          const [collision] = await tx
+            .select({ id: schema.units.id, sourceUnitName: schema.units.sourceUnitName })
+            .from(schema.units)
+            .where(
+              and(
+                eq(schema.units.organizationId, organizationId),
+                eq(schema.units.sourceUnitId, m.afId),
+              ),
+            )
+            .limit(1);
+          if (collision && collision.id !== m.ourUnitId) {
+            conflicts += 1;
+            conflicts_detail.push({
+              our_name: m.ourName,
+              af_name: m.afName,
+              af_id: m.afId,
+              owned_by: collision.sourceUnitName || collision.id,
+              strategy: m.strategy,
+            });
+            continue;
+          }
+          if (!dryRun) {
             await tx
               .update(schema.units)
               .set({ sourceUnitId: m.afId, updatedAt: new Date() })
               .where(eq(schema.units.id, m.ourUnitId));
           }
+          written += 1;
         }
-        return plan;
+        return { ...plan, written, conflicts, conflicts_detail };
       });
       processed += 1;
-      if (summary.skipped) continue;
-      totalMatched += summary.matched;
-      totalAlreadySet += summary.already_set;
-      totalConflicts += summary.conflicts;
-      for (const u of summary.unmatched_appfolio) {
-        if (unmatchedSamples.length < 60) {
-          unmatchedSamples.push({ property: summary.display_name, ...u });
+      if (result.skipped) continue;
+      totalWritten += result.written;
+      totalAlreadySet += result.already_set;
+      totalConflicts += result.conflicts;
+      // Pair up unmatched AppFolio + unmatched our units for this
+      // property so both sides are visible side-by-side.
+      if ((result.unmatched_appfolio.length || result.unmatched_our.length)
+          && unmatchedSamples.length < 60) {
+        unmatchedSamples.push({
+          property: result.display_name,
+          appfolio: result.unmatched_appfolio,
+          our: result.unmatched_our,
+        });
+      }
+      for (const c of result.conflicts_detail) {
+        if (conflictSamples.length < 60) {
+          conflictSamples.push({ property: result.display_name, ...c });
         }
       }
     } catch (err) {
@@ -316,12 +346,13 @@ export default withAdminHandler(async (req, res) => {
     has_more: !timedOut ? nextOffset < total : true,
     timed_out: timedOut,
     totals: {
-      units_matched: totalMatched,
+      units_written: totalWritten,
       units_already_set: totalAlreadySet,
       conflicts: totalConflicts,
-      unmatched_appfolio_units: unmatchedSamples.length,
+      unmatched_properties: unmatchedSamples.length,
     },
     unmatched_samples: unmatchedSamples,
+    conflict_samples: conflictSamples,
     errors,
   });
 });
