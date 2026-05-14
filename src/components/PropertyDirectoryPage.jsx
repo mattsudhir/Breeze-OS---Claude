@@ -472,6 +472,56 @@ function ResultBlock({ result }) {
     );
   }
 
+  // Property dedupe rendering
+  if (kind === 'dedupeProp') {
+    const plan = data.plan || [];
+    return (
+      <div style={{
+        padding: 12, background: '#FAFAFA', border: '1px solid #1565C0',
+        borderRadius: 8, marginBottom: 12, fontSize: 13,
+      }}>
+        <div style={{ fontWeight: 600, color: '#1565C0', marginBottom: 6 }}>
+          {data.dry_run ? 'Property dedupe preview (no changes written)' : 'Property dedupe applied'}
+        </div>
+        <table style={{ fontSize: 13, borderSpacing: '0 2px' }}>
+          <tbody>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>Total properties</td><td>{data.total_properties}</td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>Duplicate groups</td><td><strong>{data.duplicate_groups}</strong></td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>{data.dry_run ? 'Orphan properties to merge' : 'Orphan properties deleted'}</td><td><strong style={{ color: '#C62828' }}>{data.dry_run ? data.orphan_properties : data.properties_deleted}</strong></td></tr>
+            {!data.dry_run && <tr><td style={{ paddingRight: 12, color: '#777' }}>Duplicate units collapsed after merge</td><td>{data.units_deleted_after_merge}</td></tr>}
+          </tbody>
+        </table>
+        {plan.length > 0 && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontWeight: 600, fontSize: 12, color: '#b45309', marginBottom: 4 }}>
+              Duplicate property groups (keeper → orphans merged in):
+            </div>
+            <div style={{ maxHeight: 260, overflowY: 'auto', fontSize: 12 }}>
+              {plan.map((g, i) => (
+                <div key={i} style={{ padding: '4px 0', borderBottom: '1px solid #eee', color: '#555' }}>
+                  <strong>&quot;{g.display_name}&quot;</strong> — {g.group_size} rows, keeping{' '}
+                  {g.keeper_has_uuid ? 'the AppFolio-matched row' : 'the oldest row'}
+                  {' '}({g.keeper_units} units), merging {g.orphan_property_ids.length}
+                  {' '}({g.orphan_units.reduce((a, b) => a + b, 0)} orphan units)
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {(data.failures || []).length > 0 && (
+          <div style={{ marginTop: 8, color: '#C62828', fontSize: 12 }}>
+            {data.failures.length} group(s) could not merge: {data.failures[0]?.error}
+          </div>
+        )}
+        {data.dry_run && data.duplicate_groups > 0 && (
+          <div style={{ marginTop: 8, color: '#555', fontStyle: 'italic' }}>
+            Looks right? Run button 11 to merge, then re-run unit reconciliation (6 → 7) + Sync Leases.
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <pre style={{
       padding: 12, background: '#1e1e1e', color: '#d4d4d4', borderRadius: 8,
@@ -628,6 +678,22 @@ function AppfolioDiagnosticsTab() {
         onClick={() => run(
           'dedupeApply', 'dedupe', diagApi.dedupeUnitsApply,
           'Delete duplicate unit rows? Orphan duplicates are removed after their leases/charges are re-pointed to the keeper. This is destructive — run the preview first.',
+        )}
+      />
+      <DiagButton
+        label="10. Dedupe PROPERTIES — preview"
+        hint="Finds duplicate property rows (same name) from CSV double-imports — the level above duplicate units. Shows what would be merged; writes nothing."
+        running={running === 'dedupePropDry'}
+        onClick={() => run('dedupePropDry', 'dedupeProp', diagApi.dedupePropertiesDryRun)}
+      />
+      <DiagButton
+        label="11. Dedupe PROPERTIES — MERGE + DELETE"
+        hint="Merges duplicate properties into one keeper (re-points units + all references), deletes the orphan property rows, then collapses the duplicate units the merge exposed. One operation. Run the preview first."
+        accent="#C62828"
+        running={running === 'dedupePropApply'}
+        onClick={() => run(
+          'dedupePropApply', 'dedupeProp', diagApi.dedupePropertiesApply,
+          'Merge duplicate property rows? Orphan properties are deleted after units + all references are re-pointed to the keeper, and the resulting duplicate units are collapsed. Destructive — run the preview first.',
         )}
       />
     </div>
