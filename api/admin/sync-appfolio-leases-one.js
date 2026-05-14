@@ -138,20 +138,13 @@ export default withAdminHandler(async (req, res) => {
       units_returned: afUnits.length,
       tenants_returned: afTenants.length,
       active_tenants: activeTenants.length,
-      sample_unit: afUnits[0] ? {
-        Id: afUnits[0].Id,
-        Name: afUnits[0].Name,
-        UnitNumber: afUnits[0].UnitNumber,
-        Address1: afUnits[0].Address1,
-      } : null,
-      sample_tenant: activeTenants[0] ? {
-        TenantId: activeTenants[0].TenantId,
-        UnitId: activeTenants[0].UnitId,
-        FirstName: activeTenants[0].FirstName,
-        LastName: activeTenants[0].LastName,
-        Rent: activeTenants[0].Rent,
-        LeaseFromDate: activeTenants[0].LeaseFromDate,
-      } : null,
+      // Raw key lists + full first rows — so we can see AppFolio's
+      // actual field names instead of guessing (the lease sync keeps
+      // missing on lease-date / rent field names).
+      raw_unit_keys: afUnits[0] ? Object.keys(afUnits[0]) : [],
+      raw_tenant_keys: afTenants[0] ? Object.keys(afTenants[0]) : [],
+      raw_sample_unit: afUnits[0] || null,
+      raw_sample_tenant: afTenants[0] || null,
     },
     hint: afUnits.length === 0
       ? 'AppFolio returned 0 units for this property. Check that source_property_id matches AppFolio.'
