@@ -77,7 +77,10 @@ export default withAdminHandler(async (req, res) => {
 
   // Probe every endpoint pattern we know about so the user can see
   // which one AppFolio's actually serving for their account.
-  const qs = 'page%5Bsize%5D=1';
+  // AppFolio's /properties REQUIRES a filter — include
+  // LastUpdatedAtFrom so a clean auth pass returns 200, not a 400
+  // "must include a filter" that masks the real auth status.
+  const qs = 'page%5Bsize%5D=1&filters%5BLastUpdatedAtFrom%5D=1970-01-01T00%3A00%3A00Z';
   const probes = await Promise.all([
     probe('shared_v0',     `https://api.appfolio.com/api/v0/properties?${qs}`,            headers),
     probe('subdomain_v0',  `https://${subdomain}.appfolio.com/api/v0/properties?${qs}`,    headers),
