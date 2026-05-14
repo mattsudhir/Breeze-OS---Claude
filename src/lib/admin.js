@@ -192,4 +192,8 @@ export const appfolioDiagnostics = {
       method: 'POST',
       body: { dry_run: dryRun, offset, limit },
     }),
+  dedupeUnitsDryRun: () =>
+    adminFetch('/api/admin/dedupe-units', { query: { dry_run: 'true' } }),
+  dedupeUnitsApply: () =>
+    adminFetch('/api/admin/dedupe-units', { method: 'POST', body: { dry_run: false } }),
 };
