@@ -100,13 +100,18 @@ async function syncOneProperty(tx, organizationId, property) {
 
   // Walk AppFolio's unit list, fill any gaps in the lookup, and
   // backfill source_unit_id on rows that matched by name.
+  //
+  // AppFolio's /units payload: the unit's own primary key is `Id`
+  // (NOT `UnitId` — that's only on rows that REFERENCE a unit, like
+  // tenants/work-orders). The display name is `Name` / `UnitNumber`
+  // / `Address1`.
   let unitIdsBackfilled = 0;
   for (const au of afUnits) {
-    const afUnitId = au.UnitId != null ? String(au.UnitId) : null;
+    const afUnitId = au.Id != null ? String(au.Id) : null;
     if (!afUnitId) continue;
     if (unitIdBySource.has(afUnitId)) continue;
 
-    const candidateNames = [au.UnitName, au.Address1, au.AddressLine1]
+    const candidateNames = [au.Name, au.UnitNumber, au.Address1, au.Address2]
       .filter(Boolean)
       .map((s) => String(s).trim());
     let matched = null;
@@ -119,6 +124,25 @@ async function syncOneProperty(tx, organizationId, property) {
         .update(schema.units)
         .set({ sourceUnitId: afUnitId, updatedAt: new Date() })
         .where(eq(schema.units.id, matched));
+      unitIdsBackfilled += 1;
+    }
+  }
+
+  // SFR fallback: if the property has exactly one unit on each side
+  // and name-matching didn't already pair them, match them anyway.
+  // Single-family rentals frequently have a CSV unit name that
+  // doesn't line up with AppFolio's (e.g. "" vs "Main" vs the street
+  // address), but with a 1:1 mapping there's no ambiguity.
+  if (afUnits.length === 1 && ourUnits.length === 1) {
+    const onlyAfUnit = afUnits[0];
+    const onlyAfId = onlyAfUnit.Id != null ? String(onlyAfUnit.Id) : null;
+    const onlyOurUnit = ourUnits[0];
+    if (onlyAfId && !unitIdBySource.has(onlyAfId)) {
+      unitIdBySource.set(onlyAfId, onlyOurUnit.id);
+      await tx
+        .update(schema.units)
+        .set({ sourceUnitId: onlyAfId, updatedAt: new Date() })
+        .where(eq(schema.units.id, onlyOurUnit.id));
       unitIdsBackfilled += 1;
     }
   }

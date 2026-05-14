@@ -116,8 +116,9 @@ export default withAdminHandler(async (req, res) => {
       tenants_returned: afTenants.length,
       active_tenants: activeTenants.length,
       sample_unit: afUnits[0] ? {
-        UnitId: afUnits[0].UnitId,
-        UnitName: afUnits[0].UnitName,
+        Id: afUnits[0].Id,
+        Name: afUnits[0].Name,
+        UnitNumber: afUnits[0].UnitNumber,
         Address1: afUnits[0].Address1,
       } : null,
       sample_tenant: activeTenants[0] ? {
