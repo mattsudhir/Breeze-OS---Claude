@@ -83,6 +83,7 @@ async function syncOneProperty(tx, organizationId, property) {
       leases_ended: 0,
       leases_skipped_no_unit: 0,
       leases_skipped_no_start: 0,
+      units_occupied_no_lease: 0,
       unit_ids_backfilled: 0,
     };
   }
@@ -206,6 +207,10 @@ async function syncOneProperty(tx, organizationId, property) {
   let leasesSkippedNoUnit = 0;
   let leasesSkippedNoStart = 0;
   let tenantsSkippedNotCurrent = 0;
+  // OccupancyIds that produced a lease this run — used afterward to
+  // find units AppFolio reports as occupied but for which no tenant
+  // carrying that CurrentOccupancyId came back in /tenants.
+  const occupanciesLeased = new Set();
 
   for (const t of afTenants) {
     // Resolve the unit, then gate strictly on the current occupancy.
@@ -332,11 +337,23 @@ async function syncOneProperty(tx, organizationId, property) {
       leaseId = inserted.id;
     }
     leasesUpserted += 1;
+    occupanciesLeased.add(String(t.OccupancyId));
 
     await tx
       .insert(schema.leaseTenants)
       .values({ leaseId, tenantId })
       .onConflictDoNothing();
+  }
+
+  // Diagnostic: units AppFolio reports as occupied (have a
+  // CurrentOccupancyId) and which we matched to one of our units,
+  // but for which NO tenant carrying that occupancy came back in
+  // /tenants — so they end up looking vacant. This is the gap
+  // between our occupancy count and AppFolio's.
+  let unitsOccupiedNoLease = 0;
+  for (const [afUnitId, currentOcc] of currentOccupancyByAfUnit) {
+    if (!unitIdBySource.has(afUnitId)) continue; // unmatched — counted elsewhere
+    if (!occupanciesLeased.has(currentOcc)) unitsOccupiedNoLease += 1;
   }
 
   // Stale-lease cleanup. A prior buggy run created an 'active' lease
@@ -375,6 +392,7 @@ async function syncOneProperty(tx, organizationId, property) {
     leases_ended: leasesEnded,
     leases_skipped_no_unit: leasesSkippedNoUnit,
     leases_skipped_no_start: leasesSkippedNoStart,
+    units_occupied_no_lease: unitsOccupiedNoLease,
     unit_ids_backfilled: unitIdsBackfilled,
   };
 }
@@ -439,6 +457,7 @@ export default withAdminHandler(async (req, res) => {
   let totalSkippedNoUnit = 0;
   let totalSkippedNoStart = 0;
   let totalTenantsSkippedNotCurrent = 0;
+  let totalUnitsOccupiedNoLease = 0;
   let totalUnitIdsBackfilled = 0;
   let consecutive401s = 0;
   let aborted = false;
@@ -482,6 +501,7 @@ export default withAdminHandler(async (req, res) => {
       totalSkippedNoUnit += summary.leases_skipped_no_unit || 0;
       totalSkippedNoStart += summary.leases_skipped_no_start || 0;
       totalTenantsSkippedNotCurrent += summary.tenants_skipped_not_current || 0;
+      totalUnitsOccupiedNoLease += summary.units_occupied_no_lease || 0;
       totalUnitIdsBackfilled += summary.unit_ids_backfilled || 0;
       consecutive401s = 0;
       await recordHealth(organizationId, 'appfolio_database', 'AppFolio (Database API)', { ok: true });
@@ -532,6 +552,7 @@ export default withAdminHandler(async (req, res) => {
       leases_ended: totalLeasesEnded,
       leases_skipped_no_unit: totalSkippedNoUnit,
       leases_skipped_no_start: totalSkippedNoStart,
+      units_occupied_no_lease: totalUnitsOccupiedNoLease,
       unit_ids_backfilled: totalUnitIdsBackfilled,
     },
     results,

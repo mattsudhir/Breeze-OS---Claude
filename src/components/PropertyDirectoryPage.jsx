@@ -425,7 +425,11 @@ function SyncAppfolioLeasesTab() {
   const [running, setRunning] = useState(false);
   const [stopped, setStopped] = useState(false);
   const [progress, setProgress] = useState({ processed: 0, total: 0 });
-  const [totals, setTotals] = useState({ tenants: 0, leases: 0, skipped: 0, backfilled: 0 });
+  const ZERO_TOTALS = {
+    tenants: 0, leases: 0, ended: 0, skipped: 0,
+    skippedNoStart: 0, notCurrent: 0, occupiedNoLease: 0, backfilled: 0,
+  };
+  const [totals, setTotals] = useState(ZERO_TOTALS);
   const [errors, setErrors] = useState([]);
   const [lastError, setLastError] = useState(null);
   const [batchSize, setBatchSize] = useState(25);
@@ -435,15 +439,12 @@ function SyncAppfolioLeasesTab() {
     setStopped(false);
     setErrors([]);
     setLastError(null);
-    setTotals({ tenants: 0, leases: 0, skipped: 0, backfilled: 0 });
+    setTotals(ZERO_TOTALS);
     setProgress({ processed: 0, total: 0 });
 
     let offset = 0;
     let total = 0;
-    let totalTenants = 0;
-    let totalLeases = 0;
-    let totalSkipped = 0;
-    let totalBackfilled = 0;
+    const acc = { ...ZERO_TOTALS };
     const seenErrors = [];
 
     try {
@@ -461,15 +462,20 @@ function SyncAppfolioLeasesTab() {
         }
         total = json.total_properties;
         offset = json.next_offset;
-        totalTenants += json.totals?.tenants_upserted || 0;
-        totalLeases += json.totals?.leases_upserted || 0;
-        totalSkipped += json.totals?.leases_skipped_no_unit || 0;
-        totalBackfilled += json.totals?.unit_ids_backfilled || 0;
+        const tt = json.totals || {};
+        acc.tenants += tt.tenants_upserted || 0;
+        acc.leases += tt.leases_upserted || 0;
+        acc.ended += tt.leases_ended || 0;
+        acc.skipped += tt.leases_skipped_no_unit || 0;
+        acc.skippedNoStart += tt.leases_skipped_no_start || 0;
+        acc.notCurrent += tt.tenants_skipped_not_current || 0;
+        acc.occupiedNoLease += tt.units_occupied_no_lease || 0;
+        acc.backfilled += tt.unit_ids_backfilled || 0;
         for (const r of json.results || []) {
           if (r.error) seenErrors.push({ name: r.display_name, error: r.error });
         }
         setProgress({ processed: offset, total });
-        setTotals({ tenants: totalTenants, leases: totalLeases, skipped: totalSkipped, backfilled: totalBackfilled });
+        setTotals({ ...acc });
         setErrors([...seenErrors]);
 
         if (json.aborted) {
@@ -533,14 +539,29 @@ function SyncAppfolioLeasesTab() {
               transition: 'width 0.3s ease',
             }} />
           </div>
-          <div style={{ fontSize: 12, color: '#666' }}>
+          <div style={{ fontSize: 12, color: '#666', lineHeight: 1.7 }}>
             {progress.processed} / {progress.total} properties processed ({pct}%)
-            {' · '}
+            <br />
             <strong>{totals.tenants}</strong> tenants upserted
             {' · '}
             <strong>{totals.leases}</strong> leases upserted
+            {totals.ended > 0 && <>{' · '}<strong>{totals.ended}</strong> stale leases ended</>}
             {totals.backfilled > 0 && <>{' · '}<strong>{totals.backfilled}</strong> unit IDs backfilled</>}
-            {totals.skipped > 0 && <>{' · '}<strong>{totals.skipped}</strong> skipped (unit not in DB)</>}
+            {(totals.skipped > 0 || totals.skippedNoStart > 0
+              || totals.notCurrent > 0 || totals.occupiedNoLease > 0) && (
+              <>
+                <br />
+                <span style={{ color: '#b45309' }}>
+                  Gaps:
+                  {totals.skipped > 0 && <> {totals.skipped} unit-not-matched ·</>}
+                  {totals.skippedNoStart > 0 && <> {totals.skippedNoStart} no-start-date ·</>}
+                  {totals.notCurrent > 0 && <> {totals.notCurrent} historical-tenant ·</>}
+                  {totals.occupiedNoLease > 0 && (
+                    <> {totals.occupiedNoLease} occupied-but-no-tenant-returned</>
+                  )}
+                </span>
+              </>
+            )}
           </div>
         </div>
       )}
