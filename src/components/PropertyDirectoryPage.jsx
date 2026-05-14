@@ -549,18 +549,23 @@ function SyncAppfolioLeasesTab() {
             {totals.backfilled > 0 && <>{' · '}<strong>{totals.backfilled}</strong> unit IDs backfilled</>}
             {(totals.skipped > 0 || totals.skippedNoStart > 0
               || totals.notCurrent > 0 || totals.occupiedNoLease > 0) && (
-              <>
-                <br />
-                <span style={{ color: '#b45309' }}>
-                  Gaps:
-                  {totals.skipped > 0 && <> {totals.skipped} unit-not-matched ·</>}
-                  {totals.skippedNoStart > 0 && <> {totals.skippedNoStart} no-start-date ·</>}
-                  {totals.notCurrent > 0 && <> {totals.notCurrent} historical-tenant ·</>}
-                  {totals.occupiedNoLease > 0 && (
-                    <> {totals.occupiedNoLease} occupied-but-no-tenant-returned</>
+              <div style={{ color: '#b45309', marginTop: 4 }}>
+                <div style={{ fontWeight: 600 }}>Gaps:</div>
+                <ul style={{ margin: '2px 0 0', paddingLeft: 18 }}>
+                  {totals.skipped > 0 && (
+                    <li>{totals.skipped} unit-not-matched</li>
                   )}
-                </span>
-              </>
+                  {totals.skippedNoStart > 0 && (
+                    <li>{totals.skippedNoStart} no-start-date</li>
+                  )}
+                  {totals.notCurrent > 0 && (
+                    <li>{totals.notCurrent} historical-tenant (expected)</li>
+                  )}
+                  {totals.occupiedNoLease > 0 && (
+                    <li>{totals.occupiedNoLease} occupied-but-no-tenant-returned</li>
+                  )}
+                </ul>
+              </div>
             )}
           </div>
         </div>
