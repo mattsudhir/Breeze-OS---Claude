@@ -288,6 +288,35 @@ function ResultBlock({ result }) {
     );
   }
 
+  // Single-property smoke-test rendering
+  if (kind === 'smoke') {
+    const af = data.appfolio || {};
+    const t = data.timings || {};
+    return (
+      <div style={{
+        padding: 12, background: '#FAFAFA', border: '1px solid #1565C0',
+        borderRadius: 8, marginBottom: 12, fontSize: 13,
+      }}>
+        <div style={{ fontWeight: 600, color: '#1565C0', marginBottom: 6 }}>
+          Single-property smoke test
+        </div>
+        <table style={{ fontSize: 13, borderSpacing: '0 2px' }}>
+          <tbody>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>Property</td><td>{data.property?.display_name}</td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>/units call</td><td>{t.units_ms} ms → {af.units_returned} units</td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>/tenants call</td><td>{t.tenants_ms} ms → {af.tenants_returned} tenants ({af.active_tenants} active)</td></tr>
+          </tbody>
+        </table>
+        {data.hint && (
+          <div style={{ marginTop: 8, color: '#555', fontStyle: 'italic' }}>{data.hint}</div>
+        )}
+        <div style={{ marginTop: 8, fontSize: 11, color: '#999' }}>
+          Multiply (units_ms + tenants_ms) by ~252 to estimate a full sync.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <pre style={{
       padding: 12, background: '#1e1e1e', color: '#d4d4d4', borderRadius: 8,
@@ -354,6 +383,13 @@ function AppfolioDiagnosticsTab() {
         hint="Counts of properties, units, leases, tenants — to verify a sync actually landed."
         running={running === 'leases'}
         onClick={() => run('leases', 'leases', diagApi.leasesState)}
+      />
+      <DiagButton
+        label="5. Smoke-test: sync ONE property"
+        hint="Pulls /units + /tenants for a single property and reports per-call timings. Fast — use this to diagnose why the full Sync Leases hangs."
+        accent="#6A1B9A"
+        running={running === 'smoke'}
+        onClick={() => run('smoke', 'smoke', () => diagApi.syncOneProperty({}))}
       />
     </div>
   );
