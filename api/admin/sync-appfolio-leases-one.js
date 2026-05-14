@@ -42,7 +42,13 @@ export default withAdminHandler(async (req, res) => {
   } else if (body.source_property_id) {
     filters.push(eq(schema.properties.sourcePropertyId, String(body.source_property_id)));
   }
-  const [property] = await db
+  // Pull a handful and pick the first whose source_property_id is a
+  // real UUID — AppFolio's filters[PropertyId] 422s on non-UUID
+  // values (e.g. the one property the backfill couldn't match, which
+  // still holds its old RentManager integer). When the caller names
+  // a specific property we honor it as-is.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const candidates = await db
     .select({
       id: schema.properties.id,
       displayName: schema.properties.displayName,
@@ -50,7 +56,12 @@ export default withAdminHandler(async (req, res) => {
     })
     .from(schema.properties)
     .where(and(...filters))
-    .limit(1);
+    .limit(body.property_id || body.source_property_id ? 1 : 50);
+
+  const property = (body.property_id || body.source_property_id)
+    ? candidates[0]
+    : candidates.find((p) => UUID_RE.test(String(p.sourcePropertyId || '').trim()))
+      || candidates[0];
 
   if (!property) {
     return res.status(404).json({
@@ -62,6 +73,17 @@ export default withAdminHandler(async (req, res) => {
   // source_property_id is AppFolio's property Id (a UUID string).
   const appfolioPropertyId = String(property.sourcePropertyId || '').trim();
   const timings = {};
+  if (!UUID_RE.test(appfolioPropertyId)) {
+    return res.status(200).json({
+      ok: false,
+      property: {
+        id: property.id,
+        display_name: property.displayName,
+        source_property_id: property.sourcePropertyId,
+      },
+      error: 'This property\'s source_property_id is not a UUID — the backfill could not match it to AppFolio. Run the property-ID backfill, or pick a different property.',
+    });
+  }
 
   // /units probe
   let unitsResult;
