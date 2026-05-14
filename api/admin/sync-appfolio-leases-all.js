@@ -13,7 +13,7 @@
 // one AppFolio API call. The UI calls this in a loop with rolling
 // offset until { has_more: false }.
 
-import { and, eq, isNotNull, asc } from 'drizzle-orm';
+import { and, eq, ne, isNotNull, asc } from 'drizzle-orm';
 import {
   withAdminHandler,
   getDefaultOrgId,
@@ -65,26 +65,22 @@ async function syncOneProperty(tx, organizationId, property) {
   const afUnits = unitsResult.data || [];
   const afTenants = tenantsResult.data || [];
 
-  // AppFolio's tenant Status is the authoritative "is this occupancy
-  // active" flag. Month-to-month tenants commonly have a LeaseEndDate
-  // years in the past while Status stays 'Current' and MoveOutOn is
-  // null — so filtering on the end date would wrongly drop them.
-  const activeTenants = afTenants.filter((t) => {
-    const status = String(t.Status || '').toLowerCase();
-    if (status === 'current' || status === 'notice') return true;
-    // Fallback for older payloads with no Status: present if they
-    // haven't moved out.
-    if (!t.Status && !t.MoveOutOn && !t.MoveOutDate) return true;
-    return false;
-  });
-
-  if (activeTenants.length === 0) {
+  // Occupancy is driven entirely off the UNIT's CurrentOccupancyId —
+  // AppFolio's authoritative "this unit is occupied by this tenancy."
+  // We do NOT pre-filter tenants by their individual Status: the
+  // /tenants endpoint returns every tenant across every occupancy a
+  // unit has ever had, and a unit's *current* occupant can have a
+  // Status like 'Eviction' (still living there) that a Status
+  // allow-list would wrongly drop. Matching OccupancyId ===
+  // CurrentOccupancyId gives exactly one lease per occupied unit.
+  if (afTenants.length === 0) {
     return {
       property_id: property.id,
-      tenants_seen: afTenants.length,
-      active_tenants: 0,
+      tenants_seen: 0,
       tenants_upserted: 0,
+      tenants_skipped_not_current: 0,
       leases_upserted: 0,
+      leases_ended: 0,
       leases_skipped_no_unit: 0,
       leases_skipped_no_start: 0,
       unit_ids_backfilled: 0,
@@ -159,6 +155,19 @@ async function syncOneProperty(tx, organizationId, property) {
     unitIdsBackfilled += 1;
   }
 
+  // AppFolio's unit object carries CurrentOccupancyId — the one
+  // occupancy that is the unit's *current* tenancy. AppFolio's
+  // /tenants endpoint returns tenants across ALL occupancies of a
+  // unit (historical included), so without this we'd create a lease
+  // per past occupancy. Keyed by AppFolio unit Id.
+  const currentOccupancyByAfUnit = new Map();
+  for (const au of afUnits) {
+    const afUnitId = au.Id != null ? String(au.Id) : null;
+    if (afUnitId && au.CurrentOccupancyId) {
+      currentOccupancyByAfUnit.set(afUnitId, String(au.CurrentOccupancyId));
+    }
+  }
+
   for (const au of afUnits) {
     const afUnitId = au.Id != null ? String(au.Id) : null;
     if (!afUnitId) continue;
@@ -196,8 +205,27 @@ async function syncOneProperty(tx, organizationId, property) {
   let leasesUpserted = 0;
   let leasesSkippedNoUnit = 0;
   let leasesSkippedNoStart = 0;
+  let tenantsSkippedNotCurrent = 0;
 
-  for (const t of activeTenants) {
+  for (const t of afTenants) {
+    // Resolve the unit, then gate strictly on the current occupancy.
+    // AppFolio's /tenants returns tenants across every occupancy a
+    // unit has ever had; only the unit's CurrentOccupancyId is the
+    // live tenancy. A tenant whose OccupancyId isn't the unit's
+    // current one is historical — skip it (no tenant row, no lease).
+    // This gives exactly one lease per occupied unit, with its
+    // current tenant(s) linked.
+    const unitId = unitIdBySource.get(String(t.UnitId));
+    if (!unitId) {
+      leasesSkippedNoUnit += 1;
+      continue;
+    }
+    const currentOcc = currentOccupancyByAfUnit.get(String(t.UnitId));
+    if (!currentOcc || String(t.OccupancyId) !== currentOcc) {
+      tenantsSkippedNotCurrent += 1;
+      continue;
+    }
+
     // AppFolio's tenant primary key is `Id`. OccupancyId is the
     // shared lease/occupancy key — falling back to it would collapse
     // two roommates into one tenant row.
@@ -247,12 +275,6 @@ async function syncOneProperty(tx, organizationId, property) {
       tenantId = inserted.id;
     }
     tenantsUpserted += 1;
-
-    const unitId = unitIdBySource.get(String(t.UnitId));
-    if (!unitId) {
-      leasesSkippedNoUnit += 1;
-      continue;
-    }
 
     // AppFolio tenant lease fields: LeaseStartDate / LeaseEndDate /
     // CurrentRent. Fall back to MoveInOn for the start when a tenant
@@ -317,12 +339,40 @@ async function syncOneProperty(tx, organizationId, property) {
       .onConflictDoNothing();
   }
 
+  // Stale-lease cleanup. A prior buggy run created an 'active' lease
+  // per historical occupancy. For every unit we resolved, mark any
+  // 'active' AppFolio lease whose source_lease_id isn't the unit's
+  // current occupancy as 'ended' — and end ALL active AppFolio
+  // leases on units AppFolio now reports as vacant (no current
+  // occupancy). This converges the DB to exactly one active lease
+  // per occupied unit, even on a re-run.
+  let leasesEnded = 0;
+  for (const [afUnitId, ourUnitId] of unitIdBySource) {
+    const currentOcc = currentOccupancyByAfUnit.get(afUnitId) || null;
+    const conds = [
+      eq(schema.leases.organizationId, organizationId),
+      eq(schema.leases.unitId, ourUnitId),
+      eq(schema.leases.status, 'active'),
+      eq(schema.leases.sourcePms, 'appfolio'),
+    ];
+    // Occupied unit: end every active lease except the current one.
+    // Vacant unit (no currentOcc): end them all.
+    if (currentOcc) conds.push(ne(schema.leases.sourceLeaseId, currentOcc));
+    const ended = await tx
+      .update(schema.leases)
+      .set({ status: 'ended', updatedAt: new Date() })
+      .where(and(...conds))
+      .returning({ id: schema.leases.id });
+    leasesEnded += ended.length;
+  }
+
   return {
     property_id: property.id,
     tenants_seen: afTenants.length,
-    active_tenants: activeTenants.length,
     tenants_upserted: tenantsUpserted,
+    tenants_skipped_not_current: tenantsSkippedNotCurrent,
     leases_upserted: leasesUpserted,
+    leases_ended: leasesEnded,
     leases_skipped_no_unit: leasesSkippedNoUnit,
     leases_skipped_no_start: leasesSkippedNoStart,
     unit_ids_backfilled: unitIdsBackfilled,
@@ -385,8 +435,10 @@ export default withAdminHandler(async (req, res) => {
   const results = [];
   let totalTenants = 0;
   let totalLeases = 0;
+  let totalLeasesEnded = 0;
   let totalSkippedNoUnit = 0;
   let totalSkippedNoStart = 0;
+  let totalTenantsSkippedNotCurrent = 0;
   let totalUnitIdsBackfilled = 0;
   let consecutive401s = 0;
   let aborted = false;
@@ -426,8 +478,10 @@ export default withAdminHandler(async (req, res) => {
       });
       totalTenants += summary.tenants_upserted || 0;
       totalLeases += summary.leases_upserted || 0;
+      totalLeasesEnded += summary.leases_ended || 0;
       totalSkippedNoUnit += summary.leases_skipped_no_unit || 0;
       totalSkippedNoStart += summary.leases_skipped_no_start || 0;
+      totalTenantsSkippedNotCurrent += summary.tenants_skipped_not_current || 0;
       totalUnitIdsBackfilled += summary.unit_ids_backfilled || 0;
       consecutive401s = 0;
       await recordHealth(organizationId, 'appfolio_database', 'AppFolio (Database API)', { ok: true });
@@ -473,7 +527,9 @@ export default withAdminHandler(async (req, res) => {
     timed_out: timedOut,
     totals: {
       tenants_upserted: totalTenants,
+      tenants_skipped_not_current: totalTenantsSkippedNotCurrent,
       leases_upserted: totalLeases,
+      leases_ended: totalLeasesEnded,
       leases_skipped_no_unit: totalSkippedNoUnit,
       leases_skipped_no_start: totalSkippedNoStart,
       unit_ids_backfilled: totalUnitIdsBackfilled,
