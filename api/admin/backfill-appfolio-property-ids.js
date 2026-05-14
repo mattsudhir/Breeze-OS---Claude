@@ -87,7 +87,12 @@ export default withAdminHandler(async (req, res) => {
   const unmatched = [];
   const seenOurIds = new Set();
   for (const af of afProperties) {
-    const afPropertyId = String(af.PropertyId);
+    // AppFolio's /properties payload uses Id (the entity's own primary
+    // key), not PropertyId — PropertyId is only on rows that REFERENCE
+    // a property (units, tenants, work orders, etc.).
+    const afId = af.Id || af.id || af.PropertyId;
+    if (afId == null) continue;
+    const afPropertyId = String(afId);
     const afAddrKey = normalize(`${af.Address1 || ''} ${af.City || ''}`);
     const afNameKey = normalize(af.PropertyName || af.Name || '');
 
