@@ -59,7 +59,8 @@ export default withAdminHandler(async (req, res) => {
     });
   }
 
-  const appfolioPropertyId = Number(property.sourcePropertyId);
+  // source_property_id is AppFolio's property Id (a UUID string).
+  const appfolioPropertyId = String(property.sourcePropertyId || '').trim();
   const timings = {};
 
   // /units probe
