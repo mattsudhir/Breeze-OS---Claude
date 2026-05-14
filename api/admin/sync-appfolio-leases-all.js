@@ -311,7 +311,11 @@ export default withAdminHandler(async (req, res) => {
   }
 
   const body = parseBody(req);
-  const limit = Math.min(Math.max(parseInt(body.limit, 10) || 25, 1), 100);
+  // Default batch of 10 (was 25). Each property fires 2 AppFolio
+  // calls + collision-check SELECTs + a 150ms throttle, and a 429
+  // can trigger retry waits — 25 could blow past Vercel's 300s cap
+  // and the function dies returning nothing (UI stuck at "0/0").
+  const limit = Math.min(Math.max(parseInt(body.limit, 10) || 10, 1), 100);
   const offset = Math.max(parseInt(body.offset, 10) || 0, 0);
 
   const db = getDb();
@@ -356,6 +360,14 @@ export default withAdminHandler(async (req, res) => {
   let consecutive401s = 0;
   let aborted = false;
   let abortReason = null;
+  let timedOut = false;
+
+  // Wall-clock budget. Vercel kills the function at 300s with no
+  // response — return early at 240s so the UI gets a partial result
+  // and continues the loop with the next offset instead of hanging
+  // on "0/0".
+  const startedAt = Date.now();
+  const TIME_BUDGET_MS = 240_000;
 
   // Soft throttle: 150ms gap between properties. Each property fires
   // 2 AppFolio calls (/units + /tenants), so this keeps us under ~13
@@ -365,6 +377,10 @@ export default withAdminHandler(async (req, res) => {
   const PROPERTY_DELAY_MS = 150;
 
   for (let i = 0; i < properties.length; i += 1) {
+    if (Date.now() - startedAt > TIME_BUDGET_MS) {
+      timedOut = true;
+      break;
+    }
     const property = properties[i];
     if (i > 0) {
       await new Promise((resolve) => setTimeout(resolve, PROPERTY_DELAY_MS));
@@ -418,9 +434,11 @@ export default withAdminHandler(async (req, res) => {
     offset,
     next_offset: nextOffset,
     total_properties: total,
+    // timedOut still has_more — the UI just continues with nextOffset.
     has_more: !aborted && nextOffset < total,
     aborted,
     abort_reason: abortReason,
+    timed_out: timedOut,
     totals: {
       tenants_upserted: totalTenants,
       leases_upserted: totalLeases,
