@@ -8,7 +8,7 @@
 // PR, we can upgrade the primitives.
 
 import { useEffect, useState, useCallback } from 'react';
-import { Building2, Users, Zap, Database, RefreshCw, Plus, Trash2, Upload, Settings2, Grid3x3, Link2, UserPlus } from 'lucide-react';
+import { Building2, Users, Zap, Database, RefreshCw, Plus, Trash2, Upload, Settings2, Grid3x3, Link2, UserPlus, Stethoscope, CheckCircle2, AlertCircle, AlertTriangle } from 'lucide-react';
 import {
   owners as ownersApi,
   properties as propertiesApi,
@@ -20,6 +20,7 @@ import {
   bulkUtilityConfig as bulkUtilityConfigApi,
   gridImport as gridImportApi,
   backfillUnitIds as backfillUnitIdsApi,
+  appfolioDiagnostics as diagApi,
   getAdminToken,
   setAdminToken,
   hasAdminToken,
@@ -117,6 +118,7 @@ export default function PropertyDirectoryPage() {
             { id: 'gridImport', label: 'Grid Import', icon: Grid3x3 },
             { id: 'backfill', label: 'Backfill Unit IDs', icon: Link2 },
             { id: 'syncLeases', label: 'Sync Leases (AppFolio)', icon: UserPlus },
+            { id: 'diagnostics', label: 'AppFolio Diagnostics', icon: Stethoscope },
           ].map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -150,8 +152,210 @@ export default function PropertyDirectoryPage() {
         {tab === 'gridImport' && <GridImportTab />}
         {tab === 'backfill' && <BackfillUnitIdsTab />}
         {tab === 'syncLeases' && <SyncAppfolioLeasesTab />}
+        {tab === 'diagnostics' && <AppfolioDiagnosticsTab />}
       </div>
     </TokenGate>
+  );
+}
+
+// ── AppFolio Diagnostics tab ─────────────────────────────────────
+//
+// One-tap buttons for everything we'd otherwise be pasting URLs for:
+// auth check, property-id backfill (preview + apply), leases-state
+// snapshot. Results render inline — no JSON reading, no screenshots.
+
+function DiagButton({ label, hint, onClick, running, accent = '#1565C0' }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={running}
+      style={{
+        display: 'block', width: '100%', textAlign: 'left',
+        padding: '12px 14px', marginBottom: 8,
+        background: running ? '#f0f0f0' : 'white',
+        border: `1px solid ${accent}`, borderRadius: 8,
+        cursor: running ? 'wait' : 'pointer',
+      }}
+    >
+      <div style={{ fontWeight: 600, color: accent, fontSize: 14 }}>
+        {running ? 'Running…' : label}
+      </div>
+      {hint && <div style={{ fontSize: 12, color: '#777', marginTop: 2 }}>{hint}</div>}
+    </button>
+  );
+}
+
+function ResultBlock({ result }) {
+  if (!result) return null;
+  const { kind, data, error } = result;
+  if (error) {
+    return (
+      <div style={{
+        padding: 12, background: '#FFEBEE', border: '1px solid #FFCDD2',
+        borderRadius: 8, color: '#C62828', fontSize: 13, marginBottom: 12,
+      }}>
+        <AlertCircle size={14} style={{ verticalAlign: -2, marginRight: 6 }} />
+        {error}
+      </div>
+    );
+  }
+
+  // Auth-check rendering
+  if (kind === 'auth') {
+    const statuses = data.repeat_probe_statuses || [];
+    const allOk = statuses.length > 0 && statuses.every((s) => s === 200);
+    const anyOk = statuses.includes(200);
+    const Icon = allOk ? CheckCircle2 : anyOk ? AlertTriangle : AlertCircle;
+    const color = allOk ? '#2E7D32' : anyOk ? '#EF6C00' : '#C62828';
+    return (
+      <div style={{
+        padding: 12, background: '#FAFAFA', border: `1px solid ${color}`,
+        borderRadius: 8, marginBottom: 12, fontSize: 13,
+      }}>
+        <div style={{ fontWeight: 600, color, marginBottom: 6 }}>
+          <Icon size={14} style={{ verticalAlign: -2, marginRight: 6 }} />
+          {allOk ? 'AppFolio auth healthy' : anyOk ? 'AppFolio auth INTERMITTENT' : 'AppFolio auth failing'}
+        </div>
+        <div style={{ color: '#555' }}>
+          5 back-to-back probes: <strong>{JSON.stringify(statuses)}</strong>
+        </div>
+        {data.intermittent && (
+          <div style={{ marginTop: 6, color: '#EF6C00' }}>
+            Mixed results = the secret is valid but something (IP allowlist on the
+            AppFolio credential, or rate-limiting) is rejecting some calls. Check
+            AppFolio Developer Space for an &quot;Allowed IPs&quot; setting on the
+            breezepg credential.
+          </div>
+        )}
+        {(data.hints || []).map((h, i) => (
+          <div key={i} style={{ marginTop: 6, color: '#555' }}>• {h}</div>
+        ))}
+      </div>
+    );
+  }
+
+  // Backfill rendering
+  if (kind === 'backfill') {
+    return (
+      <div style={{
+        padding: 12, background: '#FAFAFA', border: '1px solid #1565C0',
+        borderRadius: 8, marginBottom: 12, fontSize: 13,
+      }}>
+        <div style={{ fontWeight: 600, color: '#1565C0', marginBottom: 6 }}>
+          {data.dry_run ? 'Backfill preview (no changes written)' : 'Backfill applied'}
+        </div>
+        <table style={{ fontSize: 13, borderSpacing: '0 2px' }}>
+          <tbody>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>AppFolio properties</td><td>{data.appfolio_properties_returned}</td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>Our properties</td><td>{data.our_properties_total}</td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>Matched</td><td>{data.matches_count}</td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>Will update / already correct</td><td>{data.matches_will_update_count} / {data.matches_already_correct_count}</td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>AppFolio unmatched</td><td>{data.appfolio_unmatched_count}</td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>Our DB unmatched</td><td>{data.our_db_unmatched_count}</td></tr>
+            {!data.dry_run && <tr><td style={{ paddingRight: 12, color: '#777' }}><strong>Updated</strong></td><td><strong>{data.updated}</strong></td></tr>}
+            {data.conflicts > 0 && <tr><td style={{ paddingRight: 12, color: '#C62828' }}>Conflicts</td><td style={{ color: '#C62828' }}>{data.conflicts}</td></tr>}
+          </tbody>
+        </table>
+        {data.next_step && (
+          <div style={{ marginTop: 8, color: '#555', fontStyle: 'italic' }}>{data.next_step}</div>
+        )}
+      </div>
+    );
+  }
+
+  // Leases-state rendering
+  if (kind === 'leases') {
+    const c = data.counts || {};
+    return (
+      <div style={{
+        padding: 12, background: '#FAFAFA', border: '1px solid #1565C0',
+        borderRadius: 8, marginBottom: 12, fontSize: 13,
+      }}>
+        <div style={{ fontWeight: 600, color: '#1565C0', marginBottom: 6 }}>
+          Leases / units state
+        </div>
+        <table style={{ fontSize: 13, borderSpacing: '0 2px' }}>
+          <tbody>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>Properties (with source id)</td><td>{c.properties_total} ({c.properties_with_source_id})</td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>Units (with source_unit_id)</td><td>{c.units_total} ({c.units_with_source_unit_id})</td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>Leases total / active</td><td>{c.leases_total} / {c.leases_active}</td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>Tenants total</td><td>{c.tenants_total}</td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>Lease-tenant links</td><td>{c.lease_tenants_total}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  return (
+    <pre style={{
+      padding: 12, background: '#1e1e1e', color: '#d4d4d4', borderRadius: 8,
+      fontSize: 11, overflowX: 'auto', marginBottom: 12,
+    }}>{JSON.stringify(data, null, 2)}</pre>
+  );
+}
+
+function AppfolioDiagnosticsTab() {
+  const [running, setRunning] = useState(null);
+  const [result, setResult] = useState(null);
+
+  const run = async (key, kind, fn, confirmMsg) => {
+    if (confirmMsg && !window.confirm(confirmMsg)) return;
+    setRunning(key);
+    setResult(null);
+    try {
+      const data = await fn();
+      if (data.ok === false) {
+        setResult({ kind, error: data.error || 'Request failed' });
+      } else {
+        setResult({ kind, data });
+      }
+    } catch (err) {
+      setResult({ kind, error: err.message || String(err) });
+    } finally {
+      setRunning(null);
+    }
+  };
+
+  return (
+    <div style={{ maxWidth: 640 }}>
+      <p style={{ color: '#666', fontSize: 14, marginTop: 0 }}>
+        One-tap AppFolio diagnostics. No URL pasting, no JSON reading — results
+        render below each button.
+      </p>
+
+      <ResultBlock result={result} />
+
+      <DiagButton
+        label="1. Check AppFolio auth"
+        hint="Fires 5 back-to-back probes. Tells you if the credential is healthy, dead, or intermittently rejected."
+        running={running === 'auth'}
+        onClick={() => run('auth', 'auth', diagApi.checkAuth)}
+      />
+      <DiagButton
+        label="2. Backfill property IDs — preview"
+        hint="Matches our properties to AppFolio's by address/name. Shows the plan; writes nothing."
+        running={running === 'backfillDry'}
+        onClick={() => run('backfillDry', 'backfill', diagApi.backfillPropertyIdsDryRun)}
+      />
+      <DiagButton
+        label="3. Backfill property IDs — APPLY"
+        hint="Writes the corrected source_property_id values. Run the preview first."
+        accent="#C62828"
+        running={running === 'backfillApply'}
+        onClick={() => run(
+          'backfillApply', 'backfill', diagApi.backfillPropertyIdsApply,
+          'Apply property-ID backfill? This writes source_property_id on matched properties.',
+        )}
+      />
+      <DiagButton
+        label="4. Leases / units state snapshot"
+        hint="Counts of properties, units, leases, tenants — to verify a sync actually landed."
+        running={running === 'leases'}
+        onClick={() => run('leases', 'leases', diagApi.leasesState)}
+      />
+    </div>
   );
 }
 

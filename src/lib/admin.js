@@ -169,3 +169,21 @@ export const moveEvents = {
     adminFetch('/api/admin/move-events', { method: 'PATCH', query: { id }, body }),
   delete: (id) => adminFetch('/api/admin/move-events', { method: 'DELETE', query: { id } }),
 };
+
+// ── AppFolio diagnostics ─────────────────────────────────────────
+// One-tap wrappers so the user never has to paste a diagnostic URL
+// or read raw JSON. Each returns the parsed endpoint response.
+
+export const appfolioDiagnostics = {
+  checkAuth: () => adminFetch('/api/admin/debug-appfolio-auth'),
+  backfillPropertyIdsDryRun: () =>
+    adminFetch('/api/admin/backfill-appfolio-property-ids', { query: { dry_run: 'true' } }),
+  backfillPropertyIdsApply: () =>
+    adminFetch('/api/admin/backfill-appfolio-property-ids', {
+      method: 'POST',
+      body: { dry_run: false },
+    }),
+  leasesState: () => adminFetch('/api/admin/debug-leases-state'),
+  syncOneProperty: (body = {}) =>
+    adminFetch('/api/admin/sync-appfolio-leases-one', { method: 'POST', body }),
+};
