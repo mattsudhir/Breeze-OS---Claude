@@ -336,6 +336,59 @@ function ResultBlock({ result }) {
     );
   }
 
+  // Unit-ID reconciliation rendering
+  if (kind === 'unitBackfill') {
+    const t = data.totals || {};
+    const unmatched = data.unmatched || [];
+    return (
+      <div style={{
+        padding: 12, background: '#FAFAFA', border: '1px solid #1565C0',
+        borderRadius: 8, marginBottom: 12, fontSize: 13,
+      }}>
+        <div style={{ fontWeight: 600, color: '#1565C0', marginBottom: 6 }}>
+          {data.dry_run ? 'Unit reconciliation preview (no changes written)' : 'Unit reconciliation applied'}
+        </div>
+        <table style={{ fontSize: 13, borderSpacing: '0 2px' }}>
+          <tbody>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>Units matched {data.dry_run ? '(would write)' : '(written)'}</td><td><strong>{t.units_matched}</strong></td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>Already correct</td><td>{t.units_already_set}</td></tr>
+            {t.conflicts > 0 && <tr><td style={{ paddingRight: 12, color: '#C62828' }}>Conflicts</td><td style={{ color: '#C62828' }}>{t.conflicts}</td></tr>}
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>AppFolio units unmatched</td><td>{unmatched.length}</td></tr>
+          </tbody>
+        </table>
+        {unmatched.length > 0 && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontWeight: 600, fontSize: 12, color: '#b45309', marginBottom: 4 }}>
+              Couldn&apos;t auto-match — hand-map these:
+            </div>
+            <div style={{ maxHeight: 220, overflowY: 'auto', fontSize: 12 }}>
+              {unmatched.map((u, i) => (
+                <div key={i} style={{
+                  padding: '4px 0', borderBottom: '1px solid #eee', color: '#555',
+                }}>
+                  <strong>{u.property}</strong> — {u.appfolio_name || u.appfolio_address || u.appfolio_unit_id}
+                  {' '}<span style={{ color: u.current_occupancy === 'occupied' ? '#C62828' : '#999' }}>
+                    ({u.current_occupancy})
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {(data.errors || []).length > 0 && (
+          <div style={{ marginTop: 8, color: '#C62828', fontSize: 12 }}>
+            {data.errors.length} property error(s): {data.errors[0]?.error}
+          </div>
+        )}
+        {data.dry_run && (
+          <div style={{ marginTop: 8, color: '#555', fontStyle: 'italic' }}>
+            Looks right? Run button 7 to apply, then re-run Sync Leases.
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <pre style={{
       padding: 12, background: '#1e1e1e', color: '#d4d4d4', borderRadius: 8,
@@ -347,6 +400,7 @@ function ResultBlock({ result }) {
 function AppfolioDiagnosticsTab() {
   const [running, setRunning] = useState(null);
   const [result, setResult] = useState(null);
+  const [unitProgress, setUnitProgress] = useState(null);
 
   const run = async (key, kind, fn, confirmMsg) => {
     if (confirmMsg && !window.confirm(confirmMsg)) return;
@@ -363,6 +417,52 @@ function AppfolioDiagnosticsTab() {
       setResult({ kind, error: err.message || String(err) });
     } finally {
       setRunning(null);
+    }
+  };
+
+  // Unit-ID reconciliation is batched server-side — loop with a
+  // rolling offset until has_more=false, accumulating totals.
+  const runUnitBackfill = async (dryRun) => {
+    if (!dryRun && !window.confirm(
+      'Apply unit-ID reconciliation? Writes source_unit_id on matched units.',
+    )) return;
+    const key = dryRun ? 'unitDry' : 'unitApply';
+    setRunning(key);
+    setResult(null);
+    setUnitProgress({ processed: 0, total: 0 });
+    const acc = {
+      units_matched: 0, units_already_set: 0, conflicts: 0,
+      unmatched_appfolio_units: 0,
+    };
+    const unmatched = [];
+    const errors = [];
+    let offset = 0;
+    try {
+      while (true) {
+        const json = await diagApi.backfillUnitIdsBatch({ dryRun, offset, limit: 25 });
+        if (json.ok === false) {
+          setResult({ kind: 'unitBackfill', error: json.error || 'Request failed' });
+          return;
+        }
+        const tt = json.totals || {};
+        acc.units_matched += tt.units_matched || 0;
+        acc.units_already_set += tt.units_already_set || 0;
+        acc.conflicts += tt.conflicts || 0;
+        for (const u of json.unmatched_samples || []) {
+          if (unmatched.length < 80) unmatched.push(u);
+        }
+        for (const e of json.errors || []) errors.push(e);
+        offset = json.next_offset;
+        setUnitProgress({ processed: offset, total: json.total_properties });
+        if (!json.has_more) break;
+      }
+      acc.unmatched_appfolio_units = unmatched.length;
+      setResult({ kind: 'unitBackfill', data: { dry_run: dryRun, totals: acc, unmatched, errors } });
+    } catch (err) {
+      setResult({ kind: 'unitBackfill', error: err.message || String(err) });
+    } finally {
+      setRunning(null);
+      setUnitProgress(null);
     }
   };
 
@@ -410,6 +510,24 @@ function AppfolioDiagnosticsTab() {
         running={running === 'smoke'}
         onClick={() => run('smoke', 'smoke', () => diagApi.syncOneProperty({}))}
       />
+      <DiagButton
+        label="6. Reconcile unit IDs — preview"
+        hint="Matches our units to AppFolio's within each property (exact / normalized / unit-number / SFR). Shows the plan + anything it can't auto-match. Writes nothing."
+        running={running === 'unitDry'}
+        onClick={() => runUnitBackfill(true)}
+      />
+      <DiagButton
+        label="7. Reconcile unit IDs — APPLY"
+        hint="Writes source_unit_id on every matched unit. Run the preview first, then re-run Sync Leases."
+        accent="#C62828"
+        running={running === 'unitApply'}
+        onClick={() => runUnitBackfill(false)}
+      />
+      {unitProgress && (
+        <div style={{ fontSize: 12, color: '#666', margin: '4px 0 12px' }}>
+          Reconciling… {unitProgress.processed} / {unitProgress.total} properties
+        </div>
+      )}
     </div>
   );
 }
