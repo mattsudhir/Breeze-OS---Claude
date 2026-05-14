@@ -42,14 +42,17 @@ async function syncOneProperty(tx, organizationId, property) {
     return { skipped: true, reason: 'missing source_property_id' };
   }
 
-  // Pull units AND tenants for the property in parallel. Units pass
-  // gives us AppFolio's UnitId → UnitName, which we use to match our
-  // already-imported units by source_unit_name (since bulk-import
-  // didn't populate source_unit_id). We also backfill source_unit_id
-  // on our rows so subsequent syncs are fast.
+  // Pull units AND tenants for this property in parallel.
+  //
+  // AppFolio's Database API filters use `filters[FieldName]` syntax.
+  // Both /units and /tenants rows carry a `PropertyId` field, so we
+  // scope each call with filters[PropertyId]. (Bare `property_ids` /
+  // `property_id` params are silently ignored — that made every call
+  // return the ENTIRE dataset, which is why the sync was slow and
+  // unit-matching kept missing.)
   const [unitsResult, tenantsResult] = await Promise.all([
-    fetchAllPages('/units', { property_ids: appfolioPropertyId }),
-    fetchAllPages('/tenants', { property_id: appfolioPropertyId }),
+    fetchAllPages('/units', { 'filters[PropertyId]': appfolioPropertyId }),
+    fetchAllPages('/tenants', { 'filters[PropertyId]': appfolioPropertyId }),
   ]);
   if (unitsResult.error) throw new Error(`AppFolio /units: ${unitsResult.error}`);
   if (tenantsResult.error) throw new Error(`AppFolio /tenants: ${tenantsResult.error}`);
