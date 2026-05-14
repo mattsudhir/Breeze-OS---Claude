@@ -45,22 +45,47 @@ export default withAdminHandler(async (req, res) => {
   const db = getDb();
   const organizationId = await getDefaultOrgId();
 
-  // Count helper.
-  async function count(table, hasOrg = true) {
-    const where = hasOrg ? eq(table.organizationId, organizationId) : undefined;
-    const q = db.select({ c: sql`COUNT(*)`.as('c') }).from(table);
-    const rows = where ? await q.where(where) : await q;
+  // property_utilities and lease_tenants have no organization_id of
+  // their own — they're scoped via property_id / lease_id. Pull those
+  // id sets up front so both the count and the delete can use them.
+  const orgPropertyRows = await db
+    .select({ id: schema.properties.id })
+    .from(schema.properties)
+    .where(eq(schema.properties.organizationId, organizationId));
+  const orgPropertyIds = orgPropertyRows.map((r) => r.id);
+  const orgLeaseRows = await db
+    .select({ id: schema.leases.id })
+    .from(schema.leases)
+    .where(eq(schema.leases.organizationId, organizationId));
+  const orgLeaseIds = orgLeaseRows.map((r) => r.id);
+
+  // Count helper for org-scoped tables.
+  async function count(table) {
+    const rows = await db
+      .select({ c: sql`COUNT(*)`.as('c') })
+      .from(table)
+      .where(eq(table.organizationId, organizationId));
+    return Number(rows[0].c);
+  }
+  // Count helper for a table scoped by an id list (empty list → 0).
+  async function countIn(table, column, ids) {
+    if (ids.length === 0) return 0;
+    const rows = await db
+      .select({ c: sql`COUNT(*)`.as('c') })
+      .from(table)
+      .where(sql`${column} IN ${ids}`);
     return Number(rows[0].c);
   }
 
-  // maintenance_ticket_comments has organization_id; the rest do too.
   const counts = {
     maintenance_ticket_comments: await count(schema.maintenanceTicketComments),
     maintenance_tickets: await count(schema.maintenanceTickets),
-    lease_tenants: await count(schema.leaseTenants, false),
+    lease_tenants: await countIn(schema.leaseTenants, schema.leaseTenants.leaseId, orgLeaseIds),
     leases: await count(schema.leases),
     tenants: await count(schema.tenants),
-    property_utilities: await count(schema.propertyUtilities),
+    property_utilities: await countIn(
+      schema.propertyUtilities, schema.propertyUtilities.propertyId, orgPropertyIds,
+    ),
     units: await count(schema.units),
     properties: await count(schema.properties),
   };
@@ -79,14 +104,6 @@ export default withAdminHandler(async (req, res) => {
   // Delete in FK-safe order, one transaction.
   const deleted = {};
   await db.transaction(async (tx) => {
-    // lease_tenants is org-less — scope via its leases. Simplest:
-    // delete all lease_tenants whose lease belongs to this org.
-    const orgLeaseIds = await tx
-      .select({ id: schema.leases.id })
-      .from(schema.leases)
-      .where(eq(schema.leases.organizationId, organizationId));
-    const leaseIdList = orgLeaseIds.map((r) => r.id);
-
     const d1 = await tx.delete(schema.maintenanceTicketComments)
       .where(eq(schema.maintenanceTicketComments.organizationId, organizationId))
       .returning({ id: schema.maintenanceTicketComments.id });
@@ -97,9 +114,10 @@ export default withAdminHandler(async (req, res) => {
       .returning({ id: schema.maintenanceTickets.id });
     deleted.maintenance_tickets = d2.length;
 
-    if (leaseIdList.length > 0) {
+    // lease_tenants is org-less — scope via its leases.
+    if (orgLeaseIds.length > 0) {
       const d3 = await tx.delete(schema.leaseTenants)
-        .where(sql`${schema.leaseTenants.leaseId} IN ${leaseIdList}`)
+        .where(sql`${schema.leaseTenants.leaseId} IN ${orgLeaseIds}`)
         .returning({ id: schema.leaseTenants.id });
       deleted.lease_tenants = d3.length;
     } else {
@@ -116,10 +134,15 @@ export default withAdminHandler(async (req, res) => {
       .returning({ id: schema.tenants.id });
     deleted.tenants = d5.length;
 
-    const d6 = await tx.delete(schema.propertyUtilities)
-      .where(eq(schema.propertyUtilities.organizationId, organizationId))
-      .returning({ id: schema.propertyUtilities.id });
-    deleted.property_utilities = d6.length;
+    // property_utilities is org-less — scope via its properties.
+    if (orgPropertyIds.length > 0) {
+      const d6 = await tx.delete(schema.propertyUtilities)
+        .where(sql`${schema.propertyUtilities.propertyId} IN ${orgPropertyIds}`)
+        .returning({ id: schema.propertyUtilities.id });
+      deleted.property_utilities = d6.length;
+    } else {
+      deleted.property_utilities = 0;
+    }
 
     const d7 = await tx.delete(schema.units)
       .where(eq(schema.units.organizationId, organizationId))
