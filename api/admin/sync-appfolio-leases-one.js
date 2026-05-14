@@ -67,7 +67,7 @@ export default withAdminHandler(async (req, res) => {
   let unitsResult;
   let t0 = Date.now();
   try {
-    unitsResult = await fetchAllPages('/units', { property_ids: appfolioPropertyId });
+    unitsResult = await fetchAllPages('/units', { 'filters[PropertyId]': appfolioPropertyId });
   } catch (err) {
     await recordHealth(organizationId, 'appfolio_database', 'AppFolio (Database API)', { ok: false, error: err.message });
     return res.status(502).json({ ok: false, stage: 'units', error: err.message, ms: Date.now() - t0 });
@@ -83,7 +83,7 @@ export default withAdminHandler(async (req, res) => {
   let tenantsResult;
   t0 = Date.now();
   try {
-    tenantsResult = await fetchAllPages('/tenants', { property_id: appfolioPropertyId });
+    tenantsResult = await fetchAllPages('/tenants', { 'filters[PropertyId]': appfolioPropertyId });
   } catch (err) {
     await recordHealth(organizationId, 'appfolio_database', 'AppFolio (Database API)', { ok: false, error: err.message });
     return res.status(502).json({ ok: false, stage: 'tenants', error: err.message, ms: Date.now() - t0 });
