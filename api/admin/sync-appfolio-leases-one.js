@@ -119,10 +119,13 @@ export default withAdminHandler(async (req, res) => {
 
   await recordHealth(organizationId, 'appfolio_database', 'AppFolio (Database API)', { ok: true });
 
-  const today = new Date().toISOString().slice(0, 10);
+  // Active = AppFolio Status 'Current'/'Notice' (authoritative), or
+  // no Status + not moved out. Mirrors sync-appfolio-leases-all.
   const activeTenants = afTenants.filter((t) => {
-    const end = t.LeaseToDate || t.LeaseTo || null;
-    return !end || end >= today;
+    const status = String(t.Status || '').toLowerCase();
+    if (status === 'current' || status === 'notice') return true;
+    if (!t.Status && !t.MoveOutOn && !t.MoveOutDate) return true;
+    return false;
   });
 
   return res.status(200).json({
