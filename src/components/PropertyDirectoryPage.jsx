@@ -310,9 +310,28 @@ function ResultBlock({ result }) {
         {data.hint && (
           <div style={{ marginTop: 8, color: '#555', fontStyle: 'italic' }}>{data.hint}</div>
         )}
-        <div style={{ marginTop: 8, fontSize: 11, color: '#999' }}>
-          Multiply (units_ms + tenants_ms) by ~252 to estimate a full sync.
-        </div>
+        {af.raw_sample_tenant && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontWeight: 600, fontSize: 12, color: '#6A1B9A', marginBottom: 4 }}>
+              Raw AppFolio tenant fields
+            </div>
+            <pre style={{
+              padding: 8, background: '#1e1e1e', color: '#d4d4d4', borderRadius: 6,
+              fontSize: 10, overflowX: 'auto', margin: 0,
+            }}>{JSON.stringify(af.raw_sample_tenant, null, 2)}</pre>
+          </div>
+        )}
+        {af.raw_sample_unit && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontWeight: 600, fontSize: 12, color: '#6A1B9A', marginBottom: 4 }}>
+              Raw AppFolio unit fields
+            </div>
+            <pre style={{
+              padding: 8, background: '#1e1e1e', color: '#d4d4d4', borderRadius: 6,
+              fontSize: 10, overflowX: 'auto', margin: 0,
+            }}>{JSON.stringify(af.raw_sample_unit, null, 2)}</pre>
+          </div>
+        )}
       </div>
     );
   }
