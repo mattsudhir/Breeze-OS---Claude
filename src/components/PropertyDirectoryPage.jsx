@@ -412,6 +412,66 @@ function ResultBlock({ result }) {
     );
   }
 
+  // Unit dedupe rendering
+  if (kind === 'dedupe') {
+    const plan = data.plan || [];
+    const repointed = data.repointed || {};
+    return (
+      <div style={{
+        padding: 12, background: '#FAFAFA', border: '1px solid #1565C0',
+        borderRadius: 8, marginBottom: 12, fontSize: 13,
+      }}>
+        <div style={{ fontWeight: 600, color: '#1565C0', marginBottom: 6 }}>
+          {data.dry_run ? 'Unit dedupe preview (no changes written)' : 'Unit dedupe applied'}
+        </div>
+        <table style={{ fontSize: 13, borderSpacing: '0 2px' }}>
+          <tbody>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>Total units</td><td>{data.total_units}</td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>Duplicate groups</td><td><strong>{data.duplicate_groups}</strong></td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>{data.dry_run ? 'Orphan rows to delete' : 'Orphan rows deleted'}</td><td><strong style={{ color: '#C62828' }}>{data.dry_run ? data.duplicate_unit_rows : data.units_deleted}</strong></td></tr>
+            {!data.dry_run && <tr><td style={{ paddingRight: 12, color: '#777' }}>Groups resolved</td><td>{data.groups_resolved}</td></tr>}
+          </tbody>
+        </table>
+        {!data.dry_run && Object.keys(repointed).length > 0 && (
+          <div style={{ marginTop: 8, fontSize: 12, color: '#555' }}>
+            Re-pointed: {Object.entries(repointed).map(([k, v]) => `${v} ${k}`).join(' · ')}
+          </div>
+        )}
+        {plan.length > 0 && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontWeight: 600, fontSize: 12, color: '#b45309', marginBottom: 4 }}>
+              Duplicate groups (keeper → orphans removed):
+            </div>
+            <div style={{ maxHeight: 260, overflowY: 'auto', fontSize: 12 }}>
+              {plan.map((g, i) => (
+                <div key={i} style={{ padding: '4px 0', borderBottom: '1px solid #eee', color: '#555' }}>
+                  <strong>&quot;{g.name}&quot;</strong> — {g.group_size} rows, keeping{' '}
+                  {g.keeper_has_source_id ? 'the AppFolio-matched row' : 'the oldest row'},
+                  {' '}removing {g.orphan_unit_ids.length}
+                  {g.orphan_lease_counts.some((c) => c > 0) && (
+                    <span style={{ color: '#C62828' }}>
+                      {' '}(orphan leases re-pointed: {g.orphan_lease_counts.reduce((a, b) => a + b, 0)})
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {(data.failures || []).length > 0 && (
+          <div style={{ marginTop: 8, color: '#C62828', fontSize: 12 }}>
+            {data.failures.length} group(s) could not dedupe: {data.failures[0]?.error}
+          </div>
+        )}
+        {data.dry_run && data.duplicate_groups > 0 && (
+          <div style={{ marginTop: 8, color: '#555', fontStyle: 'italic' }}>
+            Looks right? Run button 9 to delete, then re-run unit reconciliation + Sync Leases.
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <pre style={{
       padding: 12, background: '#1e1e1e', color: '#d4d4d4', borderRadius: 8,
@@ -554,6 +614,22 @@ function AppfolioDiagnosticsTab() {
           Reconciling… {unitProgress.processed} / {unitProgress.total} properties
         </div>
       )}
+      <DiagButton
+        label="8. Dedupe units — preview"
+        hint="Finds duplicate unit rows (same property + same name) from CSV double-imports. Shows what would be removed; writes nothing."
+        running={running === 'dedupeDry'}
+        onClick={() => run('dedupeDry', 'dedupe', diagApi.dedupeUnitsDryRun)}
+      />
+      <DiagButton
+        label="9. Dedupe units — DELETE duplicates"
+        hint="Re-points leases / tickets / charges to the keeper row, then deletes orphan duplicate units. Run the preview first."
+        accent="#C62828"
+        running={running === 'dedupeApply'}
+        onClick={() => run(
+          'dedupeApply', 'dedupe', diagApi.dedupeUnitsApply,
+          'Delete duplicate unit rows? Orphan duplicates are removed after their leases/charges are re-pointed to the keeper. This is destructive — run the preview first.',
+        )}
+      />
     </div>
   );
 }
