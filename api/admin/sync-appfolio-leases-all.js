@@ -34,9 +34,12 @@ function isAppfolioConfigured() {
 }
 
 async function syncOneProperty(tx, organizationId, property) {
-  const appfolioPropertyId = Number(property.sourcePropertyId);
-  if (!Number.isInteger(appfolioPropertyId) || appfolioPropertyId <= 0) {
-    return { skipped: true, reason: 'invalid source_property_id' };
+  // source_property_id is AppFolio's property Id — a UUID string,
+  // not an integer. (It used to be a RentManager integer; migration
+  // 0031 widened the column and the backfill rewrote the values.)
+  const appfolioPropertyId = String(property.sourcePropertyId || '').trim();
+  if (!appfolioPropertyId) {
+    return { skipped: true, reason: 'missing source_property_id' };
   }
 
   // Pull units AND tenants for the property in parallel. Units pass
