@@ -522,6 +522,68 @@ function ResultBlock({ result }) {
     );
   }
 
+  // Data-integrity check rendering
+  if (kind === 'integrity') {
+    const p = data.properties || {};
+    const u = data.units || {};
+    const propSamples = data.shared_property_samples || [];
+    const unitSamples = data.shared_unit_samples || [];
+    const flag = (n) => (n > 0 ? '#C62828' : '#2E7D32');
+    return (
+      <div style={{
+        padding: 12, background: '#FAFAFA', border: '1px solid #6A1B9A',
+        borderRadius: 8, marginBottom: 12, fontSize: 13,
+      }}>
+        <div style={{ fontWeight: 600, color: '#6A1B9A', marginBottom: 6 }}>
+          Data integrity check
+        </div>
+        <table style={{ fontSize: 13, borderSpacing: '0 2px' }}>
+          <tbody>
+            <tr><td colSpan={2} style={{ fontWeight: 600, paddingTop: 4 }}>Properties ({p.total})</td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>Sharing a source_property_id</td><td style={{ color: flag(p.shared_source_id_groups) }}><strong>{p.shared_source_id_groups}</strong> groups ({p.shared_source_id_property_rows} rows)</td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>Non-UUID source id</td><td style={{ color: flag(p.non_uuid_source_id) }}>{p.non_uuid_source_id}</td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>NULL source id</td><td style={{ color: flag(p.null_source_id) }}>{p.null_source_id}</td></tr>
+            <tr><td colSpan={2} style={{ fontWeight: 600, paddingTop: 6 }}>Units ({u.total})</td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>Sharing a source_unit_id</td><td style={{ color: flag(u.shared_source_id_groups) }}><strong>{u.shared_source_id_groups}</strong> groups ({u.shared_source_id_unit_rows} rows)</td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>Non-UUID source id</td><td style={{ color: flag(u.non_uuid_source_id) }}>{u.non_uuid_source_id}</td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>NULL source id</td><td style={{ color: flag(u.null_source_id) }}>{u.null_source_id}</td></tr>
+            <tr><td style={{ paddingRight: 12, color: '#777' }}>Orphan units</td><td style={{ color: flag(u.orphan_units) }}>{u.orphan_units}</td></tr>
+          </tbody>
+        </table>
+        {propSamples.length > 0 && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontWeight: 600, fontSize: 12, color: '#C62828', marginBottom: 4 }}>
+              Properties sharing a source id:
+            </div>
+            <div style={{ maxHeight: 200, overflowY: 'auto', fontSize: 12 }}>
+              {propSamples.map((g, i) => (
+                <div key={i} style={{ padding: '4px 0', borderBottom: '1px solid #eee', color: '#555' }}>
+                  <strong>{g.count}×</strong> id <code>{String(g.source_property_id).slice(0, 12)}…</code>:
+                  {' '}{g.properties.map((x) => x.display_name).join(' / ')}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {unitSamples.length > 0 && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontWeight: 600, fontSize: 12, color: '#C62828', marginBottom: 4 }}>
+              Units sharing a source id:
+            </div>
+            <div style={{ maxHeight: 200, overflowY: 'auto', fontSize: 12 }}>
+              {unitSamples.map((g, i) => (
+                <div key={i} style={{ padding: '4px 0', borderBottom: '1px solid #eee', color: '#555' }}>
+                  <strong>{g.count}×</strong> id <code>{String(g.source_unit_id).slice(0, 12)}…</code>:
+                  {' '}{g.units.map((x) => `"${x.name}"`).join(' / ')}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <pre style={{
       padding: 12, background: '#1e1e1e', color: '#d4d4d4', borderRadius: 8,
@@ -695,6 +757,13 @@ function AppfolioDiagnosticsTab() {
           'dedupePropApply', 'dedupeProp', diagApi.dedupePropertiesApply,
           'Merge duplicate property rows? Orphan properties are deleted after units + all references are re-pointed to the keeper, and the resulting duplicate units are collapsed. Destructive — run the preview first.',
         )}
+      />
+      <DiagButton
+        label="12. Data integrity check"
+        hint="Read-only. Reports properties/units sharing a source id, non-UUID ids, NULL ids, orphan units — the structural pollution from the CSV bootstrap."
+        accent="#6A1B9A"
+        running={running === 'integrity'}
+        onClick={() => run('integrity', 'integrity', diagApi.dataIntegrity)}
       />
     </div>
   );
