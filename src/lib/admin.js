@@ -200,4 +200,5 @@ export const appfolioDiagnostics = {
     adminFetch('/api/admin/dedupe-properties', { query: { dry_run: 'true' } }),
   dedupePropertiesApply: () =>
     adminFetch('/api/admin/dedupe-properties', { method: 'POST', body: { dry_run: false } }),
+  dataIntegrity: () => adminFetch('/api/admin/debug-data-integrity'),
 };
