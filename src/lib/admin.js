@@ -202,3 +202,29 @@ export const appfolioDiagnostics = {
     adminFetch('/api/admin/dedupe-properties', { method: 'POST', body: { dry_run: false } }),
   dataIntegrity: () => adminFetch('/api/admin/debug-data-integrity'),
 };
+
+// ── AppFolio full re-import ──────────────────────────────────────
+// The clean-slate path: wipe the CSV-bootstrapped directory data and
+// re-import properties + units straight from AppFolio's API, with
+// correct source_* ids from the first write. Leases + tickets then
+// sync on top with no backfill needed. This is also the
+// client-onboarding flow.
+
+export const appfolioReimport = {
+  wipeDryRun: () =>
+    adminFetch('/api/admin/wipe-directory-data', { query: { dry_run: 'true' } }),
+  wipeApply: () =>
+    adminFetch('/api/admin/wipe-directory-data', { method: 'POST', body: { dry_run: false } }),
+  importProperties: () =>
+    adminFetch('/api/admin/import-appfolio-properties', { method: 'POST' }),
+  importUnits: () =>
+    adminFetch('/api/admin/import-appfolio-units', { method: 'POST' }),
+  // Batched — caller loops with rolling offset until has_more=false.
+  syncLeasesBatch: ({ offset = 0, limit = 10 } = {}) =>
+    adminFetch('/api/admin/sync-appfolio-leases-all', {
+      method: 'POST',
+      body: { offset, limit },
+    }),
+  syncTickets: () =>
+    adminFetch('/api/admin/sync-appfolio-tickets', { method: 'POST', body: { status: 'all' } }),
+};

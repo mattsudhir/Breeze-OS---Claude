@@ -8,7 +8,7 @@
 // PR, we can upgrade the primitives.
 
 import { useEffect, useState, useCallback } from 'react';
-import { Building2, Users, Zap, Database, RefreshCw, Plus, Trash2, Upload, Settings2, Grid3x3, Link2, UserPlus, Stethoscope, CheckCircle2, AlertCircle, AlertTriangle } from 'lucide-react';
+import { Building2, Users, Zap, Database, RefreshCw, Plus, Trash2, Upload, Settings2, Grid3x3, Link2, UserPlus, Stethoscope, CheckCircle2, AlertCircle, AlertTriangle, DownloadCloud } from 'lucide-react';
 import {
   owners as ownersApi,
   properties as propertiesApi,
@@ -21,6 +21,7 @@ import {
   gridImport as gridImportApi,
   backfillUnitIds as backfillUnitIdsApi,
   appfolioDiagnostics as diagApi,
+  appfolioReimport as reimportApi,
   getAdminToken,
   setAdminToken,
   hasAdminToken,
@@ -118,6 +119,7 @@ export default function PropertyDirectoryPage() {
             { id: 'gridImport', label: 'Grid Import', icon: Grid3x3 },
             { id: 'backfill', label: 'Backfill Unit IDs', icon: Link2 },
             { id: 'syncLeases', label: 'Sync Leases (AppFolio)', icon: UserPlus },
+            { id: 'reimport', label: 'AppFolio Re-Import', icon: DownloadCloud },
             { id: 'diagnostics', label: 'AppFolio Diagnostics', icon: Stethoscope },
           ].map(({ id, label, icon: Icon }) => (
             <button
@@ -152,6 +154,7 @@ export default function PropertyDirectoryPage() {
         {tab === 'gridImport' && <GridImportTab />}
         {tab === 'backfill' && <BackfillUnitIdsTab />}
         {tab === 'syncLeases' && <SyncAppfolioLeasesTab />}
+        {tab === 'reimport' && <AppfolioReimportTab />}
         {tab === 'diagnostics' && <AppfolioDiagnosticsTab />}
       </div>
     </TokenGate>
@@ -590,6 +593,213 @@ function ResultBlock({ result }) {
       padding: 12, background: '#1e1e1e', color: '#d4d4d4', borderRadius: 8,
       fontSize: 11, overflowX: 'auto', marginBottom: 12,
     }}>{JSON.stringify(data, null, 2)}</pre>
+  );
+}
+
+// ── AppFolio Re-Import tab ───────────────────────────────────────
+//
+// The clean-slate path. The CSV bootstrap left the directory layer
+// polluted (mismatched + stale source ids) in ways name-based
+// reconciliation can't fully untangle. This wipes it and re-imports
+// properties + units straight from AppFolio's API, where the
+// source_* ids are correct from the first write. Leases + tickets
+// then sync on top with zero backfill. Run the steps top to bottom.
+
+function ReimportStep({ n, title, desc, button, onClick, running, done, accent = '#1565C0', children }) {
+  return (
+    <div style={{
+      border: `1px solid ${done ? '#C8E6C9' : '#e0e0e0'}`,
+      background: done ? '#F1F8E9' : '#fff',
+      borderRadius: 10, padding: 14, marginBottom: 10,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <div style={{
+          flexShrink: 0, width: 24, height: 24, borderRadius: '50%',
+          background: done ? '#2E7D32' : accent, color: '#fff',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 13, fontWeight: 700,
+        }}>{done ? '✓' : n}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 600, fontSize: 14 }}>{title}</div>
+          <div style={{ fontSize: 12, color: '#777', marginTop: 2 }}>{desc}</div>
+          {children}
+          <button
+            type="button"
+            onClick={onClick}
+            disabled={running}
+            style={{
+              marginTop: 8, padding: '7px 14px', borderRadius: 6,
+              border: `1px solid ${accent}`,
+              background: running ? '#f0f0f0' : accent,
+              color: running ? '#999' : '#fff',
+              fontSize: 13, fontWeight: 600,
+              cursor: running ? 'wait' : 'pointer',
+            }}
+          >
+            {running ? 'Running…' : button}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AppfolioReimportTab() {
+  const [running, setRunning] = useState(null);
+  const [results, setResults] = useState({});
+  const [leaseProgress, setLeaseProgress] = useState(null);
+
+  const setResult = (key, value) =>
+    setResults((prev) => ({ ...prev, [key]: value }));
+
+  const runStep = async (key, fn, confirmMsg) => {
+    if (confirmMsg && !window.confirm(confirmMsg)) return;
+    setRunning(key);
+    try {
+      const data = await fn();
+      setResult(key, data.ok === false
+        ? { ok: false, error: data.error || 'Request failed' }
+        : { ok: true, data });
+    } catch (err) {
+      setResult(key, { ok: false, error: err.message || String(err) });
+    } finally {
+      setRunning(null);
+    }
+  };
+
+  // Leases sync is batched server-side — loop until has_more=false.
+  const runLeaseSync = async () => {
+    setRunning('leases');
+    setLeaseProgress({ processed: 0, total: 0 });
+    const acc = { tenants: 0, leases: 0, ended: 0, skippedNoUnit: 0, skippedNoStart: 0 };
+    let offset = 0;
+    try {
+      while (true) {
+        const json = await reimportApi.syncLeasesBatch({ offset, limit: 10 });
+        if (json.ok === false) {
+          setResult('leases', { ok: false, error: json.error || 'Request failed' });
+          return;
+        }
+        const t = json.totals || {};
+        acc.tenants += t.tenants_upserted || 0;
+        acc.leases += t.leases_upserted || 0;
+        acc.ended += t.leases_ended || 0;
+        acc.skippedNoUnit += t.leases_skipped_no_unit || 0;
+        acc.skippedNoStart += t.leases_skipped_no_start || 0;
+        offset = json.next_offset;
+        setLeaseProgress({ processed: offset, total: json.total_properties });
+        if (!json.has_more) break;
+      }
+      setResult('leases', { ok: true, data: { totals: acc } });
+    } catch (err) {
+      setResult('leases', { ok: false, error: err.message || String(err) });
+    } finally {
+      setRunning(null);
+      setLeaseProgress(null);
+    }
+  };
+
+  const R = ({ k }) => {
+    const r = results[k];
+    if (!r) return null;
+    if (!r.ok) {
+      return (
+        <div style={{
+          marginTop: 8, padding: '6px 10px', background: '#FFEBEE',
+          border: '1px solid #FFCDD2', borderRadius: 6, color: '#C62828', fontSize: 12,
+        }}>{r.error}</div>
+      );
+    }
+    return (
+      <pre style={{
+        marginTop: 8, padding: 8, background: '#1e1e1e', color: '#d4d4d4',
+        borderRadius: 6, fontSize: 11, overflowX: 'auto',
+      }}>{JSON.stringify(r.data, null, 2)}</pre>
+    );
+  };
+
+  return (
+    <div style={{ maxWidth: 640 }}>
+      <div style={{
+        marginBottom: 16, padding: 12, background: '#FFF8E1',
+        border: '1px solid #FFE082', borderRadius: 8, fontSize: 13, color: '#6D4C00',
+      }}>
+        <strong>Clean-slate re-import.</strong> Step 1 deletes the current
+        directory data (properties, units, leases, tenants, maintenance
+        tickets). Owners, entities, utility providers, GL accounts, bank
+        accounts and the accounting ledger are kept. Steps 2&ndash;5
+        rebuild everything straight from AppFolio with correct ids.
+        Run top to bottom.
+      </div>
+
+      <ReimportStep
+        n={1} title="Wipe directory data" accent="#C62828"
+        desc="Preview first (shows row counts). The button toggles to the destructive delete once you've previewed."
+        button={results.wipePreview && !results.wipe ? 'Wipe now (destructive)' : 'Preview wipe'}
+        running={running === 'wipePreview' || running === 'wipe'}
+        done={!!results.wipe?.ok}
+        onClick={() => {
+          if (results.wipePreview && !results.wipe) {
+            runStep('wipe', reimportApi.wipeApply,
+              'Delete all directory data (properties / units / leases / tenants / maintenance tickets)? This is destructive.');
+          } else {
+            runStep('wipePreview', reimportApi.wipeDryRun);
+          }
+        }}
+      >
+        <R k="wipePreview" />
+        <R k="wipe" />
+      </ReimportStep>
+
+      <ReimportStep
+        n={2} title="Import properties from AppFolio"
+        desc="Pulls /properties. source_property_id = AppFolio's UUID from the first write — no backfill ever needed."
+        button="Import properties"
+        running={running === 'properties'}
+        done={!!results.properties?.ok}
+        onClick={() => runStep('properties', reimportApi.importProperties)}
+      >
+        <R k="properties" />
+      </ReimportStep>
+
+      <ReimportStep
+        n={3} title="Import units from AppFolio"
+        desc="Pulls /units, skips NonRevenue (common areas / models / offices), resolves property by source id."
+        button="Import units"
+        running={running === 'units'}
+        done={!!results.units?.ok}
+        onClick={() => runStep('units', reimportApi.importUnits)}
+      >
+        <R k="units" />
+      </ReimportStep>
+
+      <ReimportStep
+        n={4} title="Sync leases + tenants"
+        desc="Per property: pulls /tenants, creates one lease per occupied unit off CurrentOccupancyId. Batched — runs to completion."
+        button="Sync leases"
+        running={running === 'leases'}
+        done={!!results.leases?.ok}
+        onClick={runLeaseSync}
+      >
+        {leaseProgress && (
+          <div style={{ marginTop: 6, fontSize: 12, color: '#666' }}>
+            {leaseProgress.processed} / {leaseProgress.total} properties…
+          </div>
+        )}
+        <R k="leases" />
+      </ReimportStep>
+
+      <ReimportStep
+        n={5} title="Sync maintenance tickets"
+        desc="Pulls /work_orders and maps them to maintenance tickets."
+        button="Sync tickets"
+        running={running === 'tickets'}
+        done={!!results.tickets?.ok}
+        onClick={() => runStep('tickets', reimportApi.syncTickets)}
+      >
+        <R k="tickets" />
+      </ReimportStep>
+    </div>
   );
 }
 
