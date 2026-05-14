@@ -353,6 +353,7 @@ function ResultBlock({ result }) {
           <tbody>
             <tr><td style={{ paddingRight: 12, color: '#777' }}>{data.dry_run ? 'Would write (no conflict)' : 'Units written'}</td><td><strong>{t.units_written}</strong></td></tr>
             <tr><td style={{ paddingRight: 12, color: '#777' }}>Already correct</td><td>{t.units_already_set}</td></tr>
+            {t.stale_ids_reclaimed > 0 && <tr><td style={{ paddingRight: 12, color: '#777' }}>Stale ids reclaimed (cross-property)</td><td>{t.stale_ids_reclaimed}</td></tr>}
             {t.conflicts > 0 && <tr><td style={{ paddingRight: 12, color: '#C62828' }}>Conflicts (skipped)</td><td style={{ color: '#C62828' }}>{t.conflicts}</td></tr>}
             <tr><td style={{ paddingRight: 12, color: '#777' }}>Properties with unmatched units</td><td>{unmatched.length}</td></tr>
           </tbody>
@@ -625,7 +626,9 @@ function AppfolioDiagnosticsTab() {
     setRunning(key);
     setResult(null);
     setUnitProgress({ processed: 0, total: 0 });
-    const acc = { units_written: 0, units_already_set: 0, conflicts: 0 };
+    const acc = {
+      units_written: 0, units_already_set: 0, stale_ids_reclaimed: 0, conflicts: 0,
+    };
     const unmatched = [];
     const conflicts = [];
     const errors = [];
@@ -640,6 +643,7 @@ function AppfolioDiagnosticsTab() {
         const tt = json.totals || {};
         acc.units_written += tt.units_written || 0;
         acc.units_already_set += tt.units_already_set || 0;
+        acc.stale_ids_reclaimed += tt.stale_ids_reclaimed || 0;
         acc.conflicts += tt.conflicts || 0;
         for (const u of json.unmatched_samples || []) {
           if (unmatched.length < 80) unmatched.push(u);
