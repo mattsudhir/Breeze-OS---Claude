@@ -116,8 +116,9 @@ export default withAdminHandler(async (req, res) => {
     const row = rows[i];
     // Accept either the new sourcePropertyId or legacy rmPropertyId
     // field name so old client code keeps working while the rename
-    // propagates.
-    const sourcePropertyId = toInt(row.sourcePropertyId ?? row.rmPropertyId);
+    // propagates. Kept as a string — source_property_id is text now
+    // (migration 0031); RentManager used ints but AppFolio uses UUIDs.
+    const sourcePropertyId = toStr(row.sourcePropertyId ?? row.rmPropertyId);
     if (!sourcePropertyId) {
       rowErrors.push({ rowIndex: i, error: 'Missing or invalid sourcePropertyId', row });
       continue;
