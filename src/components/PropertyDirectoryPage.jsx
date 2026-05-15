@@ -735,14 +735,18 @@ function AppfolioReimportTab() {
       <ReimportStep
         n={1} title="Wipe directory data" accent="#C62828"
         desc="Preview first (shows row counts). The button toggles to the destructive delete once you've previewed."
-        button={results.wipePreview && !results.wipe ? 'Wipe now (destructive)' : 'Preview wipe'}
+        button={results.wipePreview?.ok && !results.wipe?.ok
+          ? 'Wipe now (destructive)' : 'Preview wipe'}
         running={running === 'wipePreview' || running === 'wipe'}
         done={!!results.wipe?.ok}
         onClick={() => {
-          if (results.wipePreview && !results.wipe) {
+          if (results.wipePreview?.ok && !results.wipe?.ok) {
             runStep('wipe', reimportApi.wipeApply,
               'Delete all directory data (properties / units / leases / tenants / maintenance tickets)? This is destructive.');
           } else {
+            // Clear any stale wipe error from a prior failed apply
+            // so the toggle can advance on success.
+            setResults((prev) => ({ ...prev, wipe: undefined }));
             runStep('wipePreview', reimportApi.wipeDryRun);
           }
         }}
