@@ -114,11 +114,13 @@ export default withAdminHandler(async (req, res) => {
       .returning({ id: schema.maintenanceTickets.id });
     deleted.maintenance_tickets = d2.length;
 
-    // lease_tenants is org-less — scope via its leases.
+    // lease_tenants is org-less — scope via its leases. It has a
+    // composite PK (lease_id, tenant_id) and NO `id` column, so we
+    // return one of the PK columns for the row count.
     if (orgLeaseIds.length > 0) {
       const d3 = await tx.delete(schema.leaseTenants)
         .where(sql`${schema.leaseTenants.leaseId} IN ${orgLeaseIds}`)
-        .returning({ id: schema.leaseTenants.id });
+        .returning({ leaseId: schema.leaseTenants.leaseId });
       deleted.lease_tenants = d3.length;
     } else {
       deleted.lease_tenants = 0;
