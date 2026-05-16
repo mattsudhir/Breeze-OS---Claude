@@ -1,161 +1,314 @@
-import { FileText, Plus, Calendar, DollarSign, Home, CheckCircle2, Clock, AlertCircle } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  FileText, Calendar, DollarSign, Home, AlertCircle, Loader2,
+  Users,
+} from 'lucide-react';
+import { getAdminToken } from '../lib/admin';
 
-// Placeholder leasing data — will be replaced by live Rent Manager lease queries.
-const PIPELINE = [
-  { stage: 'Applications', count: 9, color: '#1565C0' },
-  { stage: 'Screening', count: 4, color: '#0077B6' },
-  { stage: 'Approved', count: 3, color: '#2E7D32' },
-  { stage: 'Signed', count: 2, color: '#6A1B9A' },
-];
-
-const ACTIVE_LEASES = [
-  { id: 1, tenant: 'Marcia Clark', unit: 'Unit 204 · Oakwood Apartments', rent: 2150, start: 'Jun 1, 2025', end: 'May 31, 2026', status: 'active' },
-  { id: 2, tenant: 'Daniel Kim', unit: 'Unit 8B · Birchwood Commons', rent: 1895, start: 'Aug 15, 2025', end: 'Aug 14, 2026', status: 'active' },
-  { id: 3, tenant: 'Sam Patel', unit: 'Unit 22 · Maple Grove', rent: 945, start: 'Jan 1, 2025', end: 'May 1, 2026', status: 'expiring' },
-  { id: 4, tenant: 'Jenna Wong', unit: 'Unit 11B · Birchwood Commons', rent: 1650, start: 'Mar 12, 2026', end: 'Mar 11, 2027', status: 'active' },
-  { id: 5, tenant: 'Robert Hayes', unit: 'Unit 14C · Birchwood Commons', rent: 2100, start: 'Feb 1, 2025', end: 'Apr 30, 2026', status: 'expiring' },
-];
-
-const APPLICATIONS = [
-  { id: 'APP-2301', applicant: 'Elena Rodriguez', unit: 'Unit 3A · Oakwood', appliedOn: 'Apr 8, 2026', status: 'screening', score: 742 },
-  { id: 'APP-2300', applicant: 'Marcus Chen', unit: 'Unit 19 · Maple Grove', appliedOn: 'Apr 7, 2026', status: 'approved', score: 801 },
-  { id: 'APP-2299', applicant: 'Priya Shah', unit: 'Unit 6C · Birchwood', appliedOn: 'Apr 6, 2026', status: 'screening', score: 688 },
-  { id: 'APP-2298', applicant: 'Tyler Brooks', unit: 'Unit 12 · Oakwood', appliedOn: 'Apr 5, 2026', status: 'pending', score: null },
-];
+// Leasing — currently a read-only view over our DB's leases via
+// /api/admin/list-tenants (which already returns each tenant with
+// their current lease + unit + property).
+//
+// Active deliverables:
+//   - Headline KPIs: active leases, total rent roll, expiring soon
+//   - Lease expirations table for the next 90 days (renewal queue)
+//   - Active leases table
+//
+// Marked as not-yet-built:
+//   - Applications / screening / pipeline (no `applications` table
+//     yet; the surface is a stub with a "Coming soon" pill so
+//     users don't think the data is fake).
+//   - New-lease creation flow (also "Coming soon").
 
 function formatCurrency(n) {
-  return `$${Number(n).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  if (n == null) return '—';
+  return `$${Number(n).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 }
 
-function statusBadge(status) {
-  switch (status) {
-    case 'active':
-      return { className: 'unit-occupied', label: 'Active', Icon: CheckCircle2 };
-    case 'expiring':
-      return { className: 'unit-vacant', label: 'Expiring Soon', Icon: AlertCircle };
-    case 'approved':
-      return { className: 'unit-occupied', label: 'Approved', Icon: CheckCircle2 };
-    case 'screening':
-      return { className: 'status-in_progress', label: 'Screening', Icon: Clock };
-    case 'pending':
-      return { className: 'status-onhold', label: 'Pending', Icon: Clock };
-    default:
-      return { className: 'status-onhold', label: status, Icon: Clock };
+function formatDate(d) {
+  if (!d) return '—';
+  try {
+    return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  } catch {
+    return String(d);
+  }
+}
+
+function daysUntil(d) {
+  if (!d) return null;
+  const t = new Date(d).getTime();
+  if (!Number.isFinite(t)) return null;
+  return Math.round((t - Date.now()) / (1000 * 60 * 60 * 24));
+}
+
+async function fetchTenantsWithLeases() {
+  const token = getAdminToken();
+  const qs = token ? `?secret=${encodeURIComponent(token)}` : '';
+  try {
+    const resp = await fetch(`/api/admin/list-tenants${qs}`, {
+      headers: token ? { 'X-Breeze-Admin-Token': token } : {},
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.ok === false) {
+      return { error: data.error || `HTTP ${resp.status}` };
+    }
+    return { tenants: data.tenants || [] };
+  } catch (err) {
+    return { error: err.message || 'Network error' };
   }
 }
 
 export default function LeasingPage() {
-  const expiringSoon = ACTIVE_LEASES.filter((l) => l.status === 'expiring').length;
+  const [tenants, setTenants] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const res = await fetchTenantsWithLeases();
+      if (cancelled) return;
+      if (res.error) {
+        setError(res.error);
+        setTenants([]);
+      } else {
+        setTenants(res.tenants);
+      }
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // "Active" lease = status='current' per list-tenants' derivation.
+  // One row per primary tenant on an active lease — co-tenants get
+  // their own row but with the same lease_id (filter would dedupe
+  // if we wanted unique-by-lease).
+  const activeLeases = useMemo(() => {
+    if (!tenants) return [];
+    return tenants
+      .filter((t) => t.status === 'current' && t.lease_id)
+      .map((t) => ({
+        id: t.lease_id,
+        tenant: t.name,
+        tenantId: t.id,
+        unit: [t.unitName, t.propertyName].filter(Boolean).join(' · '),
+        unitName: t.unitName,
+        propertyName: t.propertyName,
+        rent: t.rent,
+        start: t.lease_start_date,
+        end: t.lease_end_date,
+        role: t.lease_role,
+        daysUntilEnd: daysUntil(t.lease_end_date),
+      }));
+  }, [tenants]);
+
+  const expiring = useMemo(() => {
+    return activeLeases
+      .filter((l) => l.daysUntilEnd != null && l.daysUntilEnd >= 0 && l.daysUntilEnd <= 90)
+      .sort((a, b) => a.daysUntilEnd - b.daysUntilEnd);
+  }, [activeLeases]);
+
+  const totals = useMemo(() => {
+    const t = activeLeases.reduce(
+      (acc, l) => ({
+        count:        acc.count + 1,
+        rentRoll:     acc.rentRoll + (l.rent || 0),
+        expiringSoon: acc.expiringSoon + (l.daysUntilEnd != null && l.daysUntilEnd <= 60 ? 1 : 0),
+      }),
+      { count: 0, rentRoll: 0, expiringSoon: 0 },
+    );
+    return t;
+  }, [activeLeases]);
+
+  if (loading) {
+    return (
+      <div className="properties-page">
+        <div className="loading-state">
+          <Loader2 size={28} className="spin" />
+          <span>Loading leases...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="properties-page">
-      <div className="data-source-banner" style={{
-        display: 'flex', alignItems: 'center', gap: '8px',
-        padding: '8px 14px', marginBottom: '16px', borderRadius: '8px',
-        fontSize: '12px', fontWeight: 600,
-        background: '#FFF3E0', color: '#E65100', border: '1px solid #FFE0B2',
-      }}>
-        <FileText size={14} /> Preview — sample leasing pipeline while live data is connected
-      </div>
+      {error && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '8px 14px', marginBottom: 16, borderRadius: 8,
+          fontSize: 12, fontWeight: 600,
+          background: '#FFEBEE', color: '#C62828', border: '1px solid #FFCDD2',
+        }}>
+          <AlertCircle size={14} /> Couldn't load leases: {error}
+        </div>
+      )}
 
       <div className="tenant-detail-topbar">
         <div className="property-detail-header" style={{ flex: 1 }}>
-          <div className="wo-detail-icon" style={{ background: '#0077B615', color: '#0077B6' }}>
+          <div className="wo-detail-icon" style={{ background: '#1565C015', color: '#1565C0' }}>
             <FileText size={28} />
           </div>
           <div style={{ flex: 1 }}>
             <h2>Leasing</h2>
             <p className="property-detail-address">
-              {ACTIVE_LEASES.length} active leases · {expiringSoon} expiring within 60 days
+              {totals.count} active leases · {formatCurrency(totals.rentRoll)}/mo · {totals.expiringSoon} expiring in 60 days
             </p>
           </div>
         </div>
-        <button className="btn-primary tenant-edit-btn">
-          <Plus size={14} /> New Lease
-        </button>
       </div>
 
+      {/* Headline KPIs */}
       <div style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-        gap: '12px',
-        marginBottom: '16px',
+        gap: 12, marginBottom: 16,
       }}>
-        {PIPELINE.map((p) => (
-          <div key={p.stage} className="dashboard-card" style={{ padding: '16px' }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>{p.stage}</div>
-            <div style={{ fontSize: 28, fontWeight: 700, color: p.color, marginTop: 4 }}>{p.count}</div>
-          </div>
-        ))}
-      </div>
-
-      <div className="dashboard-card">
-        <div className="card-header">
-          <h3><Home size={18} /> Active Leases</h3>
-        </div>
-        <div className="tenants-list">
-          {ACTIVE_LEASES.map((l) => {
-            const badge = statusBadge(l.status);
-            const Icon = badge.Icon;
-            return (
-              <div key={l.id} className="tenant-row" style={{ cursor: 'default' }}>
-                <div className="tenant-avatar" style={{ background: '#0077B615', color: '#0077B6' }}>
-                  <FileText size={22} />
-                </div>
-                <div className="tenant-info">
-                  <span className="tenant-name">{l.tenant}</span>
-                  <div className="tenant-contact" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
-                    <span className="tenant-contact-item"><Home size={12} /> {l.unit}</span>
-                    <span className="tenant-contact-item">
-                      <Calendar size={12} /> {l.start} – {l.end}
-                    </span>
-                    <span className="tenant-contact-item">
-                      <DollarSign size={12} /> {formatCurrency(l.rent)}/mo
-                    </span>
-                  </div>
-                </div>
-                <span className={`unit-status ${badge.className}`}>
-                  <Icon size={12} /> {badge.label}
-                </span>
+        {[
+          { label: 'Active Leases',   value: String(totals.count),                    icon: FileText, color: '#1565C0' },
+          { label: 'Rent Roll/mo',    value: formatCurrency(totals.rentRoll),         icon: DollarSign, color: '#2E7D32' },
+          { label: 'Expiring (60d)',  value: String(totals.expiringSoon),
+            icon: AlertCircle,
+            color: totals.expiringSoon > 0 ? '#E65100' : '#888' },
+          { label: 'Total Tenants',   value: String((tenants || []).length),          icon: Users, color: '#6A1B9A' },
+        ].map((kpi) => {
+          const Icon = kpi.icon;
+          return (
+            <div key={kpi.label} className="dashboard-card" style={{ padding: '14px 16px' }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                color: '#666', fontSize: 11, fontWeight: 600,
+                textTransform: 'uppercase', letterSpacing: '0.05em',
+              }}>
+                <Icon size={14} style={{ color: kpi.color }} />
+                {kpi.label}
               </div>
-            );
-          })}
-        </div>
+              <div style={{ fontSize: 26, fontWeight: 700, color: '#222', marginTop: 4 }}>
+                {kpi.value}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
+      {/* Expiring soon — actionable view */}
+      <div className="dashboard-card" style={{ marginBottom: 16 }}>
+        <div className="card-header">
+          <h3><Calendar size={18} /> Expiring in the next 90 days</h3>
+          <span style={{ fontSize: 12, color: '#888' }}>
+            {expiring.length} lease{expiring.length === 1 ? '' : 's'}
+          </span>
+        </div>
+        {expiring.length === 0 ? (
+          <div style={{ padding: 16, color: '#888', fontSize: 13 }}>
+            Nothing expires in the next 90 days. Good news — no renewal queue to clear.
+          </div>
+        ) : (
+          <table className="properties-table">
+            <thead>
+              <tr>
+                <th>Tenant</th>
+                <th>Unit · Property</th>
+                <th style={{ textAlign: 'right' }}>Rent</th>
+                <th>Ends</th>
+                <th style={{ textAlign: 'right' }}>Days</th>
+              </tr>
+            </thead>
+            <tbody>
+              {expiring.map((l) => {
+                const urgent = l.daysUntilEnd <= 30;
+                return (
+                  <tr key={l.id + '-' + l.tenantId}>
+                    <td style={{ fontWeight: 600 }}>{l.tenant}</td>
+                    <td style={{ color: '#666' }}>
+                      <Home size={11} style={{ verticalAlign: -1, marginRight: 4 }} />
+                      {l.unit || '—'}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>{formatCurrency(l.rent)}</td>
+                    <td style={{ color: '#666' }}>{formatDate(l.end)}</td>
+                    <td style={{
+                      textAlign: 'right',
+                      fontWeight: 600,
+                      color: urgent ? '#C62828' : '#E65100',
+                    }}>
+                      {l.daysUntilEnd}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Active leases */}
       <div className="dashboard-card">
         <div className="card-header">
-          <h3><Clock size={18} /> Applications in Progress</h3>
+          <h3><FileText size={18} /> All Active Leases</h3>
+          <span style={{ fontSize: 12, color: '#888' }}>
+            {activeLeases.length} lease{activeLeases.length === 1 ? '' : 's'}
+          </span>
         </div>
-        <table className="properties-table">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Applicant</th>
-              <th>Unit</th>
-              <th>Applied</th>
-              <th>Credit</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {APPLICATIONS.map((a) => {
-              const badge = statusBadge(a.status);
-              return (
-                <tr key={a.id}>
-                  <td style={{ fontWeight: 600 }}>{a.id}</td>
-                  <td>{a.applicant}</td>
-                  <td style={{ color: '#666' }}>{a.unit}</td>
-                  <td style={{ color: '#666' }}>{a.appliedOn}</td>
-                  <td>{a.score ? a.score : '—'}</td>
-                  <td>
-                    <span className={`unit-status ${badge.className}`}>{badge.label}</span>
-                  </td>
+        {activeLeases.length === 0 ? (
+          <div style={{ padding: 16, color: '#888', fontSize: 13 }}>
+            No active leases yet.
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table className="properties-table" style={{ minWidth: 720 }}>
+              <thead>
+                <tr>
+                  <th>Tenant</th>
+                  <th>Unit · Property</th>
+                  <th style={{ textAlign: 'right' }}>Rent/mo</th>
+                  <th>Start</th>
+                  <th>End</th>
+                  <th>Role</th>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
+              </thead>
+              <tbody>
+                {activeLeases.slice(0, 250).map((l) => (
+                  <tr key={l.id + '-' + l.tenantId}>
+                    <td style={{ fontWeight: 600 }}>{l.tenant}</td>
+                    <td style={{ color: '#666' }}>{l.unit || '—'}</td>
+                    <td style={{ textAlign: 'right' }}>{formatCurrency(l.rent)}</td>
+                    <td style={{ color: '#666' }}>{formatDate(l.start)}</td>
+                    <td style={{ color: '#666' }}>{formatDate(l.end)}</td>
+                    <td style={{ color: '#666' }}>{l.role || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {activeLeases.length > 250 && (
+              <div style={{
+                padding: '12px 16px', color: '#888', fontSize: 12,
+                borderTop: '1px solid #eee', textAlign: 'center',
+              }}>
+                Showing first 250 of {activeLeases.length} leases.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Applications pipeline — feature stub */}
+      <div className="dashboard-card" style={{ marginTop: 16 }}>
+        <div className="card-header">
+          <h3><Users size={18} /> Applications & Screening Pipeline</h3>
+          <span style={{
+            fontSize: 11, fontWeight: 600, color: '#E65100',
+            background: '#FFF3E0', padding: '2px 8px', borderRadius: 999,
+          }}>
+            Coming soon
+          </span>
+        </div>
+        <div style={{ padding: 16, color: '#666', fontSize: 13 }}>
+          The application pipeline (intake → screening → approval →
+          signed) needs its own `applications` table; it'll be wired
+          up when leasing flows ship. For now this page surfaces the
+          read-side of existing leases only.
+        </div>
       </div>
     </div>
   );
