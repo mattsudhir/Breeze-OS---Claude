@@ -69,13 +69,28 @@ async function fetchOurDashboardData() {
     isClosed: t.status === 'completed' || t.status === 'cancelled',
     createdDate: t.reported_at || t.created_at || null,
   }));
-  const tenants = (ttsts?.tenants || []).map((t) => ({
-    id: t.id,
-    name: t.name,
-    status: t.status,
-    email: t.email,
-    phone: t.phone,
-  }));
+  // Surface the fields the dashboard's activity feed + upcoming-
+  // renewals card consume. Our list-tenants returns lease_end_date
+  // / moveInDate / unitName / propertyName — alias them to the
+  // legacy field names the renderer expects so move-ins, move-outs,
+  // and lease-renewal entries actually populate.
+  const today = new Date();
+  const tenants = (ttsts?.tenants || []).map((t) => {
+    const endDate = t.lease_end_date || null;
+    const moveOut = endDate && new Date(endDate) <= today ? endDate : null;
+    return {
+      id: t.id,
+      name: t.name,
+      status: t.status,
+      email: t.email,
+      phone: t.phone,
+      moveInDate: t.moveInDate || t.lease_start_date || null,
+      moveOutDate: moveOut,
+      leaseEnd: endDate,
+      unitName: t.unitName || t.unit_name || null,
+      propertyName: t.propertyName || t.property_name || null,
+    };
+  });
 
   return { properties, units, workOrders, tenants };
 }
