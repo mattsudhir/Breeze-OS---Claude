@@ -244,6 +244,7 @@ export default function ClassicDashboard({ onNavigate }) {
     .slice(0, 6)
     .map((wo) => ({
       id: wo.displayId || `WO-${wo.id}`,
+      ticketId: wo.id,  // raw UUID so the click-through can directly expand
       unit: unitById[wo.unitId] ? `Unit ${unitById[wo.unitId]}` : '',
       property: propertyById[wo.propertyId] || '',
       issue: wo.summary || 'No description',
@@ -496,11 +497,11 @@ export default function ClassicDashboard({ onNavigate }) {
                   className="maintenance-item"
                   role="button"
                   tabIndex={0}
-                  onClick={() => onNavigate && onNavigate('maintenance', { ticketDisplayId: wo.id })}
+                  onClick={() => onNavigate && onNavigate('maintenance', { ticketId: wo.ticketId })}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      onNavigate && onNavigate('maintenance', { ticketDisplayId: wo.id });
+                      onNavigate && onNavigate('maintenance', { ticketId: wo.ticketId });
                     }
                   }}
                   style={{ cursor: 'pointer' }}
