@@ -48,6 +48,13 @@ export default function PropertiesDrilldown({ initialFilters } = {}) {
   // row by default so units are visible immediately. The user can
   // still collapse individual rows.
   const [expandAll, setExpandAll] = useState(!!initialFilters?.expandAll);
+  // 'all' (default) | 'occupied' | 'vacant'. Set by the Occupied /
+  // Vacant stat cards on the dashboard so the drilldown opens already
+  // focused on the slice the user clicked. Users can change it
+  // in-page via the filter pills.
+  const [occupancyFilter, setOccupancyFilter] = useState(
+    initialFilters?.occupancy || 'all',
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -82,26 +89,20 @@ export default function PropertiesDrilldown({ initialFilters } = {}) {
   }, []);
 
   // Derive a per-property row in the shape the table renders.
+  // The occupancyFilter affects which units appear in the expand panel
+  // AND the per-property roll-up counts the user sees — so an
+  // "Occupied" filter shows occupied-unit counts and only occupied
+  // unit cards when the row is expanded.
   const rows = useMemo(() => {
     if (!properties) return [];
-    return properties.map((p) => {
-      const totalUnits = p.unit_count || 0;
-      const occupied = p.occupied_count || 0;
-      const vacant = p.vacant_count ?? Math.max(0, totalUnits - occupied);
-      const occupancy = totalUnits > 0 ? Math.round((occupied / totalUnits) * 100) : 0;
-      return {
-        id: p.id,
-        name: p.display_name || '—',
-        city: p.address?.city || '',
-        state: p.address?.state || '',
-        type: p.property_type || '',
-        totalUnits,
-        occupied,
-        vacant,
-        occupancy,
-        monthlyRent: centsToDollars(p.total_monthly_rent_cents),
-        openWOs: p.open_maintenance_count || 0,
-        units: (p.units || []).map((u) => ({
+    const filterUnits = (units) => {
+      if (occupancyFilter === 'occupied') return units.filter((u) => u.isOccupied);
+      if (occupancyFilter === 'vacant') return units.filter((u) => !u.isOccupied);
+      return units;
+    };
+    return properties
+      .map((p) => {
+        const allUnits = (p.units || []).map((u) => ({
           id: u.id,
           name: u.name || '—',
           bedrooms: u.bedrooms,
@@ -110,10 +111,40 @@ export default function PropertiesDrilldown({ initialFilters } = {}) {
           rent: centsToDollars(u.monthly_rent_cents),
           tenantName: u.tenant_name || null,
           isOccupied: !!u.is_occupied,
-        })),
-      };
-    });
-  }, [properties]);
+        }));
+        const visibleUnits = filterUnits(allUnits);
+        const totalUnits = occupancyFilter === 'all'
+          ? (p.unit_count || allUnits.length)
+          : visibleUnits.length;
+        const occupied = occupancyFilter === 'vacant' ? 0 : (
+          occupancyFilter === 'occupied' ? visibleUnits.length : (p.occupied_count || 0)
+        );
+        const vacant = occupancyFilter === 'occupied' ? 0 : (
+          occupancyFilter === 'vacant' ? visibleUnits.length : (p.vacant_count ?? Math.max(0, totalUnits - occupied))
+        );
+        const occupancy = totalUnits > 0 ? Math.round((occupied / totalUnits) * 100) : 0;
+        const monthlyRent = visibleUnits.reduce((s, u) => s + (u.rent || 0), 0);
+        return {
+          id: p.id,
+          name: p.display_name || '—',
+          city: p.address?.city || '',
+          state: p.address?.state || '',
+          type: p.property_type || '',
+          totalUnits,
+          occupied,
+          vacant,
+          occupancy,
+          monthlyRent: occupancyFilter === 'all'
+            ? centsToDollars(p.total_monthly_rent_cents)
+            : monthlyRent,
+          openWOs: p.open_maintenance_count || 0,
+          units: visibleUnits,
+        };
+      })
+      // When filtering by occupancy, hide properties that have zero
+      // matching units — keeps the view focused on what the user asked for.
+      .filter((r) => occupancyFilter === 'all' || r.units.length > 0);
+  }, [properties, occupancyFilter]);
 
   // Apply sort.
   const sortedRows = useMemo(() => {
@@ -210,6 +241,37 @@ export default function PropertiesDrilldown({ initialFilters } = {}) {
             </p>
           </div>
         </div>
+      </div>
+
+      {/* Occupancy filter pills — set by the dashboard stat cards or
+          clickable in-page. */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+        {[
+          { key: 'all',      label: 'All Units',  color: '#1565C0' },
+          { key: 'occupied', label: 'Occupied',   color: '#2E7D32' },
+          { key: 'vacant',   label: 'Vacant',     color: '#E65100' },
+        ].map((pill) => {
+          const active = occupancyFilter === pill.key;
+          return (
+            <button
+              key={pill.key}
+              type="button"
+              onClick={() => setOccupancyFilter(pill.key)}
+              style={{
+                padding: '6px 12px',
+                borderRadius: 999,
+                fontSize: 12,
+                fontWeight: 600,
+                border: `1px solid ${active ? pill.color : '#E0E0E0'}`,
+                background: active ? pill.color : '#FFF',
+                color: active ? '#FFF' : '#555',
+                cursor: 'pointer',
+              }}
+            >
+              {pill.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* Portfolio KPI strip — inline grid so we don't need new CSS. */}
