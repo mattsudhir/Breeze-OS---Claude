@@ -83,11 +83,13 @@ on:
 jobs:
   ops:
     runs-on: ubuntu-latest
-    # On comment events, only react if the comment starts with `/` —
-    # cheap pre-filter so we don't burn a runner on every random comment.
+    # On comment events, only react if the comment looks like a slash
+    # command — cheap pre-filter so we don't burn a runner on every
+    # random comment. Allows leading backticks / asterisks / underscores
+    # so MCP-formatted comments (`/run-smoke`) still fire.
     if: |
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/'))
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/'))
     permissions:
       issues: write
       pull-requests: write
@@ -130,7 +132,12 @@ jobs:
           esac
 
           # First non-empty line of the comment body. Trim CR + spaces.
+          # Strip markdown formatting that some clients (incl. the GitHub
+          # MCP server) auto-apply to text starting with `/` — backticks,
+          # bold, italic — so the parsed slash command is the literal
+          # ASCII the human typed.
           CMD_LINE=$(printf '%s' "$BODY" | sed 's/\r$//' | awk 'NF{print; exit}')
+          CMD_LINE=$(printf '%s' "$CMD_LINE" | sed 's/[`*_]//g')
           if [ -z "${CMD_LINE:-}" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
