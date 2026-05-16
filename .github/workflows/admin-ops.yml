@@ -130,7 +130,12 @@ jobs:
           esac
 
           # First non-empty line of the comment body. Trim CR + spaces.
+          # Strip markdown formatting that some clients (incl. the GitHub
+          # MCP server) auto-apply to text starting with `/` — backticks,
+          # bold, italic — so the parsed slash command is the literal
+          # ASCII the human typed.
           CMD_LINE=$(printf '%s' "$BODY" | sed 's/\r$//' | awk 'NF{print; exit}')
+          CMD_LINE=$(printf '%s' "$CMD_LINE" | sed 's/[`*_]//g')
           if [ -z "${CMD_LINE:-}" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
