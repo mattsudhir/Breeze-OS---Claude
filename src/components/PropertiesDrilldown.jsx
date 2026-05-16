@@ -2,90 +2,30 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Building2, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, ChevronRight,
   MapPin, Home, CheckCircle2, AlertCircle, Wrench, DollarSign,
-  Loader2, WifiOff,
+  Loader2, User,
 } from 'lucide-react';
-import { getProperties, getUnits, getWorkOrders } from '../services/data';
-import { useDataSource } from '../contexts/DataSourceContext.jsx';
+import { getAdminToken } from '../lib/admin';
 
 // Analytics-style "drilldown" landing page for Properties. Reached from
 // the Dashboard → Properties stat card (see ClassicDashboard.jsx). Shows
 // a sortable portfolio table with per-property metrics and inline unit
-// expansion, on top of the same RM endpoints the sidebar PropertiesPage
-// uses. Sidebar "Properties" still goes to the simpler list view so we
-// have one landing place per context.
-
-// ── Demo fallback — mirrors the rent-manager service return shape so
-// the rest of this component doesn't need conditional logic when we're
-// offline or RM auth hits the max-sessions cap. ──────────────────────
-
-const DEMO_PROPERTIES = [
-  { id: 1, name: 'Oakwood Apartments', city: 'Portland', state: 'OR', type: 'Multifamily' },
-  { id: 2, name: 'Maple Ridge Complex', city: 'Portland', state: 'OR', type: 'Multifamily' },
-  { id: 3, name: 'Pine Valley Homes', city: 'Beaverton', state: 'OR', type: 'Single Family' },
-  { id: 4, name: 'Birchwood Commons', city: 'Lake Oswego', state: 'OR', type: 'Multifamily' },
-  { id: 5, name: 'Cedar Court', city: 'Portland', state: 'OR', type: 'Multifamily' },
-  { id: 6, name: 'Riverside Lofts', city: 'Portland', state: 'OR', type: 'Mixed Use' },
-];
-
-const DEMO_UNITS = [
-  // Oakwood — 10 units, 9 occupied
-  ...Array.from({ length: 10 }, (_, i) => ({
-    id: 100 + i, propertyId: 1, name: `Unit ${101 + i}`,
-    status: i < 9 ? 'Occupied' : 'Vacant', bedrooms: i % 3 + 1, bathrooms: 1,
-    marketRent: 1800 + i * 25,
-  })),
-  // Maple Ridge — 12 units, 11 occupied
-  ...Array.from({ length: 12 }, (_, i) => ({
-    id: 200 + i, propertyId: 2, name: `Unit ${i + 1}B`,
-    status: i < 11 ? 'Occupied' : 'Vacant', bedrooms: 2, bathrooms: 1,
-    marketRent: 1875 + i * 15,
-  })),
-  // Pine Valley — 6 units, 5 occupied
-  ...Array.from({ length: 6 }, (_, i) => ({
-    id: 300 + i, propertyId: 3, name: `Unit ${500 + i}`,
-    status: i < 5 ? 'Occupied' : 'Vacant', bedrooms: 3, bathrooms: 2,
-    marketRent: 2100 + i * 40,
-  })),
-  // Birchwood — 8 units, 8 occupied
-  ...Array.from({ length: 8 }, (_, i) => ({
-    id: 400 + i, propertyId: 4, name: `Unit ${400 + i}`,
-    status: 'Occupied', bedrooms: 2, bathrooms: 1,
-    marketRent: 1950 + i * 20,
-  })),
-  // Cedar Court — 6 units, 4 occupied
-  ...Array.from({ length: 6 }, (_, i) => ({
-    id: 500 + i, propertyId: 5, name: `Unit ${i + 1}A`,
-    status: i < 4 ? 'Occupied' : 'Vacant', bedrooms: 1, bathrooms: 1,
-    marketRent: 1650 + i * 10,
-  })),
-  // Riverside — 4 units, 3 occupied
-  ...Array.from({ length: 4 }, (_, i) => ({
-    id: 600 + i, propertyId: 6, name: `Unit ${i + 1}`,
-    status: i < 3 ? 'Occupied' : 'Vacant', bedrooms: 2, bathrooms: 2,
-    marketRent: 2250 + i * 30,
-  })),
-];
-
-const DEMO_WORK_ORDERS = [
-  { id: 1, propertyId: 1, isClosed: false }, { id: 2, propertyId: 1, isClosed: false },
-  { id: 3, propertyId: 2, isClosed: false }, { id: 4, propertyId: 2, isClosed: false },
-  { id: 5, propertyId: 2, isClosed: false }, { id: 6, propertyId: 3, isClosed: false },
-  { id: 7, propertyId: 4, isClosed: false }, { id: 8, propertyId: 5, isClosed: false },
-  { id: 9, propertyId: 5, isClosed: false }, { id: 10, propertyId: 5, isClosed: false },
-  { id: 11, propertyId: 6, isClosed: false },
-];
-
-// ── Sorting ──────────────────────────────────────────────────────
+// expansion.
+//
+// Reads from our own DB via /api/admin/list-properties-summary — no
+// more AppFolio passthrough or demo fallback. The endpoint already
+// rolls up units, active leases, primary tenants, AR, YTD income/
+// expense, and open maintenance count per property in a single round
+// trip, so the component just renders.
 
 const COLUMNS = [
-  { key: 'name', label: 'Property', numeric: false, align: 'left' },
-  { key: 'city', label: 'City', numeric: false, align: 'left' },
-  { key: 'totalUnits', label: 'Units', numeric: true, align: 'right' },
-  { key: 'occupied', label: 'Occupied', numeric: true, align: 'right' },
-  { key: 'vacant', label: 'Vacant', numeric: true, align: 'right' },
-  { key: 'occupancy', label: 'Occupancy', numeric: true, align: 'right' },
-  { key: 'estRent', label: 'Est. Rent/mo', numeric: true, align: 'right' },
-  { key: 'openWOs', label: 'Open WOs', numeric: true, align: 'right' },
+  { key: 'name',        label: 'Property',     numeric: false, align: 'left'  },
+  { key: 'city',        label: 'City',         numeric: false, align: 'left'  },
+  { key: 'totalUnits',  label: 'Units',        numeric: true,  align: 'right' },
+  { key: 'occupied',    label: 'Occupied',     numeric: true,  align: 'right' },
+  { key: 'vacant',      label: 'Vacant',       numeric: true,  align: 'right' },
+  { key: 'occupancy',   label: 'Occupancy',    numeric: true,  align: 'right' },
+  { key: 'monthlyRent', label: 'Rent/mo',      numeric: true,  align: 'right' },
+  { key: 'openWOs',     label: 'Open WOs',     numeric: true,  align: 'right' },
 ];
 
 function formatCurrency(n) {
@@ -93,14 +33,14 @@ function formatCurrency(n) {
   return `$${Math.round(n).toLocaleString('en-US')}`;
 }
 
+function centsToDollars(c) {
+  return (Number(c) || 0) / 100;
+}
+
 export default function PropertiesDrilldown({ initialFilters } = {}) {
-  const { dataSource, sources } = useDataSource();
-  const sourceLabel = sources.find((s) => s.value === dataSource)?.label || dataSource;
   const [properties, setProperties] = useState(null);
-  const [units, setUnits] = useState(null);
-  const [workOrders, setWorkOrders] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [isLive, setIsLive] = useState(false);
+  const [error, setError] = useState(null);
   const [sortKey, setSortKey] = useState('totalUnits');
   const [sortDir, setSortDir] = useState('desc');
   const [expandedId, setExpandedId] = useState(null);
@@ -113,93 +53,67 @@ export default function PropertiesDrilldown({ initialFilters } = {}) {
     let cancelled = false;
     async function fetchAll() {
       setLoading(true);
-      const results = await Promise.allSettled([
-        getProperties(dataSource),
-        getUnits(dataSource),
-        getWorkOrders(dataSource, { status: 'all' }),
-      ]);
-      if (cancelled) return;
-      const [propsRes, unitsRes, woRes] = results;
-      const propsData = propsRes.status === 'fulfilled' ? propsRes.value : null;
-      const unitsData = unitsRes.status === 'fulfilled' ? unitsRes.value : null;
-      const woData = woRes.status === 'fulfilled' ? woRes.value : null;
-
-      // If RM returned something, use it; otherwise fall back to demo.
-      if (propsData && propsData.length > 0) {
-        setProperties(propsData);
-        setUnits(unitsData || []);
-        setWorkOrders(woData || []);
-        setIsLive(true);
-      } else {
-        setProperties(DEMO_PROPERTIES);
-        setUnits(DEMO_UNITS);
-        setWorkOrders(DEMO_WORK_ORDERS);
-        setIsLive(false);
+      setError(null);
+      const token = getAdminToken();
+      const qs = token ? `?secret=${encodeURIComponent(token)}` : '';
+      try {
+        const resp = await fetch(`/api/admin/list-properties-summary${qs}`, {
+          headers: token ? { 'X-Breeze-Admin-Token': token } : {},
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!resp.ok || data.ok === false) {
+          setError(data.error || `HTTP ${resp.status}`);
+          setProperties([]);
+        } else {
+          setProperties(data.properties || []);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err.message || 'Network error');
+          setProperties([]);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      setLoading(false);
     }
     fetchAll();
     return () => { cancelled = true; };
-  }, [dataSource]);
+  }, []);
 
-  // Group units by both propertyId and propertyName. AppFolio
-  // sometimes surfaces only the name on a unit row (multi-unit
-  // configs), so a strict id match silently shows 0 units in the
-  // expand panel — that's what the "click row, page just refreshes"
-  // regression looked like. Mirrors the fallback in PropertiesPage.
-  const unitsByPropertyId = useMemo(() => {
-    return (units || []).reduce((acc, u) => {
-      if (!u.propertyId) return acc;
-      (acc[u.propertyId] ||= []).push(u);
-      return acc;
-    }, {});
-  }, [units]);
-  const unitsByPropertyName = useMemo(() => {
-    return (units || []).reduce((acc, u) => {
-      if (!u.propertyName) return acc;
-      (acc[u.propertyName] ||= []).push(u);
-      return acc;
-    }, {});
-  }, [units]);
-
-  // Derived per-property rows with all the metrics.
+  // Derive a per-property row in the shape the table renders.
   const rows = useMemo(() => {
     if (!properties) return [];
     return properties.map((p) => {
-      const propUnits =
-        unitsByPropertyId[p.id] || unitsByPropertyName[p.name] || [];
-      const totalUnits = propUnits.length;
-      const occupied = propUnits.filter((u) => {
-        const s = (u.status || '').toLowerCase();
-        return s.includes('occupied') || s.includes('current');
-      }).length;
-      const vacant = totalUnits - occupied;
+      const totalUnits = p.unit_count || 0;
+      const occupied = p.occupied_count || 0;
+      const vacant = p.vacant_count ?? Math.max(0, totalUnits - occupied);
       const occupancy = totalUnits > 0 ? Math.round((occupied / totalUnits) * 100) : 0;
-      const estRent = propUnits
-        .filter((u) => {
-          const s = (u.status || '').toLowerCase();
-          return s.includes('occupied') || s.includes('current');
-        })
-        .reduce((sum, u) => sum + (Number(u.marketRent) || 0), 0);
-      const openWOs = (workOrders || []).filter(
-        (w) => w.propertyId === p.id && !w.isClosed,
-      ).length;
       return {
         id: p.id,
-        name: p.name,
-        city: p.city || p.state || '',
-        state: p.state || '',
-        type: p.type || '',
+        name: p.display_name || '—',
+        city: p.address?.city || '',
+        state: p.address?.state || '',
+        type: p.property_type || '',
         totalUnits,
         occupied,
         vacant,
         occupancy,
-        estRent,
-        openWOs,
-        units: propUnits,
+        monthlyRent: centsToDollars(p.total_monthly_rent_cents),
+        openWOs: p.open_maintenance_count || 0,
+        units: (p.units || []).map((u) => ({
+          id: u.id,
+          name: u.name || '—',
+          bedrooms: u.bedrooms,
+          bathrooms: u.bathrooms,
+          sqft: u.sqft,
+          rent: centsToDollars(u.monthly_rent_cents),
+          tenantName: u.tenant_name || null,
+          isOccupied: !!u.is_occupied,
+        })),
       };
     });
-  }, [properties, units, workOrders, unitsByPropertyId, unitsByPropertyName]);
+  }, [properties]);
 
   // Apply sort.
   const sortedRows = useMemo(() => {
@@ -220,19 +134,18 @@ export default function PropertiesDrilldown({ initialFilters } = {}) {
     return copy;
   }, [rows, sortKey, sortDir]);
 
-  // Portfolio-wide totals (recomputed from the current rows so they
-  // stay consistent with whatever data source is in use).
+  // Portfolio-wide totals.
   const totals = useMemo(() => {
     const t = rows.reduce(
       (acc, r) => ({
         properties: acc.properties + 1,
-        units: acc.units + r.totalUnits,
-        occupied: acc.occupied + r.occupied,
-        vacant: acc.vacant + r.vacant,
-        estRent: acc.estRent + r.estRent,
-        openWOs: acc.openWOs + r.openWOs,
+        units:      acc.units      + r.totalUnits,
+        occupied:   acc.occupied   + r.occupied,
+        vacant:     acc.vacant     + r.vacant,
+        monthlyRent: acc.monthlyRent + r.monthlyRent,
+        openWOs:    acc.openWOs    + r.openWOs,
       }),
-      { properties: 0, units: 0, occupied: 0, vacant: 0, estRent: 0, openWOs: 0 },
+      { properties: 0, units: 0, occupied: 0, vacant: 0, monthlyRent: 0, openWOs: 0 },
     );
     t.avgOccupancy = t.units > 0 ? Math.round((t.occupied / t.units) * 100) : 0;
     return t;
@@ -273,20 +186,17 @@ export default function PropertiesDrilldown({ initialFilters } = {}) {
 
   return (
     <div className="properties-page">
-      <div className="data-source-banner" style={{
-        display: 'flex', alignItems: 'center', gap: '8px',
-        padding: '8px 14px', marginBottom: '16px', borderRadius: '8px',
-        fontSize: '12px', fontWeight: 600,
-        background: isLive ? '#E8F5E9' : '#FFF3E0',
-        color: isLive ? '#2E7D32' : '#E65100',
-        border: `1px solid ${isLive ? '#C8E6C9' : '#FFE0B2'}`,
-      }}>
-        {isLive ? (
-          <><CheckCircle2 size={14} /> Live portfolio data from {sourceLabel}</>
-        ) : (
-          <><WifiOff size={14} /> Demo data — couldn't reach {sourceLabel} for live metrics</>
-        )}
-      </div>
+      {error && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '8px 14px', marginBottom: 16, borderRadius: 8,
+          fontSize: 12, fontWeight: 600,
+          background: '#FFEBEE', color: '#C62828',
+          border: '1px solid #FFCDD2',
+        }}>
+          <AlertCircle size={14} /> Couldn't load portfolio: {error}
+        </div>
+      )}
 
       <div className="tenant-detail-topbar">
         <div className="property-detail-header" style={{ flex: 1 }}>
@@ -296,7 +206,7 @@ export default function PropertiesDrilldown({ initialFilters } = {}) {
           <div style={{ flex: 1 }}>
             <h2>Properties Drilldown</h2>
             <p className="property-detail-address">
-              {totals.properties} properties · {totals.units} units · {totals.avgOccupancy}% avg occupancy · {formatCurrency(totals.estRent)}/mo est. rent roll
+              {totals.properties} properties · {totals.units} units · {totals.avgOccupancy}% avg occupancy · {formatCurrency(totals.monthlyRent)}/mo rent roll
             </p>
           </div>
         </div>
@@ -306,16 +216,16 @@ export default function PropertiesDrilldown({ initialFilters } = {}) {
       <div style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-        gap: '12px',
-        marginBottom: '16px',
+        gap: 12,
+        marginBottom: 16,
       }}>
         {[
-          { label: 'Properties', value: totals.properties, color: '#1565C0', icon: Building2 },
-          { label: 'Total Units', value: totals.units, color: '#0077B6', icon: Home },
-          { label: 'Occupied', value: totals.occupied, color: '#2E7D32', icon: CheckCircle2 },
-          { label: 'Vacant', value: totals.vacant, color: '#E65100', icon: AlertCircle },
-          { label: 'Avg Occupancy', value: `${totals.avgOccupancy}%`, color: '#7B1FA2', icon: Home },
-          { label: 'Open Work Orders', value: totals.openWOs, color: '#C62828', icon: Wrench },
+          { label: 'Properties',       value: totals.properties,                        color: '#1565C0', icon: Building2 },
+          { label: 'Total Units',      value: totals.units,                             color: '#0077B6', icon: Home },
+          { label: 'Occupied',         value: totals.occupied,                          color: '#2E7D32', icon: CheckCircle2 },
+          { label: 'Vacant',           value: totals.vacant,                            color: '#E65100', icon: AlertCircle },
+          { label: 'Avg Occupancy',    value: `${totals.avgOccupancy}%`,                color: '#7B1FA2', icon: Home },
+          { label: 'Open Work Orders', value: totals.openWOs,                           color: '#C62828', icon: Wrench },
         ].map((kpi) => {
           const Icon = kpi.icon;
           return (
@@ -382,6 +292,13 @@ export default function PropertiesDrilldown({ initialFilters } = {}) {
               </tr>
             </thead>
             <tbody>
+              {sortedRows.length === 0 && !loading && (
+                <tr>
+                  <td colSpan={COLUMNS.length + 1} style={{ padding: 24, textAlign: 'center', color: '#888' }}>
+                    No properties found.
+                  </td>
+                </tr>
+              )}
               {sortedRows.map((r) => {
                 const expanded = expandAll || expandedId === r.id;
                 return (
@@ -440,7 +357,7 @@ function RowGroup({ row, expanded, onToggle }) {
         <td style={{ textAlign: 'right' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <DollarSign size={12} style={{ color: '#2E7D32' }} />
-            {formatCurrency(row.estRent)}
+            {formatCurrency(row.monthlyRent)}
           </span>
         </td>
         <td style={{ textAlign: 'right' }}>
@@ -477,46 +394,51 @@ function RowGroup({ row, expanded, onToggle }) {
             ) : (
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
                 gap: 8,
               }}>
-                {row.units.map((u) => {
-                  const s = (u.status || '').toLowerCase();
-                  const isOccupied = s.includes('occupied') || s.includes('current');
-                  return (
-                    <div
-                      key={u.id}
-                      style={{
-                        padding: '8px 10px',
-                        border: '1px solid #E0E0E0',
-                        borderRadius: 6,
-                        background: 'white',
-                        fontSize: 12,
-                      }}
-                    >
-                      <div style={{
-                        display: 'flex', justifyContent: 'space-between',
-                        alignItems: 'center', marginBottom: 2,
+                {row.units.map((u) => (
+                  <div
+                    key={u.id}
+                    style={{
+                      padding: '8px 10px',
+                      border: '1px solid #E0E0E0',
+                      borderRadius: 6,
+                      background: 'white',
+                      fontSize: 12,
+                    }}
+                  >
+                    <div style={{
+                      display: 'flex', justifyContent: 'space-between',
+                      alignItems: 'center', marginBottom: 2,
+                    }}>
+                      <strong>{u.name}</strong>
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 3,
+                        padding: '1px 6px', borderRadius: 8, fontSize: 10, fontWeight: 600,
+                        background: u.isOccupied ? '#E8F5E9' : '#FFF3E0',
+                        color: u.isOccupied ? '#2E7D32' : '#E65100',
                       }}>
-                        <strong>{u.name}</strong>
-                        <span style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 3,
-                          padding: '1px 6px', borderRadius: 8, fontSize: 10, fontWeight: 600,
-                          background: isOccupied ? '#E8F5E9' : '#FFF3E0',
-                          color: isOccupied ? '#2E7D32' : '#E65100',
-                        }}>
-                          {isOccupied ? <CheckCircle2 size={10} /> : <AlertCircle size={10} />}
-                          {isOccupied ? 'Occupied' : 'Vacant'}
-                        </span>
-                      </div>
-                      <div style={{ color: '#666' }}>
-                        {u.bedrooms != null ? `${u.bedrooms}bd` : ''}
-                        {u.bathrooms != null ? ` · ${u.bathrooms}ba` : ''}
-                        {u.marketRent != null && ` · ${formatCurrency(u.marketRent)}/mo`}
-                      </div>
+                        {u.isOccupied ? <CheckCircle2 size={10} /> : <AlertCircle size={10} />}
+                        {u.isOccupied ? 'Occupied' : 'Vacant'}
+                      </span>
                     </div>
-                  );
-                })}
+                    <div style={{ color: '#666' }}>
+                      {u.bedrooms != null ? `${u.bedrooms}bd` : ''}
+                      {u.bathrooms != null ? ` · ${u.bathrooms}ba` : ''}
+                      {u.sqft != null ? ` · ${u.sqft}sf` : ''}
+                      {u.rent > 0 && ` · ${formatCurrency(u.rent)}/mo`}
+                    </div>
+                    {u.tenantName && (
+                      <div style={{
+                        marginTop: 4, display: 'inline-flex', alignItems: 'center',
+                        gap: 4, color: '#1565C0', fontSize: 11,
+                      }}>
+                        <User size={10} /> {u.tenantName}
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </td>
