@@ -17,17 +17,19 @@
 //   5. clerk_configured   — env var present (does NOT call Clerk)
 //   6. integration_health — reads the integration_health table
 
-import { sql, eq } from 'drizzle-orm';
+import { sql, eq, isNotNull, and } from 'drizzle-orm';
 import {
   withAdminHandler,
   getDefaultOrgId,
   isClerkConfigured,
 } from '../../lib/adminHelpers.js';
 import { getDb, schema } from '../../lib/db/index.js';
+import { isEncryptionConfigured } from '../../lib/encryption.js';
+import { isPlaidConfigured } from '../../lib/backends/plaid.js';
 
 export const config = { maxDuration: 30 };
 
-const BUILD = 'smoke-v1';
+const BUILD = 'smoke-v2';
 
 export default withAdminHandler(async (req, res) => {
   if (req.method !== 'GET' && req.method !== 'POST') {
@@ -108,6 +110,55 @@ export default withAdminHandler(async (req, res) => {
       .from(schema.integrationHealth)
       .where(eq(schema.integrationHealth.organizationId, orgId));
     return { rows };
+  });
+
+  // ── Plaid / encryption health (see docs/plaid-integration-audit.md) ──
+
+  await check('plaid_env', async () => {
+    const env = process.env.PLAID_ENV || '(unset)';
+    const configured = isPlaidConfigured();
+    if (!configured) {
+      // Not an error in dev — the integration is optional. Surface
+      // it so the audit can spot regressions.
+      return { configured: false, env };
+    }
+    // Sanity: production must use production credentials.
+    const looksLikeProd = env.toLowerCase() === 'production';
+    return {
+      configured,
+      env,
+      client_id_present: Boolean(process.env.PLAID_CLIENT_ID),
+      client_id_length: (process.env.PLAID_CLIENT_ID || '').length,
+      secret_present: Boolean(process.env.PLAID_SECRET),
+      secret_length: (process.env.PLAID_SECRET || '').length,
+      production_mode: looksLikeProd,
+    };
+  });
+
+  await check('encryption_key', async () => {
+    const configured = isEncryptionConfigured();
+    return {
+      configured,
+      key_length_bytes: configured
+        ? (process.env.BREEZE_ENCRYPTION_KEY || '').length / 2
+        : 0,
+    };
+  });
+
+  await check('linked_bank_count', async () => {
+    if (!orgId) return { skipped: 'no org' };
+    const rows = await db
+      .select({ c: sql`COUNT(*)`.as('c') })
+      .from(schema.bankAccounts)
+      .where(
+        and(
+          eq(schema.bankAccounts.organizationId, orgId),
+          isNotNull(schema.bankAccounts.plaidAccessTokenEncrypted),
+        ),
+      );
+    return {
+      linked: Number(rows[0]?.c || 0),
+    };
   });
 
   const allOk = checks.every((c) => c.ok);

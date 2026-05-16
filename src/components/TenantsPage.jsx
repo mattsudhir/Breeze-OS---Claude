@@ -8,21 +8,49 @@ import {
 import { getTenant, updateTenant } from '../services/data';
 import { getAdminToken } from '../lib/admin';
 
-// List tenants from our DB (post-reimport). Returns AppFolio
-// source_tenant_id as `id` so the existing detail / edit passthrough
-// keeps working against AppFolio without further changes. Detail +
-// write migration to our DB is a separate, larger lift; this is the
-// list-view-only pass.
+// Fetch one tenant's full detail from our DB. Mirrors the legacy
+// AppFolio passthrough's getTenant() shape so the detail view's
+// field references (firstName/lastName/homePhone/cellPhone/workPhone/
+// comment/displayId/propertyName/unitName/rentAmount/moveInDate/
+// leaseEnd/status) keep working untouched. `id` may be our breeze_id
+// or the AppFolio source_tenant_id — endpoint resolves either.
+async function getTenantFromBreezeDb(id) {
+  if (!id) return null;
+  const token = getAdminToken();
+  const qs = new URLSearchParams({ id });
+  if (token) qs.set('secret', token);
+  try {
+    const resp = await fetch(`/api/admin/get-tenant?${qs.toString()}`, {
+      headers: token ? { 'X-Breeze-Admin-Token': token } : {},
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.ok === false) return null;
+    return data.tenant || null;
+  } catch {
+    return null;
+  }
+}
+
+// List tenants from our DB. Returns AppFolio source_tenant_id as
+// `id` so the existing edit passthrough keeps working against
+// AppFolio. The write side still goes through services/data
+// .updateTenant — see docs/tenants-write-architecture.md for the
+// migration plan.
 async function listTenantsFromBreezeDb() {
   const token = getAdminToken();
   const qs = token ? `?secret=${encodeURIComponent(token)}` : '';
-  const resp = await fetch(`/api/admin/list-tenants${qs}`, {
-    headers: token ? { 'X-Breeze-Admin-Token': token } : {},
-  });
-  const data = await resp.json().catch(() => ({}));
-  if (!resp.ok || data.ok === false) return null;
-  return data.tenants || [];
+  try {
+    const resp = await fetch(`/api/admin/list-tenants${qs}`, {
+      headers: token ? { 'X-Breeze-Admin-Token': token } : {},
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.ok === false) return null;
+    return data.tenants || [];
+  } catch {
+    return null;
+  }
 }
+
 import { useDataSource } from '../contexts/DataSourceContext.jsx';
 import FollowButton from './FollowButton.jsx';
 
@@ -96,7 +124,7 @@ function formatDate(d) {
   }
 }
 
-// ── Detail view with tabs + edit form ──────────────────────────────────
+// ── Detail view with tabs + edit form ────────────────────────────
 function TenantDetail({ tenantId, listTenant, onBack, onUpdated }) {
   const { dataSource, sources } = useDataSource();
   const sourceLabel = sources.find((s) => s.value === dataSource)?.label || dataSource;
@@ -114,7 +142,14 @@ function TenantDetail({ tenantId, listTenant, onBack, onUpdated }) {
     let cancelled = false;
     async function fetchDetail() {
       setLoadingDetail(true);
-      const full = await getTenant(dataSource, tenantId);
+      // Detail view reads from our DB (post-reimport). Falls through
+      // to the legacy AppFolio passthrough only if the local fetch
+      // returns nothing — keeps the page useful for tenants who
+      // somehow aren't in our DB yet.
+      let full = await getTenantFromBreezeDb(tenantId);
+      if (!full) {
+        full = await getTenant(dataSource, tenantId);
+      }
       if (!cancelled && full) {
         setTenant(full);
       }
@@ -162,8 +197,9 @@ function TenantDetail({ tenantId, listTenant, onBack, onUpdated }) {
       setEditing(false);
       setSaveOk(true);
       if (onUpdated) onUpdated(merged);
-      // Background refetch to pick up server-side changes
-      const fresh = await getTenant(dataSource, tenant.id);
+      // Background refetch — prefer our DB, fall back to passthrough.
+      let fresh = await getTenantFromBreezeDb(tenant.id);
+      if (!fresh) fresh = await getTenant(dataSource, tenant.id);
       if (fresh) setTenant(fresh);
       setTimeout(() => setSaveOk(false), 3000);
     } catch (err) {
@@ -290,7 +326,7 @@ function TenantDetail({ tenantId, listTenant, onBack, onUpdated }) {
   );
 }
 
-// ── Tab: Overview ───────────────────────────────────────────────────────
+// ── Tab: Overview ─────────────────────────────────────────────────
 function OverviewTab({ tenant }) {
   return (
     <div className="dashboard-card">
@@ -327,7 +363,7 @@ function OverviewTab({ tenant }) {
   );
 }
 
-// ── Tab: Lease ───────────────────────────────────────────────────────────
+// ── Tab: Lease ────────────────────────────────────────────────────
 function LeaseTab({ tenant }) {
   const lease = tenant.currentLease;
   if (!lease && (!tenant.leases || tenant.leases.length === 0)) {
@@ -370,7 +406,7 @@ function LeaseTab({ tenant }) {
   );
 }
 
-// ── Tab: Balance ───────────────────────────────────────────────────────
+// ── Tab: Balance ──────────────────────────────────────────────────
 function BalanceTab({ tenant }) {
   const charges = tenant.openCharges || [];
   return (
@@ -410,7 +446,7 @@ function BalanceTab({ tenant }) {
   );
 }
 
-// ── Tab: Contacts ──────────────────────────────────────────────────────
+// ── Tab: Contacts ─────────────────────────────────────────────────
 function ContactsTab({ tenant }) {
   const contacts = tenant.contacts || [];
   if (contacts.length === 0) {
@@ -444,7 +480,7 @@ function ContactsTab({ tenant }) {
   );
 }
 
-// ── Tab: Notes ───────────────────────────────────────────────────────────
+// ── Tab: Notes ────────────────────────────────────────────────────
 function NotesTab({ tenant }) {
   return (
     <div className="dashboard-card">
@@ -458,7 +494,7 @@ function NotesTab({ tenant }) {
   );
 }
 
-// ── Helper: detail row ────────────────────────────────────────────────────
+// ── Helper: detail row ────────────────────────────────────────────
 function DetailRow({ icon: Icon, label, value }) {
   return (
     <div className="tenant-detail-row">
@@ -471,7 +507,7 @@ function DetailRow({ icon: Icon, label, value }) {
   );
 }
 
-// ── Edit form ─────────────────────────────────────────────────────────────
+// ── Edit form ─────────────────────────────────────────────────────
 function TenantEditForm({ form, setForm, saving, onSave, onCancel }) {
   const update = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
@@ -541,7 +577,7 @@ function TenantEditForm({ form, setForm, saving, onSave, onCancel }) {
   );
 }
 
-// ── Main TenantsPage ──────────────────────────────────────────────────────
+// ── Main TenantsPage ──────────────────────────────────────────────
 export default function TenantsPage() {
   const { dataSource, sources } = useDataSource();
   const sourceLabel = sources.find((s) => s.value === dataSource)?.label || dataSource;
@@ -847,7 +883,7 @@ export default function TenantsPage() {
   );
 }
 
-// ── Charge Fee modal ──────────────────────────────────────────────────────
+// ── Charge Fee modal ──────────────────────────────────────────────
 //
 // Posts a charge to the tenant's occupancy in AppFolio (existing
 // charge_tenant tool). Spawns a Tasks-page review item with a
