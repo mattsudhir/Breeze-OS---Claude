@@ -37,6 +37,28 @@
     { "source": "/api/human-tasks",                   "destination": "/api/human-tasks" },
     { "source": "/api/cron/process-tasks",            "destination": "/api/cron/process-tasks" },
     { "source": "/api/cron/appfolio-reconcile",       "destination": "/api/cron/appfolio-reconcile" },
+    { "source": "/api/cron/probe-integrations",       "destination": "/api/cron/probe-integrations" },
+
+    { "source": "/api/admin/run-reimport",            "destination": "/api/admin/run-reimport" },
+    { "source": "/api/admin/smoke-test",              "destination": "/api/admin/smoke-test" },
+    { "source": "/api/admin/recent-errors",           "destination": "/api/admin/recent-errors" },
+    { "source": "/api/admin/wipe-directory-data",     "destination": "/api/admin/wipe-directory-data" },
+    { "source": "/api/admin/import-appfolio-properties", "destination": "/api/admin/import-appfolio-properties" },
+    { "source": "/api/admin/import-appfolio-units",   "destination": "/api/admin/import-appfolio-units" },
+    { "source": "/api/admin/sync-appfolio-leases-all", "destination": "/api/admin/sync-appfolio-leases-all" },
+    { "source": "/api/admin/sync-appfolio-leases-one", "destination": "/api/admin/sync-appfolio-leases-one" },
+    { "source": "/api/admin/sync-appfolio-tickets",   "destination": "/api/admin/sync-appfolio-tickets" },
+    { "source": "/api/admin/debug-appfolio-auth",     "destination": "/api/admin/debug-appfolio-auth" },
+    { "source": "/api/admin/debug-data-integrity",    "destination": "/api/admin/debug-data-integrity" },
+    { "source": "/api/admin/debug-leases-state",      "destination": "/api/admin/debug-leases-state" },
+    { "source": "/api/admin/dedupe-properties",       "destination": "/api/admin/dedupe-properties" },
+    { "source": "/api/admin/dedupe-units",            "destination": "/api/admin/dedupe-units" },
+    { "source": "/api/admin/backfill-appfolio-property-ids", "destination": "/api/admin/backfill-appfolio-property-ids" },
+    { "source": "/api/admin/backfill-appfolio-unit-ids", "destination": "/api/admin/backfill-appfolio-unit-ids" },
+    { "source": "/api/admin/list-integration-health", "destination": "/api/admin/list-integration-health" },
+    { "source": "/api/admin/probe-integrations",      "destination": "/api/admin/probe-integrations" },
+    { "source": "/api/admin/import-appfolio-property", "destination": "/api/admin/import-appfolio-property" },
+
     { "source": "/api/(.*)",                          "destination": "/api/rentmanager" }
   ],
   "functions": {
