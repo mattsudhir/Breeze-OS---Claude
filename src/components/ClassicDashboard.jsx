@@ -8,7 +8,7 @@ import {
 import { getProperties, getUnits, getWorkOrders, getTenants } from '../services/data';
 import { useDataSource } from '../contexts/DataSourceContext.jsx';
 
-// ── Helpers ─────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────
 
 function relativeTime(dateLike) {
   if (!dateLike) return '';
@@ -145,14 +145,21 @@ export default function ClassicDashboard({ onNavigate }) {
 
   const fmt = (n) => (n == null ? '—' : String(n));
 
+  // All four stat cards open the Properties drilldown — that's the
+  // useful destination when someone clicks a top-level KPI. The
+  // sidebar list view at 'properties' is for nav, not drilldown.
+  // Each card passes a filter so the drilldown opens already focused
+  // on the slice the user clicked (all units / occupied / vacant /
+  // collapsed list of properties).
   const STATS = [
-    { label: 'Total Units', value: fmt(totalUnits), icon: Building2, color: '#0077B6', trend: null, nav: 'properties' },
-    { label: 'Occupied', value: fmt(occupiedUnits), icon: Home, color: '#2E7D32', trend: null, nav: 'properties' },
-    { label: 'Vacant', value: fmt(vacantUnits), icon: AlertCircle, color: '#E65100', trend: null, nav: 'properties' },
-    // The Properties card opens the dedicated drilldown — a sortable
-    // portfolio table with per-property metrics — rather than the
-    // sidebar list view, which stays at 'properties'.
-    { label: 'Properties', value: fmt(propertyCount), icon: Building2, color: '#1565C0', trend: null, nav: 'properties-drilldown' },
+    { label: 'Total Units', value: fmt(totalUnits), icon: Building2, color: '#0077B6', trend: null,
+      nav: 'properties-drilldown', filters: { expandAll: true } },
+    { label: 'Occupied', value: fmt(occupiedUnits), icon: Home, color: '#2E7D32', trend: null,
+      nav: 'properties-drilldown', filters: { expandAll: true, occupancy: 'occupied' } },
+    { label: 'Vacant', value: fmt(vacantUnits), icon: AlertCircle, color: '#E65100', trend: null,
+      nav: 'properties-drilldown', filters: { expandAll: true, occupancy: 'vacant' } },
+    { label: 'Properties', value: fmt(propertyCount), icon: Building2, color: '#1565C0', trend: null,
+      nav: 'properties-drilldown', filters: null },
   ];
 
   // Maintenance Queue: open work orders, freshest first. Property and
@@ -298,7 +305,7 @@ export default function ClassicDashboard({ onNavigate }) {
           <button
             key={i}
             className="stat-card stat-card-clickable"
-            onClick={() => stat.nav && onNavigate && onNavigate(stat.nav)}
+            onClick={() => stat.nav && onNavigate && onNavigate(stat.nav, stat.filters || undefined)}
           >
             <div className="stat-icon" style={{ backgroundColor: stat.color + '15', color: stat.color }}>
               <stat.icon size={22} />
@@ -394,7 +401,13 @@ export default function ClassicDashboard({ onNavigate }) {
         <div className="dashboard-card maintenance-card">
           <div className="card-header">
             <h3><Wrench size={18} /> Maintenance Queue {isLive && <span className="live-dot" />}</h3>
-            <button className="card-link">View all <ChevronRight size={14} /></button>
+            <button
+              type="button"
+              className="card-link"
+              onClick={() => onNavigate && onNavigate('maintenance')}
+            >
+              View all <ChevronRight size={14} />
+            </button>
           </div>
           <div className="maintenance-list">
             {maintenanceItems.length === 0 ? (
@@ -403,7 +416,20 @@ export default function ClassicDashboard({ onNavigate }) {
               </div>
             ) : (
               maintenanceItems.map((wo, i) => (
-                <div key={i} className="maintenance-item">
+                <div
+                  key={i}
+                  className="maintenance-item"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onNavigate && onNavigate('maintenance', { ticketDisplayId: wo.id })}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onNavigate && onNavigate('maintenance', { ticketDisplayId: wo.id });
+                    }
+                  }}
+                  style={{ cursor: 'pointer' }}
+                >
                   <div className="maintenance-header">
                     <span className="wo-id">{wo.id}</span>
                     <span className={`wo-priority ${getPriorityClass(wo.priority)}`}>{wo.priority}</span>
