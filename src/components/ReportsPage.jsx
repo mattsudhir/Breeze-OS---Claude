@@ -1,52 +1,170 @@
-import { BarChart3, Download, TrendingUp, Home, Users, Wrench, DollarSign, FileText, Calendar } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  BarChart3, TrendingUp, Home, Wrench, DollarSign, FileText,
+  Loader2, AlertCircle, Building2,
+} from 'lucide-react';
+import { getAdminToken } from '../lib/admin';
 
-// Placeholder reports data — dashboards will be wired to live metrics next.
-const HEADLINE_METRICS = [
-  { id: 'occupancy', label: 'Portfolio Occupancy', value: '94.2%', trend: '+1.4pp', up: true, icon: Home, color: '#2E7D32' },
-  { id: 'collections', label: 'Collections Rate', value: '98.1%', trend: '+0.3pp', up: true, icon: DollarSign, color: '#1565C0' },
-  { id: 'avgTurn', label: 'Avg. Turn Time', value: '6.3 days', trend: '-0.8d', up: true, icon: Wrench, color: '#E65100' },
-  { id: 'satisfaction', label: 'Tenant Satisfaction', value: '4.6 / 5', trend: '+0.1', up: true, icon: Users, color: '#6A1B9A' },
-];
+// Reports — portfolio-wide metrics derived from our own DB
+// (list-properties-summary). Headline numbers and the per-property
+// occupancy table both reflect post-reimport state.
+//
+// What's NOT here yet:
+//   - Revenue trend (would need a per-month rollup over
+//     journal_entries; future endpoint)
+//   - Tenant satisfaction (no source data yet)
+//   - "Saved & scheduled reports" table — that's a feature, not
+//     data; kept as a labeled stub until the report-generation
+//     pipeline ships.
 
-const OCCUPANCY_BY_PROPERTY = [
-  { name: 'Oakwood Apartments', occupied: 23, total: 24, pct: 96 },
-  { name: 'Birchwood Commons', occupied: 41, total: 44, pct: 93 },
-  { name: 'Maple Grove', occupied: 17, total: 18, pct: 94 },
-  { name: 'Willow Creek Villas', occupied: 11, total: 12, pct: 92 },
-  { name: 'Cedar Park Townhomes', occupied: 8, total: 8, pct: 100 },
-];
+function formatCurrency(n) {
+  if (n == null) return '—';
+  return `$${Number(n).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+}
 
-const SAVED_REPORTS = [
-  { id: 'rpt-1', name: 'Monthly Rent Roll', type: 'Financial', schedule: 'Monthly · 1st', lastRun: 'Apr 1, 2026', format: 'PDF' },
-  { id: 'rpt-2', name: 'Delinquency Report', type: 'Financial', schedule: 'Weekly · Mon', lastRun: 'Apr 6, 2026', format: 'XLSX' },
-  { id: 'rpt-3', name: 'Maintenance Backlog', type: 'Operations', schedule: 'Weekly · Fri', lastRun: 'Apr 10, 2026', format: 'PDF' },
-  { id: 'rpt-4', name: 'Vacancy & Turn Report', type: 'Operations', schedule: 'Monthly · 1st', lastRun: 'Apr 1, 2026', format: 'PDF' },
-  { id: 'rpt-5', name: 'Owner Statement — Oakwood', type: 'Owner', schedule: 'Monthly · 5th', lastRun: 'Apr 5, 2026', format: 'PDF' },
-  { id: 'rpt-6', name: 'Lease Expiration Forecast (90d)', type: 'Leasing', schedule: 'Weekly · Mon', lastRun: 'Apr 6, 2026', format: 'XLSX' },
-];
+function formatPercent(n) {
+  if (n == null) return '—';
+  return `${Math.round(n * 10) / 10}%`;
+}
 
-const REVENUE_TREND = [
-  { month: 'Nov', revenue: 162 },
-  { month: 'Dec', revenue: 168 },
-  { month: 'Jan', revenue: 171 },
-  { month: 'Feb', revenue: 175 },
-  { month: 'Mar', revenue: 179 },
-  { month: 'Apr', revenue: 184 },
-];
+async function fetchPortfolio() {
+  const token = getAdminToken();
+  const qs = token ? `?secret=${encodeURIComponent(token)}` : '';
+  try {
+    const resp = await fetch(`/api/admin/list-properties-summary${qs}`, {
+      headers: token ? { 'X-Breeze-Admin-Token': token } : {},
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.ok === false) {
+      return { error: data.error || `HTTP ${resp.status}` };
+    }
+    return { properties: data.properties || [] };
+  } catch (err) {
+    return { error: err.message || 'Network error' };
+  }
+}
 
 export default function ReportsPage() {
-  const maxRevenue = Math.max(...REVENUE_TREND.map((r) => r.revenue));
+  const [properties, setProperties] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const res = await fetchPortfolio();
+      if (cancelled) return;
+      if (res.error) {
+        setError(res.error);
+        setProperties([]);
+      } else {
+        setProperties(res.properties);
+      }
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const totals = useMemo(() => {
+    if (!properties) return null;
+    const t = properties.reduce(
+      (acc, p) => ({
+        properties: acc.properties + 1,
+        units:        acc.units        + (p.unit_count || 0),
+        occupied:     acc.occupied     + (p.occupied_count || 0),
+        rentCents:    acc.rentCents    + (p.total_monthly_rent_cents || 0),
+        openMaint:    acc.openMaint    + (p.open_maintenance_count || 0),
+        openArCents:  acc.openArCents  + (p.open_ar_cents || 0),
+        ytdIncome:    acc.ytdIncome    + (p.ytd_income_cents || 0),
+        ytdExpense:   acc.ytdExpense   + (p.ytd_expense_cents || 0),
+      }),
+      { properties: 0, units: 0, occupied: 0, rentCents: 0, openMaint: 0,
+        openArCents: 0, ytdIncome: 0, ytdExpense: 0 },
+    );
+    t.occupancyPct = t.units > 0 ? (t.occupied / t.units) * 100 : 0;
+    t.monthlyRent = t.rentCents / 100;
+    t.openAr = t.openArCents / 100;
+    t.ytdIncomeDollars = t.ytdIncome / 100;
+    t.ytdExpenseDollars = t.ytdExpense / 100;
+    t.ytdNetDollars = (t.ytdIncome - t.ytdExpense) / 100;
+    return t;
+  }, [properties]);
+
+  const occupancyRows = useMemo(() => {
+    if (!properties) return [];
+    return properties
+      .filter((p) => (p.unit_count || 0) > 0)
+      .map((p) => {
+        const total = p.unit_count || 0;
+        const occupied = p.occupied_count || 0;
+        const pct = total > 0 ? Math.round((occupied / total) * 100) : 0;
+        return {
+          id: p.id,
+          name: p.display_name || '—',
+          occupied,
+          total,
+          pct,
+        };
+      })
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 15);
+  }, [properties]);
+
+  if (loading) {
+    return (
+      <div className="properties-page">
+        <div className="loading-state">
+          <Loader2 size={28} className="spin" />
+          <span>Loading portfolio metrics...</span>
+        </div>
+      </div>
+    );
+  }
+
+  const HEADLINE_METRICS = totals ? [
+    {
+      id: 'occupancy',
+      label: 'Portfolio Occupancy',
+      value: formatPercent(totals.occupancyPct),
+      hint: `${totals.occupied} of ${totals.units} units occupied`,
+      icon: Home, color: '#2E7D32',
+    },
+    {
+      id: 'rent',
+      label: 'Monthly Rent Roll',
+      value: formatCurrency(totals.monthlyRent),
+      hint: `across ${totals.properties} properties`,
+      icon: DollarSign, color: '#1565C0',
+    },
+    {
+      id: 'maint',
+      label: 'Open Work Orders',
+      value: String(totals.openMaint),
+      hint: totals.openMaint === 0 ? 'queue is clear' : 'across the portfolio',
+      icon: Wrench, color: totals.openMaint > 0 ? '#E65100' : '#888',
+    },
+    {
+      id: 'ar',
+      label: 'Open Receivables',
+      value: formatCurrency(totals.openAr),
+      hint: 'tenant balances outstanding',
+      icon: DollarSign, color: totals.openAr > 0 ? '#C62828' : '#888',
+    },
+  ] : [];
 
   return (
     <div className="properties-page">
-      <div className="data-source-banner" style={{
-        display: 'flex', alignItems: 'center', gap: '8px',
-        padding: '8px 14px', marginBottom: '16px', borderRadius: '8px',
-        fontSize: '12px', fontWeight: 600,
-        background: '#FFF3E0', color: '#E65100', border: '1px solid #FFE0B2',
-      }}>
-        <BarChart3 size={14} /> Preview — sample metrics while reporting pipelines are wired up
-      </div>
+      {error && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '8px 14px', marginBottom: 16, borderRadius: 8,
+          fontSize: 12, fontWeight: 600,
+          background: '#FFEBEE', color: '#C62828', border: '1px solid #FFCDD2',
+        }}>
+          <AlertCircle size={14} /> Couldn't load portfolio: {error}
+        </div>
+      )}
 
       <div className="tenant-detail-topbar">
         <div className="property-detail-header" style={{ flex: 1 }}>
@@ -56,15 +174,16 @@ export default function ReportsPage() {
           <div style={{ flex: 1 }}>
             <h2>Reports</h2>
             <p className="property-detail-address">
-              Live portfolio metrics · {SAVED_REPORTS.length} saved reports
+              Live metrics from our DB
+              {totals && (
+                <span> · {totals.properties} properties · {totals.units} units</span>
+              )}
             </p>
           </div>
         </div>
-        <button className="btn-primary tenant-edit-btn">
-          <Download size={14} /> Export All
-        </button>
       </div>
 
+      {/* Headline KPIs */}
       <div style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
@@ -82,46 +201,70 @@ export default function ReportsPage() {
                 <span style={{ fontSize: 12, fontWeight: 600, color: '#666' }}>{m.label}</span>
               </div>
               <div style={{ fontSize: 22, fontWeight: 700, color: '#1a1a1a' }}>{m.value}</div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: m.up ? '#2E7D32' : '#C62828', marginTop: 4 }}>
-                <TrendingUp size={12} style={{ display: 'inline', marginRight: 4, verticalAlign: -2 }} />
-                {m.trend} vs prior period
-              </div>
+              {m.hint && (
+                <div style={{ fontSize: 11, color: '#888', marginTop: 4 }}>{m.hint}</div>
+              )}
             </div>
           );
         })}
       </div>
 
-      <div className="dashboard-card">
-        <div className="card-header">
-          <h3><TrendingUp size={18} /> Revenue — Last 6 Months ($K)</h3>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '18px', padding: '20px 8px 8px', height: 180 }}>
-          {REVENUE_TREND.map((r) => {
-            const height = (r.revenue / maxRevenue) * 140;
-            return (
-              <div key={r.month} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: 11, fontWeight: 600, color: '#666' }}>${r.revenue}K</span>
-                <div style={{
-                  width: '100%',
-                  height,
-                  background: 'linear-gradient(180deg, #0077B6, #023E8A)',
-                  borderRadius: '6px 6px 0 0',
-                }} />
-                <span style={{ fontSize: 11, color: '#888' }}>{r.month}</span>
+      {/* YTD income/expense — derived from journal_entries that have
+          actually been posted. Shows null state until accounting
+          entries exist for the year. */}
+      {totals && (totals.ytdIncome !== 0 || totals.ytdExpense !== 0) && (
+        <div className="dashboard-card" style={{ marginBottom: 16 }}>
+          <div className="card-header">
+            <h3><TrendingUp size={18} /> Year-to-date — All Properties</h3>
+          </div>
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: 16, padding: 16,
+          }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase' }}>Income</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: '#2E7D32' }}>
+                {formatCurrency(totals.ytdIncomeDollars)}
               </div>
-            );
-          })}
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase' }}>Expense</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: '#C62828' }}>
+                {formatCurrency(totals.ytdExpenseDollars)}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase' }}>Net</div>
+              <div style={{
+                fontSize: 22, fontWeight: 700,
+                color: totals.ytdNetDollars >= 0 ? '#2E7D32' : '#C62828',
+              }}>
+                {formatCurrency(totals.ytdNetDollars)}
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
 
+      {/* Occupancy table */}
       <div className="dashboard-card">
         <div className="card-header">
-          <h3><Home size={18} /> Occupancy by Property</h3>
+          <h3><Building2 size={18} /> Occupancy — Top 15 by Unit Count</h3>
+          <span style={{ fontSize: 12, color: '#888' }}>
+            {occupancyRows.length} of {totals?.properties || 0} properties shown
+          </span>
         </div>
         <div style={{ padding: '8px 4px' }}>
-          {OCCUPANCY_BY_PROPERTY.map((p) => (
-            <div key={p.name} style={{ marginBottom: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 13 }}>
+          {occupancyRows.length === 0 ? (
+            <div style={{ padding: 20, color: '#888', fontSize: 13 }}>
+              No properties with units yet.
+            </div>
+          ) : occupancyRows.map((p) => (
+            <div key={p.id} style={{ marginBottom: 14 }}>
+              <div style={{
+                display: 'flex', justifyContent: 'space-between',
+                marginBottom: 4, fontSize: 13,
+              }}>
                 <span style={{ fontWeight: 600 }}>{p.name}</span>
                 <span style={{ color: '#666' }}>{p.occupied}/{p.total} · {p.pct}%</span>
               </div>
@@ -137,43 +280,24 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      <div className="dashboard-card">
+      {/* Saved reports — feature stub. Marked as such so users
+          don't think the data is fake. */}
+      <div className="dashboard-card" style={{ marginTop: 16 }}>
         <div className="card-header">
           <h3><FileText size={18} /> Saved & Scheduled Reports</h3>
+          <span style={{
+            fontSize: 11, fontWeight: 600, color: '#E65100',
+            background: '#FFF3E0', padding: '2px 8px', borderRadius: 999,
+          }}>
+            Coming soon
+          </span>
         </div>
-        <table className="properties-table">
-          <thead>
-            <tr>
-              <th>Report</th>
-              <th>Type</th>
-              <th>Schedule</th>
-              <th>Last Run</th>
-              <th>Format</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {SAVED_REPORTS.map((r) => (
-              <tr key={r.id}>
-                <td style={{ fontWeight: 600 }}>{r.name}</td>
-                <td style={{ color: '#666' }}>{r.type}</td>
-                <td style={{ color: '#666' }}>
-                  <Calendar size={12} style={{ display: 'inline', marginRight: 4, verticalAlign: -1 }} />
-                  {r.schedule}
-                </td>
-                <td style={{ color: '#666' }}>{r.lastRun}</td>
-                <td>
-                  <span className="unit-status status-in_progress">{r.format}</span>
-                </td>
-                <td>
-                  <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: 12 }}>
-                    <Download size={12} /> Run
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div style={{ padding: 16, color: '#666', fontSize: 13 }}>
+          PDF/XLSX exports of rent rolls, delinquency reports, owner
+          statements, and maintenance backlogs will appear here once
+          the report-generation pipeline ships. Until then, every
+          metric in this page is queryable directly from the DB.
+        </div>
       </div>
     </div>
   );
