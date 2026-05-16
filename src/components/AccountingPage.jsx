@@ -1,13 +1,19 @@
-// Accounting workspace. Tabbed view over the Stage 1-3 backend.
+// Accounting workspace. Tabbed view over the full accounting backend.
 //
-// Tabs:
-//   Chart of Accounts  — live, reads /api/admin/list-gl-accounts
-//   Journal Entries    — placeholder (next iteration)
-//   Receivables        — placeholder
-//   Receipts           — placeholder
-//   Deposits           — placeholder
-//   Bank Accounts      — placeholder
-//   Reports            — placeholder (Stage 7)
+// Tabs (all live, all reading our DB):
+//   Chart of Accounts  — list-gl-accounts + create/update flows
+//   Entities           — list-entities + upsert-entity (LLC owners + tags)
+//   Vendors            — list-vendors + upsert-vendor
+//   Bills              — list-bills + create-bill / post-bill / pay-bill
+//   Journal Entries    — list-journal-entries
+//   Receivables        — list-posted-charges (open AR)
+//   Receipts           — list-receipts
+//   Deposits           — list-deposits + build-deposit
+//   Bank Accounts      — list-bank-accounts + Plaid Link button
+//   Reconciliation     — list-pending-reconciliation + match flows
+//   Bill.com           — sync + card-transactions surface
+//   Rules              — match-rule CRUD + recon-settings
+//   Reports            — entity trial balance + property statement
 //
 // The admin endpoint is gated by BREEZE_ADMIN_TOKEN. The page asks
 // for the token on first load, stashes it in sessionStorage (NOT
