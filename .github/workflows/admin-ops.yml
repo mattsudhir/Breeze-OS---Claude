@@ -83,11 +83,13 @@ on:
 jobs:
   ops:
     runs-on: ubuntu-latest
-    # On comment events, only react if the comment starts with `/` —
-    # cheap pre-filter so we don't burn a runner on every random comment.
+    # On comment events, only react if the comment looks like a slash
+    # command — cheap pre-filter so we don't burn a runner on every
+    # random comment. Allows leading backticks / asterisks / underscores
+    # so MCP-formatted comments (`/run-smoke`) still fire.
     if: |
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/'))
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/'))
     permissions:
       issues: write
       pull-requests: write
