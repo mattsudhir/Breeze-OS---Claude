@@ -15,6 +15,7 @@ name: admin-ops
 #   Useful for using one tracking issue as the "ops console".
 
 on:
+  # Manual trigger from the Actions UI.
   workflow_dispatch:
     inputs:
       job:
@@ -62,11 +63,34 @@ on:
         type: string
         default: ''
 
+  # ChatOps trigger — Claude (or anyone with write access to the repo)
+  # can fire a job by posting a slash-command comment on any issue or
+  # PR. Recognised commands:
+  #
+  #   /run-smoke
+  #   /run-reimport
+  #   /run-reimport-resume <offset>
+  #   /tail-errors [minutes] [limit]
+  #   /run-diag <METHOD> <path> [json-body]
+  #
+  # The reply always lands as a comment on the same issue/PR that
+  # contained the trigger, so the conversation thread doubles as the
+  # ops log. Only repo collaborators with write permission can fire
+  # commands — anyone else is silently ignored.
+  issue_comment:
+    types: [created]
+
 jobs:
   ops:
     runs-on: ubuntu-latest
+    # On comment events, only react if the comment starts with `/` —
+    # cheap pre-filter so we don't burn a runner on every random comment.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/'))
     permissions:
       issues: write
+      pull-requests: write
       contents: read
     steps:
       - name: Validate secrets
@@ -80,18 +104,98 @@ jobs:
             exit 1
           fi
 
+      # ChatOps path — turn the slash command into the same JOB +
+      # parameter env vars the workflow_dispatch path uses. We also
+      # gate on author association so only repo collaborators with
+      # write access can fire commands; anyone else silently no-ops.
+      - name: Parse comment trigger
+        id: parse_comment
+        if: github.event_name == 'issue_comment'
+        env:
+          BODY: ${{ github.event.comment.body }}
+          ASSOC: ${{ github.event.comment.author_association }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          # Allowed associations: OWNER, MEMBER, COLLABORATOR. Drop
+          # CONTRIBUTOR / NONE / FIRST_TIME_CONTRIBUTOR to keep the
+          # ops surface to trusted hands.
+          case "$ASSOC" in
+            OWNER|MEMBER|COLLABORATOR) ;;
+            *)
+              echo "Comment author association '$ASSOC' is not allowed. Ignoring."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+
+          # First non-empty line of the comment body. Trim CR + spaces.
+          CMD_LINE=$(printf '%s' "$BODY" | sed 's/\r$//' | awk 'NF{print; exit}')
+          if [ -z "${CMD_LINE:-}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+
+          # Split into the verb and the rest.
+          VERB=$(printf '%s' "$CMD_LINE" | awk '{print $1}')
+          REST=$(printf '%s' "$CMD_LINE" | awk '{$1=""; sub(/^ /, ""); print}')
+
+          JOB=""; RESUME_OFFSET=""; DIAG_METHOD=""; DIAG_PATH=""; DIAG_BODY=""
+          TAIL_MINUTES="60"; TAIL_LIMIT="20"
+
+          case "$VERB" in
+            /run-smoke)         JOB="run-smoke" ;;
+            /run-reimport)      JOB="run-reimport" ;;
+            /run-reimport-resume)
+              JOB="run-reimport-resume"
+              RESUME_OFFSET="${REST:-0}"
+              ;;
+            /tail-errors)
+              JOB="tail-errors"
+              # Optional: "/tail-errors <minutes> <limit>"
+              if [ -n "$REST" ]; then
+                TAIL_MINUTES=$(echo "$REST" | awk '{print $1}')
+                MAYBE_LIMIT=$(echo "$REST" | awk '{print $2}')
+                if [ -n "$MAYBE_LIMIT" ]; then TAIL_LIMIT="$MAYBE_LIMIT"; fi
+              fi
+              ;;
+            /run-diag)
+              # "/run-diag METHOD path [json body...]"
+              JOB="run-diag"
+              DIAG_METHOD=$(echo "$REST" | awk '{print $1}')
+              DIAG_PATH=$(echo "$REST" | awk '{print $2}')
+              DIAG_BODY=$(echo "$REST" | awk '{$1=""; $2=""; sub(/^  /, ""); print}')
+              ;;
+            *)
+              echo "Not a recognised slash command: $VERB"
+              echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+              ;;
+          esac
+
+          {
+            echo "skip=false"
+            echo "job=$JOB"
+            echo "resume_offset=$RESUME_OFFSET"
+            echo "diag_method=$DIAG_METHOD"
+            echo "diag_path=$DIAG_PATH"
+            echo "diag_body=$DIAG_BODY"
+            echo "tail_minutes=$TAIL_MINUTES"
+            echo "tail_limit=$TAIL_LIMIT"
+            echo "issue_number=$ISSUE_NUMBER"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Run job
         id: run
+        if: github.event_name == 'workflow_dispatch' || steps.parse_comment.outputs.skip != 'true'
         env:
           TOKEN: ${{ secrets.BREEZE_ADMIN_TOKEN }}
           BASE: ${{ secrets.VERCEL_PROD_URL }}
-          JOB: ${{ github.event.inputs.job }}
-          RESUME_OFFSET: ${{ github.event.inputs.resume_from_offset }}
-          DIAG_PATH: ${{ github.event.inputs.diag_endpoint }}
-          DIAG_METHOD: ${{ github.event.inputs.diag_method }}
-          DIAG_BODY: ${{ github.event.inputs.diag_body }}
-          TAIL_MINUTES: ${{ github.event.inputs.tail_minutes }}
-          TAIL_LIMIT: ${{ github.event.inputs.tail_limit }}
+          JOB: ${{ github.event.inputs.job || steps.parse_comment.outputs.job }}
+          RESUME_OFFSET: ${{ github.event.inputs.resume_from_offset || steps.parse_comment.outputs.resume_offset }}
+          DIAG_PATH: ${{ github.event.inputs.diag_endpoint || steps.parse_comment.outputs.diag_path }}
+          DIAG_METHOD: ${{ github.event.inputs.diag_method || steps.parse_comment.outputs.diag_method }}
+          DIAG_BODY: ${{ github.event.inputs.diag_body || steps.parse_comment.outputs.diag_body }}
+          TAIL_MINUTES: ${{ github.event.inputs.tail_minutes || steps.parse_comment.outputs.tail_minutes }}
+          TAIL_LIMIT: ${{ github.event.inputs.tail_limit || steps.parse_comment.outputs.tail_limit }}
         run: |
           set -euo pipefail
           mkdir -p out
@@ -164,18 +268,20 @@ jobs:
           retention-days: 14
 
       - name: Comment on tracking issue
-        if: always()
+        if: always() && (github.event_name == 'workflow_dispatch' || steps.parse_comment.outputs.skip != 'true')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Priority: the issue the comment came from > explicit input > repo var.
+          ISSUE_FROM_COMMENT: ${{ steps.parse_comment.outputs.issue_number }}
           ISSUE_INPUT: ${{ github.event.inputs.comment_on_issue }}
           ISSUE_VAR: ${{ vars.COMMENT_ISSUE_NUMBER }}
-          JOB: ${{ github.event.inputs.job }}
+          JOB: ${{ github.event.inputs.job || steps.parse_comment.outputs.job }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          ISSUE_NUM="${ISSUE_INPUT:-$ISSUE_VAR}"
+          ISSUE_NUM="${ISSUE_FROM_COMMENT:-${ISSUE_INPUT:-$ISSUE_VAR}}"
           if [ -z "$ISSUE_NUM" ]; then
-            echo "No issue number set (input or COMMENT_ISSUE_NUMBER var) — skipping comment."
+            echo "No issue number set (comment / input / COMMENT_ISSUE_NUMBER var) — skipping comment."
             exit 0
           fi
           BODY_FILE="$(mktemp)"
