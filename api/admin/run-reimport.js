@@ -33,7 +33,13 @@ import { withAdminHandler } from '../../lib/adminHelpers.js';
 export const config = { maxDuration: 300 };
 
 const BUILD = 'orchestrator-v1';
-const WALL_CLOCK_BUDGET_MS = 270_000;
+// Tightened to 230s (Vercel maxDuration is 300s; curl in the
+// admin-ops workflow waits up to 310s). This gives a single in-flight
+// sub-call up to ~70s of headroom before Vercel kills the whole
+// function — long enough for any one step we make. Net effect: the
+// orchestrator's structured response always reaches the workflow
+// instead of getting truncated by Vercel's hard kill.
+const WALL_CLOCK_BUDGET_MS = 230_000;
 const LEASES_BATCH_LIMIT = 10;
 const LEASES_MAX_ITERATIONS = 200; // hard ceiling so a misbehaving has_more never loops forever
 
