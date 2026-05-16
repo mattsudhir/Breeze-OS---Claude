@@ -729,7 +729,35 @@ function AppfolioReimportTab() {
         tickets). Owners, entities, utility providers, GL accounts, bank
         accounts and the accounting ledger are kept. Steps 2&ndash;5
         rebuild everything straight from AppFolio with correct ids.
-        Run top to bottom.
+        Run top to bottom &mdash; or use the one-click orchestrator below.
+      </div>
+
+      <div style={{
+        marginBottom: 20, padding: 12, background: '#E8F5E9',
+        border: '1px solid #A5D6A7', borderRadius: 8,
+      }}>
+        <div style={{ fontSize: 13, color: '#1B5E20', marginBottom: 8 }}>
+          <strong>One-click orchestrator.</strong> Runs all 5 steps
+          server-side in one call. Captures per-step results + stack
+          traces so any failure self-identifies. Recommended.
+        </div>
+        <button
+          type="button"
+          onClick={() =>
+            runStep('orchestrator', reimportApi.runAll,
+              'Run the full re-import (wipe → properties → units → leases → tickets)? Destructive.')
+          }
+          disabled={running != null}
+          style={{
+            padding: '8px 14px', background: '#2E7D32', color: '#fff',
+            border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600,
+            cursor: running != null ? 'not-allowed' : 'pointer',
+            opacity: running != null ? 0.6 : 1,
+          }}
+        >
+          {running === 'orchestrator' ? 'Running… (up to ~4 min)' : 'Run full re-import'}
+        </button>
+        <R k="orchestrator" />
       </div>
 
       <ReimportStep

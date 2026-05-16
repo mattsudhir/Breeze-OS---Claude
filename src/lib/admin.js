@@ -227,4 +227,15 @@ export const appfolioReimport = {
     }),
   syncTickets: () =>
     adminFetch('/api/admin/sync-appfolio-tickets', { method: 'POST', body: { status: 'all' } }),
+  // One-call orchestrator — runs wipe → properties → units → leases (looped)
+  // → tickets server-side. Single click instead of five. Response includes
+  // per-step results + stack traces on failure, so debugging is a paste-back
+  // instead of a screenshot loop.
+  runAll: () => adminFetch('/api/admin/run-reimport', { method: 'POST' }),
+  runAllResume: ({ skipWipe = false, resumeFromOffset = null } = {}) => {
+    const query = {};
+    if (skipWipe) query.skip_wipe = 'true';
+    if (resumeFromOffset != null) query.resume_from_offset = String(resumeFromOffset);
+    return adminFetch('/api/admin/run-reimport', { method: 'POST', query });
+  },
 };
