@@ -7,12 +7,20 @@
 // One endpoint powers the new PropertiesPage so it doesn't have to
 // fan out N+1 queries from the client.
 
-import { and, eq, gte, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, sql } from 'drizzle-orm';
 import {
   withAdminHandler,
   getDefaultOrgId,
 } from '../../lib/adminHelpers.js';
 import { getDb, schema } from '../../lib/db/index.js';
+
+// Maintenance ticket statuses considered "still open" — anything not
+// in completed / cancelled. Matches the open-WO concept the
+// Properties drilldown surfaces in its KPI strip.
+const OPEN_MAINTENANCE_STATUSES = [
+  'new', 'triage', 'assigned', 'in_progress',
+  'awaiting_parts', 'awaiting_tenant',
+];
 
 export default withAdminHandler(async (req, res) => {
   if (req.method !== 'GET') {
@@ -22,7 +30,7 @@ export default withAdminHandler(async (req, res) => {
   const organizationId = await getDefaultOrgId();
   const yearStart = `${new Date().getUTCFullYear()}-01-01`;
 
-  // ── Properties ──────────────────────────────────────────────
+  // ── Properties ─────────────────────────────────────────────────
   const propRows = await db
     .select({
       id: schema.properties.id,
@@ -114,7 +122,7 @@ export default withAdminHandler(async (req, res) => {
     });
   }
 
-  // ── Open AR per property ────────────────────────────────────
+  // ── Open AR per property ─────────────────────────────────────
   const arRows = await db
     .select({
       propertyId: schema.postedCharges.propertyId,
@@ -169,7 +177,25 @@ export default withAdminHandler(async (req, res) => {
     if (r.accountType === 'expense') cell.expense += dr - cr; // debit normal
   }
 
-  // ── Assemble ────────────────────────────────────────────────
+  // ── Open maintenance tickets per property ───────────────────
+  const maintRows = await db
+    .select({
+      propertyId: schema.maintenanceTickets.propertyId,
+      openCount: sql`COUNT(*)`.as('open_count'),
+    })
+    .from(schema.maintenanceTickets)
+    .where(
+      and(
+        eq(schema.maintenanceTickets.organizationId, organizationId),
+        inArray(schema.maintenanceTickets.status, OPEN_MAINTENANCE_STATUSES),
+      ),
+    )
+    .groupBy(schema.maintenanceTickets.propertyId);
+  const openMaintByProperty = new Map(
+    maintRows.map((r) => [r.propertyId, Number(r.openCount)]),
+  );
+
+  // ── Assemble ─────────────────────────────────────────────────
   const properties = propRows.map((p) => {
     const units = unitsByProperty.get(p.id) || [];
     const occupiedCount = units.filter((u) => u.is_occupied).length;
@@ -199,6 +225,7 @@ export default withAdminHandler(async (req, res) => {
       vacant_count: units.length - occupiedCount,
       total_monthly_rent_cents: totalMonthlyRentCents,
       open_ar_cents: openArByProperty.get(p.id) || 0,
+      open_maintenance_count: openMaintByProperty.get(p.id) || 0,
       ytd_income_cents: ytd.income,
       ytd_expense_cents: ytd.expense,
       ytd_net_cents: ytd.income - ytd.expense,
