@@ -575,16 +575,17 @@ export default function MaintenancePage({ initialFilters } = {}) {
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  // Dashboard's maintenance card hands us a ticketDisplayId so the
-  // user lands on the right ticket. Pre-set search to it and show
-  // 'all' statuses (the ticket might be closed) so the filter chips
-  // don't hide what the user just clicked.
-  const initialStatus = initialFilters?.ticketDisplayId ? 'all' : 'open';
-  const initialSearch = initialFilters?.ticketDisplayId || '';
+  // Dashboard's maintenance card hands us a ticketId (UUID) so the
+  // user lands on the right ticket already expanded. Widen the
+  // status filter to 'all' so the ticket isn't hidden behind the
+  // default 'open' filter (it could already be completed/cancelled
+  // by the time the user clicks).
+  const initialTicketId = initialFilters?.ticketId || null;
+  const initialStatus = initialTicketId ? 'all' : 'open';
   const [statusFilter, setStatusFilter] = useState(initialStatus);
   const [priorityFilter, setPriorityFilter] = useState('all');
-  const [search, setSearch] = useState(initialSearch);
-  const [expandedId, setExpandedId] = useState(null);
+  const [search, setSearch] = useState('');
+  const [expandedId, setExpandedId] = useState(initialTicketId);
   const [showNew, setShowNew] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);

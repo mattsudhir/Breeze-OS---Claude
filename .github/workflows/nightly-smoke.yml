@@ -1,0 +1,120 @@
+name: nightly-smoke
+
+# Runs /api/admin/smoke-test every night at 09:00 UTC (~5am ET in
+# summer, ~4am ET in winter) and posts the response to the Ops
+# Console tracking issue if any check fails OR if a manually-fired
+# run requests the report unconditionally.
+#
+# This is the canary that catches:
+#   - silent DB drift (smoke connects + counts every table)
+#   - PLAID_ENV accidentally flipped to production without creds
+#   - encryption key length anomalies
+#   - integration_health probes flipping to degraded/down
+#   - the catch-all rewrite eating an endpoint after a deploy
+#
+# Reuses the same BREEZE_ADMIN_TOKEN + VERCEL_PROD_URL secrets the
+# admin-ops workflow uses; both already live in repo settings.
+
+on:
+  schedule:
+    # Daily at 09:00 UTC. Cron expressions in GitHub Actions can drift
+    # by a few minutes under load — that's fine for this probe.
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+    inputs:
+      always_post:
+        description: 'Post response to the issue even when smoke is green'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - name: Validate secrets
+        run: |
+          if [ -z "${{ secrets.BREEZE_ADMIN_TOKEN }}" ]; then
+            echo "::error::BREEZE_ADMIN_TOKEN repo secret not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.VERCEL_PROD_URL }}" ]; then
+            echo "::error::VERCEL_PROD_URL repo secret not set"
+            exit 1
+          fi
+
+      - name: Fire smoke probe
+        id: smoke
+        env:
+          TOKEN: ${{ secrets.BREEZE_ADMIN_TOKEN }}
+          BASE: ${{ secrets.VERCEL_PROD_URL }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          BASE_STRIPPED="${BASE%/}"
+          url="${BASE_STRIPPED}/api/admin/smoke-test?secret=${TOKEN}"
+          curl -sS -X GET "$url" \
+            -H "X-Breeze-Admin-Token: ${TOKEN}" \
+            --max-time 60 | tee out/response.json
+          sed -i "s/${TOKEN}/REDACTED/g" out/response.json || true
+
+          # Parse the response. jq is preinstalled on ubuntu-latest.
+          if jq -e '.ok == true' out/response.json > /dev/null; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+          # Surface a one-line summary in the workflow log too.
+          jq -r '
+            "Smoke ok=\(.ok) build=\(.build) " +
+            "props=\(.checks[] | select(.name=="db_table_counts") | .detail.properties) " +
+            "units=\(.checks[] | select(.name=="db_table_counts") | .detail.units) " +
+            "tenants=\(.checks[] | select(.name=="db_table_counts") | .detail.tenants)"
+          ' out/response.json || true
+
+      - name: Upload response artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-smoke-${{ github.run_id }}
+          path: out/response.json
+          retention-days: 30
+
+      - name: Comment on Ops Console (failure or always_post)
+        if: always() && (steps.smoke.outputs.ok != 'true' || github.event.inputs.always_post == 'true')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_VAR: ${{ vars.COMMENT_ISSUE_NUMBER }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SMOKE_OK: ${{ steps.smoke.outputs.ok }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ISSUE_VAR" ]; then
+            echo "COMMENT_ISSUE_NUMBER variable not set — skipping issue comment."
+            exit 0
+          fi
+          BODY_FILE="$(mktemp)"
+          {
+            if [ "$SMOKE_OK" = "true" ]; then
+              echo "**nightly smoke: ✅ green**"
+            else
+              echo "**nightly smoke: 🚨 failing**"
+            fi
+            echo ""
+            echo "Run: $RUN_URL"
+            echo ""
+            echo '```json'
+            head -c 50000 out/response.json
+            echo ''
+            echo '```'
+          } > "$BODY_FILE"
+          gh issue comment "$ISSUE_VAR" --repo "${{ github.repository }}" --body-file "$BODY_FILE"
+
+      - name: Fail the workflow on red smoke
+        if: steps.smoke.outputs.ok != 'true'
+        run: |
+          echo "::error::Smoke check failed — see Ops Console comment and artifact for details."
+          exit 1
