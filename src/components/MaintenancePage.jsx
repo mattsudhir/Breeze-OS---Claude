@@ -568,16 +568,22 @@ function StatCard({ label, value, accent }) {
 
 // ── Main page ───────────────────────────────────────────────────
 
-export default function MaintenancePage() {
+export default function MaintenancePage({ initialFilters } = {}) {
   const [tickets, setTickets] = useState(null);
   const [summary, setSummary] = useState([]);
   const [properties, setProperties] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [statusFilter, setStatusFilter] = useState('open');
+  // Dashboard's maintenance card hands us a ticketDisplayId so the
+  // user lands on the right ticket. Pre-set search to it and show
+  // 'all' statuses (the ticket might be closed) so the filter chips
+  // don't hide what the user just clicked.
+  const initialStatus = initialFilters?.ticketDisplayId ? 'all' : 'open';
+  const initialSearch = initialFilters?.ticketDisplayId || '';
+  const [statusFilter, setStatusFilter] = useState(initialStatus);
   const [priorityFilter, setPriorityFilter] = useState('all');
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(initialSearch);
   const [expandedId, setExpandedId] = useState(null);
   const [showNew, setShowNew] = useState(false);
   const [syncing, setSyncing] = useState(false);
