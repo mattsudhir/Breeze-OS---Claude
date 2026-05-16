@@ -16,6 +16,7 @@ import {
   withAdminHandler,
   getDefaultOrgId,
   parseBody,
+  recordAudit,
 } from '../../lib/adminHelpers.js';
 
 const EDITABLE_FIELDS = [
@@ -76,6 +77,9 @@ export default withAdminHandler(async (req, res) => {
         ...editable,
       })
       .returning();
+    await recordAudit(req, {
+      action: 'CREATE', table: 'utility_providers', id: created.id, after: created,
+    });
     return res.status(201).json({ ok: true, provider: created });
   }
 
@@ -88,6 +92,9 @@ export default withAdminHandler(async (req, res) => {
     if (Object.keys(editable).length === 0) {
       return res.status(400).json({ ok: false, error: 'No editable fields provided' });
     }
+    const [before] = await db
+      .select().from(schema.utilityProviders)
+      .where(eq(schema.utilityProviders.id, id)).limit(1);
     const [updated] = await db
       .update(schema.utilityProviders)
       .set({ ...editable, updatedAt: new Date() })
@@ -96,6 +103,9 @@ export default withAdminHandler(async (req, res) => {
     if (!updated) {
       return res.status(404).json({ ok: false, error: 'Provider not found' });
     }
+    await recordAudit(req, {
+      action: 'UPDATE', table: 'utility_providers', id, before, after: updated, diff: editable,
+    });
     return res.status(200).json({ ok: true, provider: updated });
   }
 
@@ -110,6 +120,9 @@ export default withAdminHandler(async (req, res) => {
     if (!deleted) {
       return res.status(404).json({ ok: false, error: 'Provider not found' });
     }
+    await recordAudit(req, {
+      action: 'DELETE', table: 'utility_providers', id, before: deleted,
+    });
     return res.status(200).json({ ok: true, deleted });
   }
 

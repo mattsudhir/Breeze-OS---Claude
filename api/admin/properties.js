@@ -17,6 +17,7 @@ import {
   withAdminHandler,
   getDefaultOrgId,
   parseBody,
+  recordAudit,
 } from '../../lib/adminHelpers.js';
 
 const EDITABLE_FIELDS = [
@@ -112,6 +113,9 @@ export default withAdminHandler(async (req, res) => {
         ...editable,
       })
       .returning();
+    await recordAudit(req, {
+      action: 'CREATE', table: 'properties', id: created.id, after: created,
+    });
     return res.status(201).json({ ok: true, property: created });
   }
 
@@ -124,6 +128,8 @@ export default withAdminHandler(async (req, res) => {
     if (Object.keys(editable).length === 0) {
       return res.status(400).json({ ok: false, error: 'No editable fields provided' });
     }
+    const [before] = await db
+      .select().from(schema.properties).where(eq(schema.properties.id, id)).limit(1);
     const [updated] = await db
       .update(schema.properties)
       .set({ ...editable, updatedAt: new Date() })
@@ -132,6 +138,9 @@ export default withAdminHandler(async (req, res) => {
     if (!updated) {
       return res.status(404).json({ ok: false, error: 'Property not found' });
     }
+    await recordAudit(req, {
+      action: 'UPDATE', table: 'properties', id, before, after: updated, diff: editable,
+    });
     return res.status(200).json({ ok: true, property: updated });
   }
 
@@ -146,6 +155,9 @@ export default withAdminHandler(async (req, res) => {
     if (!deleted) {
       return res.status(404).json({ ok: false, error: 'Property not found' });
     }
+    await recordAudit(req, {
+      action: 'DELETE', table: 'properties', id, before: deleted,
+    });
     return res.status(200).json({ ok: true, deleted });
   }
 
