@@ -5,7 +5,24 @@ import {
   FileText, DollarSign, MapPin, Edit3, Save, X, Home,
   Smartphone, Briefcase, Calendar, Hash, StickyNote
 } from 'lucide-react';
-import { getTenants, getTenant, updateTenant } from '../services/data';
+import { getTenant, updateTenant } from '../services/data';
+import { getAdminToken } from '../lib/admin';
+
+// List tenants from our DB (post-reimport). Returns AppFolio
+// source_tenant_id as `id` so the existing detail / edit passthrough
+// keeps working against AppFolio without further changes. Detail +
+// write migration to our DB is a separate, larger lift; this is the
+// list-view-only pass.
+async function listTenantsFromBreezeDb() {
+  const token = getAdminToken();
+  const qs = token ? `?secret=${encodeURIComponent(token)}` : '';
+  const resp = await fetch(`/api/admin/list-tenants${qs}`, {
+    headers: token ? { 'X-Breeze-Admin-Token': token } : {},
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || data.ok === false) return null;
+  return data.tenants || [];
+}
 import { useDataSource } from '../contexts/DataSourceContext.jsx';
 import FollowButton from './FollowButton.jsx';
 
@@ -542,12 +559,16 @@ export default function TenantsPage() {
   // Bumped 250 at a time when the user hits Show more.
   const [renderLimit, setRenderLimit] = useState(250);
 
-  // Refetch whenever the user flips the data source toggle in TopBar.
+  // The list view reads from our DB via /api/admin/list-tenants
+  // — fast, accurate, paginated server-side. Detail + edit still
+  // talk to AppFolio (legacy passthrough) using the source_tenant_id
+  // the list endpoint surfaces as `id`. The dataSource toggle still
+  // matters for those, so we re-fetch when it changes.
   useEffect(() => {
     let cancelled = false;
     async function fetchData() {
       setLoading(true);
-      const data = await getTenants(dataSource);
+      const data = await listTenantsFromBreezeDb();
       if (cancelled) return;
       if (data) {
         setTenants(data);

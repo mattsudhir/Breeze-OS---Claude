@@ -43,6 +43,7 @@
     { "source": "/api/admin/smoke-test",              "destination": "/api/admin/smoke-test" },
     { "source": "/api/admin/recent-errors",           "destination": "/api/admin/recent-errors" },
     { "source": "/api/admin/debug-units-breakdown",   "destination": "/api/admin/debug-units-breakdown" },
+    { "source": "/api/admin/list-tenants",            "destination": "/api/admin/list-tenants" },
     { "source": "/api/admin/wipe-directory-data",     "destination": "/api/admin/wipe-directory-data" },
     { "source": "/api/admin/import-appfolio-properties", "destination": "/api/admin/import-appfolio-properties" },
     { "source": "/api/admin/import-appfolio-units",   "destination": "/api/admin/import-appfolio-units" },
