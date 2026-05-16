@@ -1,0 +1,299 @@
+name: admin-ops
+
+# Manual ops triggers that let Claude (or any dev) drive the deployed
+# admin endpoints from CI instead of from a browser. Every job hits the
+# production Vercel URL with the BREEZE_ADMIN_TOKEN secret and posts the
+# full JSON response back to whatever issue/PR triggered it.
+#
+# Required repo secrets:
+#   BREEZE_ADMIN_TOKEN  — value of the env var of the same name in Vercel
+#   VERCEL_PROD_URL     — e.g. https://breeze-os-claude.vercel.app
+#                         (the exact host that serves prod traffic)
+#
+# Required repo variable (optional): COMMENT_ISSUE_NUMBER
+#   If set, every job posts its result as a comment on that issue.
+#   Useful for using one tracking issue as the "ops console".
+
+on:
+  # Manual trigger from the Actions UI.
+  workflow_dispatch:
+    inputs:
+      job:
+        description: 'Which job to run'
+        required: true
+        type: choice
+        options:
+          - run-reimport
+          - run-reimport-resume
+          - run-smoke
+          - tail-errors
+          - run-diag
+      resume_from_offset:
+        description: '(reimport-resume only) leases offset to resume from'
+        required: false
+        type: string
+        default: '0'
+      diag_endpoint:
+        description: '(run-diag only) path, e.g. /api/admin/debug-appfolio-auth'
+        required: false
+        type: string
+      diag_method:
+        description: '(run-diag only) GET or POST'
+        required: false
+        type: string
+        default: GET
+      diag_body:
+        description: '(run-diag only) JSON body string'
+        required: false
+        type: string
+        default: ''
+      tail_minutes:
+        description: '(tail-errors only) lookback window in minutes'
+        required: false
+        type: string
+        default: '60'
+      tail_limit:
+        description: '(tail-errors only) max rows'
+        required: false
+        type: string
+        default: '20'
+      comment_on_issue:
+        description: 'Issue number to comment on (overrides repo var)'
+        required: false
+        type: string
+        default: ''
+
+  # ChatOps trigger — Claude (or anyone with write access to the repo)
+  # can fire a job by posting a slash-command comment on any issue or
+  # PR. Recognised commands:
+  #
+  #   /run-smoke
+  #   /run-reimport
+  #   /run-reimport-resume <offset>
+  #   /tail-errors [minutes] [limit]
+  #   /run-diag <METHOD> <path> [json-body]
+  #
+  # The reply always lands as a comment on the same issue/PR that
+  # contained the trigger, so the conversation thread doubles as the
+  # ops log. Only repo collaborators with write permission can fire
+  # commands — anyone else is silently ignored.
+  issue_comment:
+    types: [created]
+
+jobs:
+  ops:
+    runs-on: ubuntu-latest
+    # On comment events, only react if the comment starts with `/` —
+    # cheap pre-filter so we don't burn a runner on every random comment.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/'))
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: read
+    steps:
+      - name: Validate secrets
+        run: |
+          if [ -z "${{ secrets.BREEZE_ADMIN_TOKEN }}" ]; then
+            echo "::error::BREEZE_ADMIN_TOKEN repo secret not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.VERCEL_PROD_URL }}" ]; then
+            echo "::error::VERCEL_PROD_URL repo secret not set"
+            exit 1
+          fi
+
+      # ChatOps path — turn the slash command into the same JOB +
+      # parameter env vars the workflow_dispatch path uses. We also
+      # gate on author association so only repo collaborators with
+      # write access can fire commands; anyone else silently no-ops.
+      - name: Parse comment trigger
+        id: parse_comment
+        if: github.event_name == 'issue_comment'
+        env:
+          BODY: ${{ github.event.comment.body }}
+          ASSOC: ${{ github.event.comment.author_association }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          # Allowed associations: OWNER, MEMBER, COLLABORATOR. Drop
+          # CONTRIBUTOR / NONE / FIRST_TIME_CONTRIBUTOR to keep the
+          # ops surface to trusted hands.
+          case "$ASSOC" in
+            OWNER|MEMBER|COLLABORATOR) ;;
+            *)
+              echo "Comment author association '$ASSOC' is not allowed. Ignoring."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+
+          # First non-empty line of the comment body. Trim CR + spaces.
+          CMD_LINE=$(printf '%s' "$BODY" | sed 's/\r$//' | awk 'NF{print; exit}')
+          if [ -z "${CMD_LINE:-}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+
+          # Split into the verb and the rest.
+          VERB=$(printf '%s' "$CMD_LINE" | awk '{print $1}')
+          REST=$(printf '%s' "$CMD_LINE" | awk '{$1=""; sub(/^ /, ""); print}')
+
+          JOB=""; RESUME_OFFSET=""; DIAG_METHOD=""; DIAG_PATH=""; DIAG_BODY=""
+          TAIL_MINUTES="60"; TAIL_LIMIT="20"
+
+          case "$VERB" in
+            /run-smoke)         JOB="run-smoke" ;;
+            /run-reimport)      JOB="run-reimport" ;;
+            /run-reimport-resume)
+              JOB="run-reimport-resume"
+              RESUME_OFFSET="${REST:-0}"
+              ;;
+            /tail-errors)
+              JOB="tail-errors"
+              # Optional: "/tail-errors <minutes> <limit>"
+              if [ -n "$REST" ]; then
+                TAIL_MINUTES=$(echo "$REST" | awk '{print $1}')
+                MAYBE_LIMIT=$(echo "$REST" | awk '{print $2}')
+                if [ -n "$MAYBE_LIMIT" ]; then TAIL_LIMIT="$MAYBE_LIMIT"; fi
+              fi
+              ;;
+            /run-diag)
+              # "/run-diag METHOD path [json body...]"
+              JOB="run-diag"
+              DIAG_METHOD=$(echo "$REST" | awk '{print $1}')
+              DIAG_PATH=$(echo "$REST" | awk '{print $2}')
+              DIAG_BODY=$(echo "$REST" | awk '{$1=""; $2=""; sub(/^  /, ""); print}')
+              ;;
+            *)
+              echo "Not a recognised slash command: $VERB"
+              echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+              ;;
+          esac
+
+          {
+            echo "skip=false"
+            echo "job=$JOB"
+            echo "resume_offset=$RESUME_OFFSET"
+            echo "diag_method=$DIAG_METHOD"
+            echo "diag_path=$DIAG_PATH"
+            echo "diag_body=$DIAG_BODY"
+            echo "tail_minutes=$TAIL_MINUTES"
+            echo "tail_limit=$TAIL_LIMIT"
+            echo "issue_number=$ISSUE_NUMBER"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run job
+        id: run
+        if: github.event_name == 'workflow_dispatch' || steps.parse_comment.outputs.skip != 'true'
+        env:
+          TOKEN: ${{ secrets.BREEZE_ADMIN_TOKEN }}
+          BASE: ${{ secrets.VERCEL_PROD_URL }}
+          JOB: ${{ github.event.inputs.job || steps.parse_comment.outputs.job }}
+          RESUME_OFFSET: ${{ github.event.inputs.resume_from_offset || steps.parse_comment.outputs.resume_offset }}
+          DIAG_PATH: ${{ github.event.inputs.diag_endpoint || steps.parse_comment.outputs.diag_path }}
+          DIAG_METHOD: ${{ github.event.inputs.diag_method || steps.parse_comment.outputs.diag_method }}
+          DIAG_BODY: ${{ github.event.inputs.diag_body || steps.parse_comment.outputs.diag_body }}
+          TAIL_MINUTES: ${{ github.event.inputs.tail_minutes || steps.parse_comment.outputs.tail_minutes }}
+          TAIL_LIMIT: ${{ github.event.inputs.tail_limit || steps.parse_comment.outputs.tail_limit }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          BASE_STRIPPED="${BASE%/}"
+          curl_admin() {
+            local method="$1" path="$2" body="${3:-}"
+            local url="${BASE_STRIPPED}${path}"
+            local sep="?"
+            case "$path" in *\?*) sep="&";; esac
+            url="${url}${sep}secret=${TOKEN}"
+            if [ -n "$body" ]; then
+              curl -sS -X "$method" "$url" \
+                -H "Content-Type: application/json" \
+                -H "X-Breeze-Admin-Token: ${TOKEN}" \
+                --max-time 290 \
+                -d "$body"
+            else
+              curl -sS -X "$method" "$url" \
+                -H "X-Breeze-Admin-Token: ${TOKEN}" \
+                --max-time 290
+            fi
+          }
+
+          case "$JOB" in
+            run-reimport)
+              echo "::group::POST /api/admin/run-reimport"
+              curl_admin POST /api/admin/run-reimport | tee out/response.json
+              echo "::endgroup::"
+              ;;
+            run-reimport-resume)
+              echo "::group::POST /api/admin/run-reimport?skip_wipe=true&resume_from_offset=$RESUME_OFFSET"
+              curl_admin POST "/api/admin/run-reimport?skip_wipe=true&resume_from_offset=$RESUME_OFFSET" | tee out/response.json
+              echo "::endgroup::"
+              ;;
+            run-smoke)
+              echo "::group::GET /api/admin/smoke-test"
+              curl_admin GET /api/admin/smoke-test | tee out/response.json
+              echo "::endgroup::"
+              ;;
+            tail-errors)
+              echo "::group::GET /api/admin/recent-errors"
+              curl_admin GET "/api/admin/recent-errors?limit=${TAIL_LIMIT}&since_minutes=${TAIL_MINUTES}" | tee out/response.json
+              echo "::endgroup::"
+              ;;
+            run-diag)
+              if [ -z "$DIAG_PATH" ]; then
+                echo "::error::diag_endpoint input is required for run-diag"
+                exit 1
+              fi
+              echo "::group::$DIAG_METHOD $DIAG_PATH"
+              curl_admin "$DIAG_METHOD" "$DIAG_PATH" "$DIAG_BODY" | tee out/response.json
+              echo "::endgroup::"
+              ;;
+            *)
+              echo "::error::unknown job: $JOB"
+              exit 1
+              ;;
+          esac
+
+          # Sanitize: strip the token from any echoed URLs in case the
+          # response embedded the request URL. Defense in depth.
+          sed -i "s/${TOKEN}/REDACTED/g" out/response.json || true
+
+      - name: Upload response artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: admin-ops-response-${{ github.run_id }}
+          path: out/response.json
+          retention-days: 14
+
+      - name: Comment on tracking issue
+        if: always() && (github.event_name == 'workflow_dispatch' || steps.parse_comment.outputs.skip != 'true')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Priority: the issue the comment came from > explicit input > repo var.
+          ISSUE_FROM_COMMENT: ${{ steps.parse_comment.outputs.issue_number }}
+          ISSUE_INPUT: ${{ github.event.inputs.comment_on_issue }}
+          ISSUE_VAR: ${{ vars.COMMENT_ISSUE_NUMBER }}
+          JOB: ${{ github.event.inputs.job || steps.parse_comment.outputs.job }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          ISSUE_NUM="${ISSUE_FROM_COMMENT:-${ISSUE_INPUT:-$ISSUE_VAR}}"
+          if [ -z "$ISSUE_NUM" ]; then
+            echo "No issue number set (comment / input / COMMENT_ISSUE_NUMBER var) — skipping comment."
+            exit 0
+          fi
+          BODY_FILE="$(mktemp)"
+          {
+            echo "**admin-ops: \`$JOB\`**"
+            echo ""
+            echo "Run: $RUN_URL"
+            echo ""
+            echo '```json'
+            # Truncate to ~50 KB so GitHub doesn't reject the comment.
+            head -c 50000 out/response.json
+            echo ''
+            echo '```'
+          } > "$BODY_FILE"
+          gh issue comment "$ISSUE_NUM" --repo "${{ github.repository }}" --body-file "$BODY_FILE"
