@@ -232,6 +232,13 @@
       "when": 1780128000000,
       "tag": "0032_admin_error_log",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1780214400000,
+      "tag": "0033_relax_journal_line_immutability",
+      "breakpoints": true
     }
   ]
 }
