@@ -33,7 +33,13 @@ import { withAdminHandler } from '../../lib/adminHelpers.js';
 export const config = { maxDuration: 300 };
 
 const BUILD = 'orchestrator-v1';
-const WALL_CLOCK_BUDGET_MS = 270_000;
+// Tightened to 230s (Vercel maxDuration is 300s; curl in the
+// admin-ops workflow waits up to 310s). This gives a single in-flight
+// sub-call up to ~70s of headroom before Vercel kills the whole
+// function — long enough for any one step we make. Net effect: the
+// orchestrator's structured response always reaches the workflow
+// instead of getting truncated by Vercel's hard kill.
+const WALL_CLOCK_BUDGET_MS = 230_000;
 const LEASES_BATCH_LIMIT = 10;
 const LEASES_MAX_ITERATIONS = 200; // hard ceiling so a misbehaving has_more never loops forever
 
@@ -123,7 +129,7 @@ export default withAdminHandler(async (req, res) => {
     });
   }
 
-  // ── 1. Wipe ───────────────────────────────────────────────────────
+  // ── 1. Wipe ────────────────────────────────────────────────────
   if (!skipWipe) {
     const wipe = await callStep('wipe', '/api/admin/wipe-directory-data', {
       body: { dry_run: false },
@@ -132,21 +138,21 @@ export default withAdminHandler(async (req, res) => {
     if (overBudget()) return respond({ failed_at: 'wall_clock', resumable_from: { step: 'import_properties' } });
   }
 
-  // ── 2. Import properties ──────────────────────────────────────────
+  // ── 2. Import properties ───────────────────────────────────────
   if (resumeFromOffset < 0) {
     const props = await callStep('import_properties', '/api/admin/import-appfolio-properties');
     if (!props.ok) return respond({ failed_at: 'import_properties' });
     if (overBudget()) return respond({ failed_at: 'wall_clock', resumable_from: { step: 'import_units' } });
   }
 
-  // ── 3. Import units ───────────────────────────────────────────────
+  // ── 3. Import units ────────────────────────────────────────────
   if (resumeFromOffset < 0) {
     const units = await callStep('import_units', '/api/admin/import-appfolio-units');
     if (!units.ok) return respond({ failed_at: 'import_units' });
     if (overBudget()) return respond({ failed_at: 'wall_clock', resumable_from: { step: 'leases', offset: 0 } });
   }
 
-  // ── 4. Loop sync leases until has_more=false ──────────────────────
+  // ── 4. Loop sync leases until has_more=false ───────────────────
   let offset = resumeFromOffset >= 0 ? resumeFromOffset : 0;
   let iter = 0;
   while (true) {
@@ -177,7 +183,7 @@ export default withAdminHandler(async (req, res) => {
     offset = typeof d.next_offset === 'number' ? d.next_offset : offset + LEASES_BATCH_LIMIT;
   }
 
-  // ── 5. Sync tickets ───────────────────────────────────────────────
+  // ── 5. Sync tickets ────────────────────────────────────────────
   if (overBudget()) {
     return respond({ failed_at: 'wall_clock', resumable_from: { step: 'tickets' } });
   }

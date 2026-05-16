@@ -217,12 +217,12 @@ jobs:
               curl -sS -X "$method" "$url" \
                 -H "Content-Type: application/json" \
                 -H "X-Breeze-Admin-Token: ${TOKEN}" \
-                --max-time 290 \
+                --max-time 310 \
                 -d "$body"
             else
               curl -sS -X "$method" "$url" \
                 -H "X-Breeze-Admin-Token: ${TOKEN}" \
-                --max-time 290
+                --max-time 310
             fi
           }
 
