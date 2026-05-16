@@ -101,62 +101,96 @@ export default withAdminHandler(async (req, res) => {
     });
   }
 
-  // Delete in FK-safe order, one transaction.
+  // Delete in FK-safe order, one transaction. Each step is wrapped so
+  // that if anything throws, the response tells us exactly which table
+  // blew up — no more "Cannot convert undefined or null to object" with
+  // no fingerprint. The throw still aborts the transaction (Drizzle
+  // rolls back on a thrown promise inside .transaction()).
   const deleted = {};
-  await db.transaction(async (tx) => {
-    const d1 = await tx.delete(schema.maintenanceTicketComments)
-      .where(eq(schema.maintenanceTicketComments.organizationId, organizationId))
-      .returning({ id: schema.maintenanceTicketComments.id });
-    deleted.maintenance_ticket_comments = d1.length;
+  let failedStep = null;
+  try {
+    await db.transaction(async (tx) => {
+      async function step(name, fn) {
+        failedStep = name;
+        const n = await fn(tx);
+        deleted[name] = n;
+        failedStep = null;
+      }
 
-    const d2 = await tx.delete(schema.maintenanceTickets)
-      .where(eq(schema.maintenanceTickets.organizationId, organizationId))
-      .returning({ id: schema.maintenanceTickets.id });
-    deleted.maintenance_tickets = d2.length;
+      await step('maintenance_ticket_comments', async (tx) => {
+        const rows = await tx.delete(schema.maintenanceTicketComments)
+          .where(eq(schema.maintenanceTicketComments.organizationId, organizationId))
+          .returning({ id: schema.maintenanceTicketComments.id });
+        return rows.length;
+      });
 
-    // lease_tenants is org-less — scope via its leases.
-    if (orgLeaseIds.length > 0) {
-      const d3 = await tx.delete(schema.leaseTenants)
-        .where(sql`${schema.leaseTenants.leaseId} IN ${orgLeaseIds}`)
-        .returning({ id: schema.leaseTenants.id });
-      deleted.lease_tenants = d3.length;
-    } else {
-      deleted.lease_tenants = 0;
-    }
+      await step('maintenance_tickets', async (tx) => {
+        const rows = await tx.delete(schema.maintenanceTickets)
+          .where(eq(schema.maintenanceTickets.organizationId, organizationId))
+          .returning({ id: schema.maintenanceTickets.id });
+        return rows.length;
+      });
 
-    const d4 = await tx.delete(schema.leases)
-      .where(eq(schema.leases.organizationId, organizationId))
-      .returning({ id: schema.leases.id });
-    deleted.leases = d4.length;
+      // lease_tenants is org-less — scope via its leases. Composite PK
+      // (lease_id, tenant_id), NO `id` column.
+      await step('lease_tenants', async (tx) => {
+        if (orgLeaseIds.length === 0) return 0;
+        const rows = await tx.delete(schema.leaseTenants)
+          .where(sql`${schema.leaseTenants.leaseId} IN ${orgLeaseIds}`)
+          .returning({ leaseId: schema.leaseTenants.leaseId });
+        return rows.length;
+      });
 
-    const d5 = await tx.delete(schema.tenants)
-      .where(eq(schema.tenants.organizationId, organizationId))
-      .returning({ id: schema.tenants.id });
-    deleted.tenants = d5.length;
+      await step('leases', async (tx) => {
+        const rows = await tx.delete(schema.leases)
+          .where(eq(schema.leases.organizationId, organizationId))
+          .returning({ id: schema.leases.id });
+        return rows.length;
+      });
 
-    // property_utilities is org-less — scope via its properties.
-    if (orgPropertyIds.length > 0) {
-      const d6 = await tx.delete(schema.propertyUtilities)
-        .where(sql`${schema.propertyUtilities.propertyId} IN ${orgPropertyIds}`)
-        .returning({ id: schema.propertyUtilities.id });
-      deleted.property_utilities = d6.length;
-    } else {
-      deleted.property_utilities = 0;
-    }
+      await step('tenants', async (tx) => {
+        const rows = await tx.delete(schema.tenants)
+          .where(eq(schema.tenants.organizationId, organizationId))
+          .returning({ id: schema.tenants.id });
+        return rows.length;
+      });
 
-    const d7 = await tx.delete(schema.units)
-      .where(eq(schema.units.organizationId, organizationId))
-      .returning({ id: schema.units.id });
-    deleted.units = d7.length;
+      // property_utilities is org-less — scope via its properties.
+      await step('property_utilities', async (tx) => {
+        if (orgPropertyIds.length === 0) return 0;
+        const rows = await tx.delete(schema.propertyUtilities)
+          .where(sql`${schema.propertyUtilities.propertyId} IN ${orgPropertyIds}`)
+          .returning({ id: schema.propertyUtilities.id });
+        return rows.length;
+      });
 
-    const d8 = await tx.delete(schema.properties)
-      .where(eq(schema.properties.organizationId, organizationId))
-      .returning({ id: schema.properties.id });
-    deleted.properties = d8.length;
-  });
+      await step('units', async (tx) => {
+        const rows = await tx.delete(schema.units)
+          .where(eq(schema.units.organizationId, organizationId))
+          .returning({ id: schema.units.id });
+        return rows.length;
+      });
+
+      await step('properties', async (tx) => {
+        const rows = await tx.delete(schema.properties)
+          .where(eq(schema.properties.organizationId, organizationId))
+          .returning({ id: schema.properties.id });
+        return rows.length;
+      });
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      build: 'wipe-v3',
+      failed_step: failedStep,
+      error: err?.message || String(err),
+      partial_deleted: deleted,
+    });
+  }
 
   return res.status(200).json({
     ok: true,
+    build: 'wipe-v3',
     dry_run: false,
     organization_id: organizationId,
     deleted,
