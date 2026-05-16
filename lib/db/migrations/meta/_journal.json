@@ -239,6 +239,13 @@
       "when": 1780214400000,
       "tag": "0033_relax_journal_line_immutability",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1780300800000,
+      "tag": "0034_admin_audit_log",
+      "breakpoints": true
     }
   ]
 }
