@@ -5,10 +5,83 @@ import {
   Clock, ChevronRight, Search, BarChart3, Calendar,
   Loader2, WifiOff
 } from 'lucide-react';
-import { getProperties, getUnits, getWorkOrders, getTenants } from '../services/data';
+import { getAdminToken } from '../lib/admin';
+
+// Dashboard data comes from our own DB (post-reimport). The old
+// getProperties / getUnits / getWorkOrders / getTenants service-layer
+// helpers routed through AppFolio passthrough; we now hit:
+//   - /api/admin/list-properties-summary   (one query, returns units inline)
+//   - /api/admin/list-maintenance-tickets  (our ticket queue)
+//   - /api/admin/list-tenants              (post-reimport tenant directory)
+// and synthesise the legacy shapes downstream code expects so the
+// existing rendering code keeps working.
+async function fetchOurDashboardData() {
+  const token = getAdminToken();
+  const qs = token ? `?secret=${encodeURIComponent(token)}` : '';
+  const headers = token ? { 'X-Breeze-Admin-Token': token } : {};
+
+  async function fetchJson(path) {
+    try {
+      const resp = await fetch(`${path}${qs}`, { headers });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) return null;
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  const [pSum, mtkts, ttsts] = await Promise.all([
+    fetchJson('/api/admin/list-properties-summary'),
+    fetchJson('/api/admin/list-maintenance-tickets?status=all'),
+    fetchJson('/api/admin/list-tenants'),
+  ]);
+
+  // Synthesise the legacy passthrough shapes so the rest of the
+  // component is untouched.
+  const properties = (pSum?.properties || []).map((p) => ({
+    id: p.id,
+    name: p.display_name,
+    city: p.address?.city || '',
+    state: p.address?.state || '',
+    type: p.property_type || '',
+  }));
+  const units = (pSum?.properties || []).flatMap((p) =>
+    (p.units || []).map((u) => ({
+      id: u.id,
+      propertyId: p.id,
+      name: u.name,
+      status: u.is_occupied ? 'Occupied' : 'Vacant',
+      marketRent: (u.monthly_rent_cents || 0) / 100,
+      bedrooms: u.bedrooms,
+      bathrooms: u.bathrooms,
+    })),
+  );
+  const workOrders = (mtkts?.tickets || []).map((t) => ({
+    id: t.id,
+    displayId: t.id ? `TKT-${String(t.id).slice(0, 8)}` : null,
+    summary: t.title || '',
+    description: t.description || '',
+    propertyId: t.property_id || null,
+    unitId: t.unit_id || null,
+    priority: t.priority || 'medium',
+    status: t.status || 'new',
+    isClosed: t.status === 'completed' || t.status === 'cancelled',
+    createdDate: t.reported_at || t.created_at || null,
+  }));
+  const tenants = (ttsts?.tenants || []).map((t) => ({
+    id: t.id,
+    name: t.name,
+    status: t.status,
+    email: t.email,
+    phone: t.phone,
+  }));
+
+  return { properties, units, workOrders, tenants };
+}
 import { useDataSource } from '../contexts/DataSourceContext.jsx';
 
-// ── Helpers ───────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────
 
 function relativeTime(dateLike) {
   if (!dateLike) return '';
@@ -70,28 +143,15 @@ export default function ClassicDashboard({ onNavigate }) {
     let cancelled = false;
     async function fetchData() {
       setLoading(true);
-      // Use allSettled so one slow/failed call doesn't kill the others.
-      const results = await Promise.allSettled([
-        getProperties(dataSource),
-        getUnits(dataSource),
-        getWorkOrders(dataSource, { status: 'all' }),
-        getTenants(dataSource),
-      ]);
+      const { properties: p, units: u, workOrders: w, tenants: t } =
+        await fetchOurDashboardData();
       if (cancelled) return;
-      const [propsRes, unitsRes, woRes, tRes] = results;
-      const propsData = propsRes.status === 'fulfilled' ? propsRes.value : null;
-      const unitsData = unitsRes.status === 'fulfilled' ? unitsRes.value : null;
-      const woData    = woRes.status    === 'fulfilled' ? woRes.value    : null;
-      const tData     = tRes.status     === 'fulfilled' ? tRes.value     : null;
-
-      setProperties(propsData);
-      setUnits(unitsData);
-      setWorkOrders(woData);
-      setTenants(tData);
-
-      // Banner shows "live" if ANY endpoint responded
-      setIsLive(!!(propsData || unitsData || woData || tData));
-
+      setProperties(p);
+      setUnits(u);
+      setWorkOrders(w);
+      setTenants(t);
+      // "Live" is true if we got any data at all from our DB.
+      setIsLive(!!(p?.length || u?.length || w?.length || t?.length));
       setLoading(false);
     }
     fetchData();
@@ -108,7 +168,7 @@ export default function ClassicDashboard({ onNavigate }) {
     return m;
   }, {});
 
-  // ── Build display data — all derived from live fetches ──────────
+  // ── Build display data — all derived from live fetches ──────
   // No demo fallbacks. When AppFolio (or RM) is unreachable, sections
   // render an honest empty state rather than fake property names that
   // don't match the user's actual portfolio.
