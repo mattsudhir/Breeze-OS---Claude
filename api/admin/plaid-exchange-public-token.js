@@ -77,11 +77,26 @@ export default withAdminHandler(async (req, res) => {
   const organizationId = await getDefaultOrgId();
   const db = getDb();
 
+  // Surface Plaid's structured error fields the same way
+  // plaid-link-token does, so the AccountingPage can prefer
+  // display_message for user-facing copy.
+  function plaidError(stage, err) {
+    const plaid = err?.response?.data || {};
+    return res.status(502).json({
+      ok: false,
+      error: plaid.error_message || err.message || `${stage} failed`,
+      error_type: plaid.error_type || null,
+      error_code: plaid.error_code || null,
+      display_message: plaid.display_message || null,
+      stage,
+    });
+  }
+
   let exchanged;
   try {
     exchanged = await exchangePublicToken(publicToken);
   } catch (err) {
-    return res.status(502).json({ ok: false, error: `exchange failed: ${err.message}` });
+    return plaidError('exchange', err);
   }
   const { access_token: accessToken, item_id: itemId } = exchanged;
 
@@ -89,7 +104,7 @@ export default withAdminHandler(async (req, res) => {
   try {
     plaidAccounts = await getAccounts(accessToken);
   } catch (err) {
-    return res.status(502).json({ ok: false, error: `accounts fetch failed: ${err.message}` });
+    return plaidError('accounts_fetch', err);
   }
 
   const encryptedToken = encryptText(accessToken);

@@ -1115,7 +1115,11 @@ function PlaidLinkButton({ token, onLinked, onTokenInvalid }) {
         if (json.error?.includes('not configured')) {
           setPlaidUnavailable(true);
         } else {
-          setError(json.error || 'failed to get link token');
+          // Plaid documents `display_message` as the only string
+          // safe to show end-users; fall back to the generic
+          // error_message when absent. See
+          // docs/plaid-integration-audit.md item #5.
+          setError(json.display_message || json.error || 'failed to get link token');
         }
         return null;
       }
@@ -1141,7 +1145,8 @@ function PlaidLinkButton({ token, onLinked, onTokenInvalid }) {
       if (res.status === 401) { onTokenInvalid(); return; }
       const json = await res.json();
       if (!json.ok) {
-        setError(json.error || 'exchange failed');
+        // Same display_message preference as the link-token branch.
+        setError(json.display_message || json.error || 'exchange failed');
         return;
       }
       onLinked();
