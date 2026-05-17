@@ -514,7 +514,24 @@ function TicketRow({ ticket, vendors, expanded, onToggle, onChanged }) {
           {expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: '#222', marginBottom: 3 }}>{ticket.title}</div>
+          <div
+            style={{
+              fontSize: 14, fontWeight: 600, color: '#222', marginBottom: 3,
+              // AppFolio's JobDescription is often the full work-order
+              // narrative (multiple paragraphs). Without a clamp the row
+              // height balloons to hundreds of pixels — clamp to two
+              // visual lines in the list and show the rest in the
+              // expanded TicketDetail body.
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+              wordBreak: 'break-word',
+            }}
+            title={ticket.title}
+          >
+            {ticket.title}
+          </div>
           <div style={{
             display: 'flex', flexWrap: 'wrap', gap: 10,
             fontSize: 12, color: '#666',

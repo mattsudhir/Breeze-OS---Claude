@@ -58,6 +58,25 @@ function mapPriority(appfolioPriority) {
   return 'medium';
 }
 
+// Pull a short, list-friendly summary from a (possibly very long)
+// work-order description. Picks the first natural break — sentence
+// end, hard newline, or colon — and trims. Returns empty string if
+// nothing usable.
+function firstSentenceOf(text) {
+  if (!text || typeof text !== 'string') return '';
+  const trimmed = text.trim();
+  if (!trimmed) return '';
+  // First match wins: end-of-sentence (.!?) followed by space,
+  // newline, or a colon-led sentence ("01-2026-01:" pattern).
+  const m = trimmed.match(/^[\s\S]*?(?:[.!?]\s|\n|:)/);
+  let candidate = m ? m[0] : trimmed;
+  candidate = candidate.replace(/[\s.:!?]+$/, '').trim();
+  // If we got back nothing useful (e.g. the text started with the
+  // delimiter), fall back to the first 100 chars of the original.
+  if (candidate.length < 4) return trimmed.slice(0, 100);
+  return candidate;
+}
+
 export default withAdminHandler(async (req, res) => {
   if (req.method !== 'POST') {
     return res.status(405).json({ ok: false, error: 'POST only' });
@@ -197,8 +216,23 @@ export default withAdminHandler(async (req, res) => {
 
     const status = mapStatus(w.Status);
     const priority = mapPriority(w.Priority);
-    const title = (w.JobDescription || w.WorkOrderIssue || w.Description || `Work Order ${sourceTicketId}`).slice(0, 500);
-    const description = w.Description || w.TenantRemarks || null;
+    // Pick a SHORT title for the list view, and stash the full text
+    // in `description`. AppFolio's JobDescription is frequently the
+    // entire work-order narrative (multi-paragraph inspection
+    // findings, etc.) — using it raw as a title makes the
+    // MaintenancePage row balloon vertically.
+    //
+    // Preference order: WorkOrderIssue (AppFolio's short summary
+    // field, when set) → first sentence/line of JobDescription/
+    // Description → fallback. Cap at ~120 chars so even the
+    // weirdest input still fits the list row.
+    const rawDescription = w.JobDescription || w.Description || w.TenantRemarks || '';
+    const shortTitle = (w.WorkOrderIssue
+      || firstSentenceOf(rawDescription)
+      || `Work Order ${sourceTicketId}`
+    ).slice(0, 120);
+    const title = shortTitle;
+    const description = rawDescription || null;
     const category = w.VendorTrade || null;
     const reportedAt = w.CreatedAt ? new Date(w.CreatedAt) : new Date();
     const scheduledAt = w.ScheduledStart ? new Date(w.ScheduledStart) : null;
