@@ -70,6 +70,7 @@ Brief — the options we looked at and why we didn't pick them.
 | 0003  | [Cache vs source-of-truth labeling](./0003-cache-vs-source-of-truth-labeling.md) | Accepted |
 | 0004  | [AI-summarized maintenance ticket titles](./0004-ai-summarized-ticket-titles.md) | Accepted (opt-in) |
 | 0005  | [Daily summary briefing for owners and PMs](./0005-daily-summary-briefing.md) | Accepted (v1 shipped) |
+| 0006  | [Chat-metric pre-computation + invalidation](./0006-chat-metrics-precomputation.md) | Accepted (v1 shipping) |
 
 ## Cross-references
 

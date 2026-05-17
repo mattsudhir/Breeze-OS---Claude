@@ -41,6 +41,7 @@ import {
   categoriesForEvent,
   fanoutCategoryEvent,
 } from '../../lib/categorySubscriptions.js';
+import { markDirtyForTopic } from '../../lib/chatMetrics/invalidate.js';
 
 // Vercel Node functions parse JSON by default; we need the raw
 // bytes for JWS verification. Disabling the body parser lets us
@@ -136,6 +137,18 @@ export default async function handler(req, res) {
       currentState = await readOneFromMirror(orgId, mirrorType, resourceId);
     } catch (err) {
       console.warn('[appfolio-webhook] mirror sync failed:', err?.message || err);
+    }
+  }
+
+  // ── Step 3a: invalidate dependent chat_metrics ──
+  // The mirror just updated, so any pre-computed answer derived from
+  // it is now stale. The cron sweep recomputes; we just mark dirty.
+  // Best-effort: failures here must never block the webhook response.
+  if (orgId) {
+    try {
+      await markDirtyForTopic(orgId, topic, resourceId);
+    } catch (err) {
+      console.warn('[appfolio-webhook] chat_metrics invalidate failed:', err?.message || err);
     }
   }
 

@@ -49,6 +49,8 @@
     { "source": "/api/admin/recent-audit",            "destination": "/api/admin/recent-audit" },
     { "source": "/api/admin/summarize-pending-titles", "destination": "/api/admin/summarize-pending-titles" },
     { "source": "/api/admin/daily-briefing-data",     "destination": "/api/admin/daily-briefing-data" },
+    { "source": "/api/admin/chat-metrics",            "destination": "/api/admin/chat-metrics" },
+    { "source": "/api/cron/refresh-chat-metrics",     "destination": "/api/cron/refresh-chat-metrics" },
     { "source": "/api/admin/wipe-directory-data",     "destination": "/api/admin/wipe-directory-data" },
     { "source": "/api/admin/import-appfolio-properties", "destination": "/api/admin/import-appfolio-properties" },
     { "source": "/api/admin/import-appfolio-units",   "destination": "/api/admin/import-appfolio-units" },
@@ -103,7 +105,9 @@
     "api/issue-gl-mappings.js":               { "maxDuration": 15 },
     "api/human-tasks.js":                     { "maxDuration": 15 },
     "api/cron/process-tasks.js":              { "maxDuration": 60 },
-    "api/cron/appfolio-reconcile.js":         { "maxDuration": 300 }
+    "api/cron/appfolio-reconcile.js":         { "maxDuration": 300 },
+    "api/cron/refresh-chat-metrics.js":       { "maxDuration": 120 },
+    "api/admin/chat-metrics.js":              { "maxDuration": 60 }
   },
   "crons": [
     {
@@ -117,6 +121,14 @@
     {
       "path": "/api/cron/probe-integrations",
       "schedule": "0 */4 * * *"
+    },
+    {
+      "path": "/api/cron/refresh-chat-metrics",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/refresh-chat-metrics?mode=all",
+      "schedule": "0 * * * *"
     }
   ]
 }
