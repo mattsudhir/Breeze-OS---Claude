@@ -83,6 +83,13 @@ export default function ChatHome({ onNavigate }) {
   const [isRecording, setIsRecording] = useState(false);
   const [showQuickActions, setShowQuickActions] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
+  // Escalating "still working" text shown in the Thinking pill so
+  // users know we haven't hung up on them. The hangups always
+  // happen mid-fetch when a query falls outside the chat_metrics
+  // cache and the agent has to talk to AppFolio directly (10-60s).
+  // Updates are pure client-side — no server coordination needed.
+  const [thinkingMessage, setThinkingMessage] = useState('Thinking…');
+  const thinkingTimersRef = useRef([]);
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const { dataSource, sources: DATA_SOURCES } = useDataSource();
   // Pending attachment for the next message. Shape:
@@ -178,6 +185,25 @@ export default function ChatHome({ onNavigate }) {
     abortControllerRef.current = controller;
 
     setIsThinking(true);
+    setThinkingMessage('Thinking…');
+    // Escalation timeline: cached metrics return in ~3-5s, so by 6s
+    // we know we're in slow-path territory; by 20s we're almost
+    // certainly doing a fresh AppFolio scan.
+    thinkingTimersRef.current.forEach(clearTimeout);
+    thinkingTimersRef.current = [
+      setTimeout(() => setThinkingMessage('Still working…'), 6000),
+      setTimeout(
+        () => setThinkingMessage('Pulling fresh data — about 30 seconds.'),
+        18000,
+      ),
+      setTimeout(
+        () =>
+          setThinkingMessage(
+            'Big query — could be up to a minute or two. Hang tight.',
+          ),
+        45000,
+      ),
+    ];
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
@@ -243,6 +269,8 @@ export default function ChatHome({ onNavigate }) {
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null;
         setIsThinking(false);
+        thinkingTimersRef.current.forEach(clearTimeout);
+        thinkingTimersRef.current = [];
       }
     }
   };
@@ -256,6 +284,8 @@ export default function ChatHome({ onNavigate }) {
     abortControllerRef.current = null;
     controller.abort();
     setIsThinking(false);
+    thinkingTimersRef.current.forEach(clearTimeout);
+    thinkingTimersRef.current = [];
     cancelSpeech();
     addMessage({
       type: 'system',
@@ -571,7 +601,7 @@ export default function ChatHome({ onNavigate }) {
             <div className="chat-bubble-content">
               <div className="chat-bubble system thinking-bubble">
                 <Loader2 size={16} className="spin" />
-                <span>Thinking...</span>
+                <span>{thinkingMessage}</span>
               </div>
             </div>
           </div>
