@@ -125,11 +125,12 @@ export default withAdminHandler(async (req, res) => {
     const patterns = Array.isArray(raw)
       ? raw.filter((s) => typeof s === 'string' && s.trim())
       : [];
-    if (!patterns.length) {
-      return res
-        .status(400)
-        .json({ ok: false, error: 'property_name_patterns (string[]) required' });
-    }
+    // If no patterns supplied (or the slash-command body got mangled),
+    // fall back to the maintained Breeze exclusion seed list. Lets us
+    // POST with an empty body and still do the right thing.
+    const effectivePatterns = patterns.length
+      ? patterns
+      : ['1413 7th', 'brice', '510 ohio', 'common'];
 
     // Re-run the property-name backfill with the supplied substrings.
     const result = await db.execute(sql`
@@ -140,7 +141,7 @@ export default withAdminHandler(async (req, res) => {
         AND u."organization_id" = ${orgId}
         AND (
           ${sql.join(
-            patterns.map((p) => sql`LOWER(p."display_name") LIKE ${'%' + p.toLowerCase() + '%'}`),
+            effectivePatterns.map((p) => sql`LOWER(p."display_name") LIKE ${'%' + p.toLowerCase() + '%'}`),
             sql` OR `,
           )}
         )
@@ -160,7 +161,8 @@ export default withAdminHandler(async (req, res) => {
 
     return res.status(200).json({
       ok: true,
-      patterns,
+      patterns_used: effectivePatterns,
+      defaulted: !patterns.length,
       rows_updated: updated,
       total_flagged_now: nowFlagged,
     });
