@@ -80,11 +80,11 @@ export default function LeasingPage() {
     return () => { cancelled = true; };
   }, []);
 
-  // "Active" lease = status='current' per list-tenants' derivation.
-  // One row per primary tenant on an active lease — co-tenants get
-  // their own row but with the same lease_id (filter would dedupe
-  // if we wanted unique-by-lease).
-  const activeLeases = useMemo(() => {
+  // Tenant-on-lease rows for the renewal table and the all-leases
+  // table. Co-tenants on the same lease produce multiple rows; that's
+  // what those tables want (so each tenant is visible). Counting and
+  // summing rent happens against the deduplicated set below.
+  const tenantLeaseRows = useMemo(() => {
     if (!tenants) return [];
     return tenants
       .filter((t) => t.status === 'current' && t.lease_id)
@@ -103,14 +103,32 @@ export default function LeasingPage() {
       }));
   }, [tenants]);
 
+  // Unique-by-lease set for headline counts + rent roll. A lease with
+  // two tenants on it is ONE lease and ONE rent obligation, not two.
+  // Keep the primary tenant's row when there's one; otherwise first
+  // seen wins.
+  const uniqueLeases = useMemo(() => {
+    const byLease = new Map();
+    for (const row of tenantLeaseRows) {
+      const existing = byLease.get(row.id);
+      if (!existing) {
+        byLease.set(row.id, row);
+      } else if (row.role === 'primary' && existing.role !== 'primary') {
+        byLease.set(row.id, row);
+      }
+    }
+    return [...byLease.values()];
+  }, [tenantLeaseRows]);
+
+  // The expiring-in-90-days table also dedupes — one card per lease.
   const expiring = useMemo(() => {
-    return activeLeases
+    return uniqueLeases
       .filter((l) => l.daysUntilEnd != null && l.daysUntilEnd >= 0 && l.daysUntilEnd <= 90)
       .sort((a, b) => a.daysUntilEnd - b.daysUntilEnd);
-  }, [activeLeases]);
+  }, [uniqueLeases]);
 
   const totals = useMemo(() => {
-    const t = activeLeases.reduce(
+    const t = uniqueLeases.reduce(
       (acc, l) => ({
         count:        acc.count + 1,
         rentRoll:     acc.rentRoll + (l.rent || 0),
@@ -119,7 +137,7 @@ export default function LeasingPage() {
       { count: 0, rentRoll: 0, expiringSoon: 0 },
     );
     return t;
-  }, [activeLeases]);
+  }, [uniqueLeases]);
 
   if (loading) {
     return (
@@ -242,15 +260,20 @@ export default function LeasingPage() {
         )}
       </div>
 
-      {/* Active leases */}
+      {/* Active leases — one row per tenant (so couples show both
+          names), with the lease count itself surfaced separately
+          from the row count so the user can tell them apart. */}
       <div className="dashboard-card">
         <div className="card-header">
           <h3><FileText size={18} /> All Active Leases</h3>
           <span style={{ fontSize: 12, color: '#888' }}>
-            {activeLeases.length} lease{activeLeases.length === 1 ? '' : 's'}
+            {uniqueLeases.length} lease{uniqueLeases.length === 1 ? '' : 's'}
+            {tenantLeaseRows.length !== uniqueLeases.length && (
+              <> · {tenantLeaseRows.length} tenant rows</>
+            )}
           </span>
         </div>
-        {activeLeases.length === 0 ? (
+        {tenantLeaseRows.length === 0 ? (
           <div style={{ padding: 16, color: '#888', fontSize: 13 }}>
             No active leases yet.
           </div>
@@ -268,7 +291,7 @@ export default function LeasingPage() {
                 </tr>
               </thead>
               <tbody>
-                {activeLeases.slice(0, 250).map((l) => (
+                {tenantLeaseRows.slice(0, 250).map((l) => (
                   <tr key={l.id + '-' + l.tenantId}>
                     <td style={{ fontWeight: 600 }}>{l.tenant}</td>
                     <td style={{ color: '#666' }}>{l.unit || '—'}</td>
@@ -280,12 +303,13 @@ export default function LeasingPage() {
                 ))}
               </tbody>
             </table>
-            {activeLeases.length > 250 && (
+            {tenantLeaseRows.length > 250 && (
               <div style={{
                 padding: '12px 16px', color: '#888', fontSize: 12,
                 borderTop: '1px solid #eee', textAlign: 'center',
               }}>
-                Showing first 250 of {activeLeases.length} leases.
+                Showing first 250 of {tenantLeaseRows.length} tenant rows
+                ({uniqueLeases.length} unique leases).
               </div>
             )}
           </div>
