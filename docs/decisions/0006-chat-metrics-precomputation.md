@@ -178,8 +178,31 @@ metrics exist; the prompt picks the right framing.
   with its computed_at, stale flag, and value. `POST` triggers a
   recompute on demand (single key or all).
 
+## Known gaps as of v1 ship
+
+- **Tenant balance pipeline**: AppFolio's `/tenants` endpoint
+  doesn't populate `Balance` reliably (most rows come back null).
+  This makes `delinquent_tenant_count` + `total_delinquency_cents`
+  + per-tenant `tenant_balance_cents` all return 0 today. Need a
+  one-off pass via `/balances` (or the Income Register report) to
+  populate the mirror's tenant.data.balance field. Tracked as a
+  deferred item below.
+- **Maintenance categorisation is sparse**: AppFolio's `VendorTrade`
+  is empty on most work orders. We fall back to scanning the
+  summary text — catches common keywords (HVAC, plumbing,
+  electrical, appliance, pest, exterior, cosmetic, security) but
+  the long tail still ends up in `general`. Acceptable for v1;
+  fine-tuning the regex set is incremental.
+- **Priority defaults to High in AppFolio**, so `urgent_maint_count`
+  is intentionally limited to Priority='Urgent' or 'Emergency'.
+  For "high-priority" counts, use `maint_by_priority` which returns
+  the full breakdown.
+
 ## Deferred to v1.1 / v2
 
+- **Tenant balance backfill** — see "Known gaps" above. Either fetch
+  `/balances` per-tenant during the hourly reconcile cron, or run
+  the Income Register report on a separate cadence.
 - **Payments / receipts metrics** (`rent_received_today_cents`,
   `tenant_last_payment_date`): need either a receipts mirror or a
   scheduled pull from AppFolio's Income Register report. Not in v1
