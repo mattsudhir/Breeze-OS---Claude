@@ -48,6 +48,7 @@
     { "source": "/api/admin/audit-bank-transaction-payloads", "destination": "/api/admin/audit-bank-transaction-payloads" },
     { "source": "/api/admin/recent-audit",            "destination": "/api/admin/recent-audit" },
     { "source": "/api/admin/summarize-pending-titles", "destination": "/api/admin/summarize-pending-titles" },
+    { "source": "/api/admin/daily-briefing-data",     "destination": "/api/admin/daily-briefing-data" },
     { "source": "/api/admin/wipe-directory-data",     "destination": "/api/admin/wipe-directory-data" },
     { "source": "/api/admin/import-appfolio-properties", "destination": "/api/admin/import-appfolio-properties" },
     { "source": "/api/admin/import-appfolio-units",   "destination": "/api/admin/import-appfolio-units" },

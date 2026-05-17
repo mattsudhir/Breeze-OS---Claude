@@ -1,8 +1,25 @@
 # 0005. Daily summary briefing for owners and PMs
 
-**Status:** Proposed (not yet implemented)
+**Status:** Accepted (v1 shipped 2026-05-17, pull-on-demand chat tool)
 **Date:** 2026-05-17
 **Deciders:** mattsudhir + Claude (this session)
+
+**v1 implementation:**
+- Migration 0036 + `lib/db/schema/briefingRuns.js` — the bookkeeping table.
+- `api/admin/daily-briefing-data` — read-only signal collector. Default
+  window is "since last briefing for this actor" → now, falling back to
+  the last 30 days for a first-time call. Each non-dry-run call records
+  a `briefing_runs` row that the NEXT call uses to compute its window.
+- `daily_briefing` tool registered in `lib/breezeAgent.js` COMMON_TOOLS.
+  Self-fetches the data endpoint and hands the snapshot to Claude with
+  rendering rules in the system prompt.
+- ChatHome quick-action chip: "✨ Daily briefing" sends
+  "What's my daily briefing?" to the agent.
+
+Cron / push delivery (v2+ in the original spec) deliberately NOT
+shipped — current pattern is pull-on-demand per the user's preferred
+shape: "user requests when they want and then summarizes everything
+since the last time they were briefed."
 
 ## Context
 

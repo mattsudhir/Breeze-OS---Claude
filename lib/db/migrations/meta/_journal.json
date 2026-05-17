@@ -253,6 +253,13 @@
       "when": 1780387200000,
       "tag": "0035_maintenance_title_source",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1780473600000,
+      "tag": "0036_briefing_runs",
+      "breakpoints": true
     }
   ]
 }

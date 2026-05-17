@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import {
   Mic, MicOff, Send, Paperclip, FileText, Home, DollarSign,
   Wrench, User, Bot, ChevronDown, Building2, Loader2,
-  Volume2, VolumeX, ArrowRight, X, Square,
+  Volume2, VolumeX, ArrowRight, X, Square, Sparkles,
 } from 'lucide-react';
 import { upload as blobUpload } from '@vercel/blob/client';
 import {
@@ -67,6 +67,8 @@ function ShowMeButtonLabel({ view, filters }) {
 }
 
 const QUICK_ACTIONS = [
+  { icon: Sparkles, label: 'Daily briefing', color: '#6A1B9A',
+    prompt: "What's my daily briefing?" },
   { icon: User, label: 'Who lives at...', color: '#1565C0', prompt: 'List my current tenants' },
   { icon: DollarSign, label: 'Balances', color: '#2E7D32', prompt: 'Which tenants have an outstanding balance?' },
   { icon: Wrench, label: 'Open maintenance', color: '#E65100', prompt: 'Show me open work orders' },
