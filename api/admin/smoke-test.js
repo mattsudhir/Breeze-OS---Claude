@@ -29,7 +29,7 @@ import { isPlaidConfigured } from '../../lib/backends/plaid.js';
 
 export const config = { maxDuration: 30 };
 
-const BUILD = 'smoke-v2';
+const BUILD = 'smoke-v3';
 
 export default withAdminHandler(async (req, res) => {
   if (req.method !== 'GET' && req.method !== 'POST') {
@@ -158,6 +158,26 @@ export default withAdminHandler(async (req, res) => {
       );
     return {
       linked: Number(rows[0]?.c || 0),
+    };
+  });
+
+  // Voice chat backbone — both /api/tts and /api/stt proxy to
+  // ElevenLabs. The same ELEVENLABS_API_KEY drives them; if it's
+  // unset, neither voice path can fall through to the server-side
+  // route and the user is stuck on whatever the browser's native
+  // SpeechRecognition gives them (which is unreliable on Edge /
+  // Firefox / Safari).
+  await check('elevenlabs_configured', async () => {
+    const apiKey = process.env.ELEVENLABS_API_KEY;
+    const voiceId = process.env.ELEVENLABS_VOICE_ID;
+    if (!apiKey) {
+      throw new Error('ELEVENLABS_API_KEY not set — voice chat falls back to browser-native only');
+    }
+    return {
+      api_key_present: true,
+      api_key_length: apiKey.length,
+      voice_id_present: Boolean(voiceId),
+      voice_id: voiceId || '(default: Sarah)',
     };
   });
 
