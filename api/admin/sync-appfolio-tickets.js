@@ -246,6 +246,9 @@ export default withAdminHandler(async (req, res) => {
       unitId,
       vendorId,
       title,
+      // Mark this as a first-sentence derivation so the AI cron
+      // knows it's a candidate for re-summarization. See ADR 0004.
+      titleSource: 'first_sentence',
       description,
       category,
       priority,
@@ -259,7 +262,10 @@ export default withAdminHandler(async (req, res) => {
     };
 
     const [existing] = await db
-      .select({ id: schema.maintenanceTickets.id })
+      .select({
+        id: schema.maintenanceTickets.id,
+        titleSource: schema.maintenanceTickets.titleSource,
+      })
       .from(schema.maintenanceTickets)
       .where(
         and(
@@ -271,9 +277,17 @@ export default withAdminHandler(async (req, res) => {
       .limit(1);
 
     if (existing) {
+      // Respect manual edits — never overwrite a user-set title via
+      // the AppFolio sync. If the user wants AppFolio's title back,
+      // they can clear the row in the UI and re-sync.
+      const updateValues = { ...values };
+      if (existing.titleSource === 'manual_edit') {
+        delete updateValues.title;
+        delete updateValues.titleSource;
+      }
       await db
         .update(schema.maintenanceTickets)
-        .set(values)
+        .set(updateValues)
         .where(eq(schema.maintenanceTickets.id, existing.id));
       updated += 1;
     } else {

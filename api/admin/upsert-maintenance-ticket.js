@@ -50,7 +50,13 @@ export default withAdminHandler(async (req, res) => {
   }
 
   const values = { updatedAt: new Date() };
-  if (body.title !== undefined) values.title = String(body.title).trim();
+  if (body.title !== undefined) {
+    values.title = String(body.title).trim();
+    // A title coming through the upsert endpoint is, by definition,
+    // a user-set value — flag it so the AppFolio sync and the AI
+    // summarization cron both leave it alone. See ADR 0004.
+    values.titleSource = 'manual_edit';
+  }
   if (body.description !== undefined) values.description = body.description || null;
   if (body.category !== undefined) values.category = body.category || null;
   if (body.priority !== undefined) values.priority = body.priority;
