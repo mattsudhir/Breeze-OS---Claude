@@ -217,7 +217,24 @@ export default function ChatHome({ onNavigate }) {
 
       if (controller.signal.aborted) return;
 
-      const data = await res.json();
+      // Parse defensively — Vercel returns an HTML/text error page
+      // when a serverless function crashes or times out, and the raw
+      // `Unexpected token` JSON parse error is useless to users.
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        addMessage({
+          type: 'system',
+          sender: 'Breeze AI',
+          avatar: 'bot',
+          text:
+            res.status === 504 || res.status === 408
+              ? 'That took too long to come back. Try a more specific question, or break it into smaller pieces.'
+              : `Sorry, the server returned an unexpected response (HTTP ${res.status}). Try again in a moment.`,
+        });
+        return;
+      }
       if (controller.signal.aborted) return;
 
       if (!res.ok || !data.ok) {
