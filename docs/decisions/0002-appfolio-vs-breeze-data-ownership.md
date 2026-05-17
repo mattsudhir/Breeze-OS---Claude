@@ -35,6 +35,14 @@ endpoints. Writes go AppFolio-first, mirror to our DB on success.
 Our sync jobs treat AppFolio's value as authoritative and
 overwrite our mirror when they differ.
 
+ADR 0003 further splits this bucket into two sub-categories:
+
+- **A-CACHE** — every column on the table is AppFolio-canonical.
+  The table can be truncated and re-synced with no data loss.
+- **A-MIRROR** — base columns are AppFolio-canonical but the row
+  also carries Breeze-only augmentations (notes, vendor
+  assignment, etc). Truncating destroys the augmentations.
+
 ### Bucket B — Breeze canonical
 The field exists only in Breeze; AppFolio has no equivalent.
 Writes go to our DB directly. No sync overwrites possible.
@@ -48,11 +56,13 @@ why. These are the most dangerous to mishandle.
 
 ### Bucket A — AppFolio canonical (we mirror, AppFolio wins on conflict)
 
+**A-CACHE tables** (safe to truncate + re-sync):
+
 | Table              | Field                  | AppFolio source                | Notes |
 |--------------------|------------------------|--------------------------------|-------|
-| `properties`       | `source_property_id`   | `Property.Id`                  | UUID; never changes once assigned |
-| `properties`       | `display_name`         | `Property.Name`                | |
-| `properties`       | `service_address_*`    | `Property.Address1/City/State/Zip` | |
+| `properties` *     | `source_property_id`   | `Property.Id`                  | UUID; never changes once assigned |
+| `properties` *     | `display_name`         | `Property.Name`                | |
+| `properties` *     | `service_address_*`    | `Property.Address1/City/State/Zip` | |
 | `units`            | `source_unit_id`       | `Unit.Id`                      | |
 | `units`            | `source_unit_name`     | `Unit.Name`                    | |
 | `units`            | `bedrooms` / `bathrooms` / `sqft` | `Unit.Bedrooms/Bathrooms/SquareFeet` | |
@@ -61,15 +71,39 @@ why. These are the most dangerous to mishandle.
 | `leases`           | `start_date` / `end_date` | `Tenant.LeaseStartDate/LeaseEndDate` | |
 | `leases`           | `rent_cents`           | `Tenant.CurrentRent`           | Refreshed on every sync |
 | `leases`           | `status`               | derived from `Tenant.Status` + `CurrentOccupancyId` match | See `sync-appfolio-leases-all.js` for the derivation |
-| `tenants`          | `source_tenant_id`     | `Tenant.Id`                    | |
-| `tenants`          | `first_name` / `last_name` / `display_name` | `Tenant.FirstName/LastName` | |
-| `tenants`          | `email` / `phone` / `mobile_phone` | `Tenant.Email/Phone/MobilePhone` | |
-| `lease_tenants`    | role (primary/cosigner/etc) | `Tenant.LeaseHolder` | |
-| `maintenance_tickets` | `source_ticket_id`  | `WorkOrder.Id`                 | |
-| `maintenance_tickets` | `priority` / `status` | mapped from AppFolio's enums  | See `sync-appfolio-tickets.js` |
-| `maintenance_tickets` | `title` / `description` | derived from `JobDescription` / `WorkOrderIssue` / `Description` | Title is the first sentence; description is the full narrative (see commit `a495b96`) |
-| `maintenance_tickets` | `reported_at`        | `WorkOrder.CreatedAt`          | |
-| `maintenance_tickets` | `scheduled_at` / `completed_at` | `WorkOrder.ScheduledStart` / `WorkCompletedOn` | |
+| `tenants` *        | `source_tenant_id`     | `Tenant.Id`                    | |
+| `tenants` *        | `first_name` / `last_name` / `display_name` | `Tenant.FirstName/LastName` | |
+| `tenants` *        | `email` / `phone` / `mobile_phone` | `Tenant.Email/Phone/MobilePhone` | |
+| `lease_tenants`    | role (primary/cosigner/etc) | `Tenant.LeaseHolder`      | |
+
+\* `properties` and `tenants` are technically A-MIRROR (each also
+has a `notes` column that's Breeze-only); the listed columns are
+all cache. See A-MIRROR below.
+
+**A-MIRROR tables** (mixed; do NOT truncate without preserving
+augmentations):
+
+| Table              | AppFolio-canonical columns        | Breeze augmentations                   |
+|--------------------|-----------------------------------|----------------------------------------|
+| `properties`       | `source_property_id`, `display_name`, `service_address_*`, etc. | `notes`, `entity_id` |
+| `tenants`          | `source_tenant_id`, `first_name`, `last_name`, `email`, `phone`, `mobile_phone` | `notes` |
+| `maintenance_tickets` | `source_ticket_id`, `priority`, `status`, `title`, `description`, `reported_at`, `scheduled_at`, `completed_at`, `category` | `vendor_id`, `assigned_to`, `internal_notes` |
+
+Today the `/api/admin/run-reimport` orchestrator truncates these
+tables anyway because the augmentations are all nullable —
+re-import doesn't break the schema. ADR 0003 (action items)
+proposes tightening this in the future so the wipe explicitly
+nulls upstream columns and preserves augmentations.
+
+`maintenance_tickets` field detail:
+
+| Field                  | AppFolio source                 | Notes |
+|------------------------|---------------------------------|-------|
+| `source_ticket_id`     | `WorkOrder.Id`                  | |
+| `priority` / `status`  | mapped from AppFolio's enums    | See `sync-appfolio-tickets.js` |
+| `title` / `description` | derived from `JobDescription` / `WorkOrderIssue` / `Description` | Title is the first sentence; description is the full narrative (see commit `a495b96`). ADR 0004 proposes AI-summarized titles as a future option. |
+| `reported_at`          | `WorkOrder.CreatedAt`           | |
+| `scheduled_at` / `completed_at` | `WorkOrder.ScheduledStart` / `WorkCompletedOn` | |
 
 ### Bucket B — Breeze canonical (only exists here)
 

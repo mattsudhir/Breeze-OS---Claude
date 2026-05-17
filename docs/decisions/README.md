@@ -67,6 +67,8 @@ Brief — the options we looked at and why we didn't pick them.
 |-------|----------------------------------------------------------|----------|
 | 0001  | [Data-source strategy](./0001-data-source-strategy.md)   | Accepted |
 | 0002  | [AppFolio vs Breeze data ownership](./0002-appfolio-vs-breeze-data-ownership.md) | Accepted |
+| 0003  | [Cache vs source-of-truth labeling](./0003-cache-vs-source-of-truth-labeling.md) | Accepted |
+| 0004  | [AI-summarized maintenance ticket titles](./0004-ai-summarized-ticket-titles.md) | **Proposed** |
 
 ## Cross-references
 
