@@ -260,6 +260,13 @@
       "when": 1780473600000,
       "tag": "0036_briefing_runs",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1780560000000,
+      "tag": "0037_chat_metrics",
+      "breakpoints": true
     }
   ]
 }
