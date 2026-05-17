@@ -1,8 +1,13 @@
 # 0004. AI-summarized maintenance ticket titles
 
-**Status:** Proposed (not yet implemented — awaiting decision)
+**Status:** Accepted (opt-in implementation shipped 2026-05-17)
 **Date:** 2026-05-17
 **Deciders:** mattsudhir + Claude (this session)
+
+**Implementation:** See migration 0035, `api/admin/summarize-pending-titles.js`,
+and the "Summarize titles" button on the Maintenance page. Cron
+NOT wired yet — invocation is manual per the recommendation
+below. Revisit once we've seen a few weeks of real-ticket output.
 
 ## Context
 

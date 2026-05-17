@@ -47,6 +47,7 @@ export default withAdminHandler(async (req, res) => {
     .select({
       id: schema.maintenanceTickets.id,
       title: schema.maintenanceTickets.title,
+      titleSource: schema.maintenanceTickets.titleSource,
       description: schema.maintenanceTickets.description,
       category: schema.maintenanceTickets.category,
       status: schema.maintenanceTickets.status,
@@ -93,6 +94,7 @@ export default withAdminHandler(async (req, res) => {
     tickets: rows.map((t) => ({
       id: t.id,
       title: t.title,
+      title_source: t.titleSource,
       description: t.description,
       category: t.category,
       status: t.status,
