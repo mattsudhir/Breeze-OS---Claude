@@ -267,6 +267,13 @@
       "when": 1780560000000,
       "tag": "0037_chat_metrics",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1780646400000,
+      "tag": "0038_units_non_revenue",
+      "breakpoints": true
     }
   ]
 }
