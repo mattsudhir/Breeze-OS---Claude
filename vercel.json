@@ -51,6 +51,7 @@
     { "source": "/api/admin/daily-briefing-data",     "destination": "/api/admin/daily-briefing-data" },
     { "source": "/api/admin/chat-metrics",            "destination": "/api/admin/chat-metrics" },
     { "source": "/api/admin/debug-non-revenue",       "destination": "/api/admin/debug-non-revenue" },
+    { "source": "/api/admin/list-properties",         "destination": "/api/admin/list-properties" },
     { "source": "/api/cron/refresh-chat-metrics",     "destination": "/api/cron/refresh-chat-metrics" },
     { "source": "/api/admin/wipe-directory-data",     "destination": "/api/admin/wipe-directory-data" },
     { "source": "/api/admin/import-appfolio-properties", "destination": "/api/admin/import-appfolio-properties" },
