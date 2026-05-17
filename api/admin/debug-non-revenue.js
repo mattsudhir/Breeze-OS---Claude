@@ -114,8 +114,16 @@ export default withAdminHandler(async (req, res) => {
 
   if (req.method === 'POST') {
     const body = parseBody(req);
-    const patterns = Array.isArray(body.property_name_patterns)
-      ? body.property_name_patterns.filter((s) => typeof s === 'string' && s.trim())
+    // Accept multiple key names because the GitHub Actions slash-command
+    // workflow strips underscores from comment bodies (so
+    // "property_name_patterns" arrives as "propertynamepatterns").
+    const raw =
+      body.property_name_patterns ||
+      body.propertynamepatterns ||
+      body.patterns ||
+      [];
+    const patterns = Array.isArray(raw)
+      ? raw.filter((s) => typeof s === 'string' && s.trim())
       : [];
     if (!patterns.length) {
       return res
