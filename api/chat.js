@@ -39,11 +39,27 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'messages array required' });
     }
 
-    const { reply, iterations } = await runAgent(inputMessages, {
+    // Bail with a clean JSON error before Vercel kills the function at
+    // maxDuration (120s). Without this race the client gets Vercel's
+    // HTML error page and fails to JSON.parse it ("Unexpected token A").
+    const AGENT_BUDGET_MS = 100_000;
+    const agentPromise = runAgent(inputMessages, {
       dataSource,
       auditSurface: 'chat',
       auditConversationId: conversationId || null,
     });
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(
+        () =>
+          reject(
+            new Error(
+              'That took longer than 100 seconds. Try a more specific question, or split it into smaller pieces.',
+            ),
+          ),
+        AGENT_BUDGET_MS,
+      );
+    });
+    const { reply, iterations } = await Promise.race([agentPromise, timeoutPromise]);
 
     return res.status(200).json({
       ok: true,
